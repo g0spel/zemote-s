@@ -3693,7 +3693,15 @@ class _InteractionCardState extends State<_InteractionCard> {
                       ),
                       onPressed: _busy
                           ? null
-                          : () => _resolve(optionId: '${option['optionId']}'),
+                          // The server normalizes userInput answers by
+                          // action/freeText/allow*-optionId and treats
+                          // everything else as decline: non-permission
+                          // option taps must be sent as an accept.
+                          : () => kind == 'permission'
+                              ? _resolve(
+                                  optionId: '${option['optionId']}')
+                              : _resolve(
+                                  action: 'accept', content: {}),
                       child: Text(
                         _optionLabel(option),
                         style: const TextStyle(fontSize: 12),
@@ -3705,8 +3713,10 @@ class _InteractionCardState extends State<_InteractionCard> {
             _QuestionsView(
               questions: questions.cast<Map>(),
               busy: _busy,
-              onResolve: (question, selected) =>
-                  _resolve(content: {question: selected}),
+              onResolve: (answers) => _resolve(
+                action: 'accept',
+                content: {'answers': answers},
+              ),
             ),
           if (freeText)
             Row(
@@ -3750,12 +3760,14 @@ class _InteractionCardState extends State<_InteractionCard> {
   }
 }
 
-/// Renders a form-style `userInput` interaction (the `questions` payload):
-/// the current question (by `currentQuestionIndex`) with its options.
-class _QuestionsView extends StatelessWidget {
+/// Renders a form-style `userInput` interaction (the `questions` payload).
+/// Answers are collected LOCALLY and submitted in ONE resolveInteraction —
+/// the pending interaction is consumed by the first answer, so per-question
+/// submission would strand the remaining questions.
+class _QuestionsView extends StatefulWidget {
   final List<Map> questions;
   final bool busy;
-  final void Function(String question, List<String> selected) onResolve;
+  final void Function(Map<String, List<String>> answers) onResolve;
 
   const _QuestionsView({
     required this.questions,
@@ -3764,46 +3776,68 @@ class _QuestionsView extends StatelessWidget {
   });
 
   @override
+  State<_QuestionsView> createState() => _QuestionsViewState();
+}
+
+class _QuestionsViewState extends State<_QuestionsView> {
+  /// Keyed by question TEXT — the server reads content.answers[question].
+  final _answers = <String, List<String>>{};
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < questions.length; i++)
+        for (var i = 0; i < widget.questions.length; i++)
           _QuestionItem(
             index: i,
-            question: questions[i],
-            busy: busy,
-            onSelect: (selected) =>
-                onResolve('${questions[i]['value'] ?? 'answer_$i'}', selected),
+            question: widget.questions[i],
+            busy: widget.busy,
+            selected: _answers['${widget.questions[i]['question']}']
+                ?? const <String>[],
+            onChanged: (selected) => setState(() {
+              final key = '${widget.questions[i]['question']}';
+              if (selected.isEmpty) {
+                _answers.remove(key);
+              } else {
+                _answers[key] = selected;
+              }
+            }),
           ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            // Unanswered questions are allowed — the model is told it
+            // should use its best judgment for those.
+            onPressed: widget.busy || _answers.isEmpty
+                ? null
+                : () => widget.onResolve(Map.of(_answers)),
+            child: const Text('提交答案', style: TextStyle(fontSize: 12)),
+          ),
+        ),
       ],
     );
   }
 }
 
-class _QuestionItem extends StatefulWidget {
+class _QuestionItem extends StatelessWidget {
   final int index;
   final Map question;
   final bool busy;
-  final void Function(List<String> selected) onSelect;
+  final List<String> selected;
+  final void Function(List<String> selected) onChanged;
 
   const _QuestionItem({
     required this.index,
     required this.question,
     required this.busy,
-    required this.onSelect,
+    required this.selected,
+    required this.onChanged,
   });
 
   @override
-  State<_QuestionItem> createState() => _QuestionItemState();
-}
-
-class _QuestionItemState extends State<_QuestionItem> {
-  final List<String> _selected = [];
-
-  @override
   Widget build(BuildContext context) {
-    final q = widget.question;
+    final q = question;
     final label = q['label'] ?? q['question'] ?? q['value'] ?? '';
     final options = q['options'];
     final multi = q['multiSelect'] == true;
@@ -3812,7 +3846,7 @@ class _QuestionItemState extends State<_QuestionItem> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${widget.index + 1}. $label',
+          Text('${index + 1}. $label',
               style: const TextStyle(fontSize: 12, height: 1.4)),
           if (q['description'] != null)
             Padding(
@@ -3833,37 +3867,24 @@ class _QuestionItemState extends State<_QuestionItem> {
                       FilterChip(
                         label: Text('${o['label'] ?? o['value'] ?? ''}',
                             style: const TextStyle(fontSize: 12)),
-                        selected: _selected.contains('${o['value']}'),
-                        onSelected: widget.busy
+                        selected: selected.contains('${o['value']}'),
+                        onSelected: busy
                             ? null
                             : (on) {
-                                setState(() {
-                                  if (multi) {
-                                    if (on) {
-                                      _selected.add('${o['value']}');
-                                    } else {
-                                      _selected.remove('${o['value']}');
-                                    }
-                                  } else {
-                                    _selected
-                                      ..clear()
-                                      ..add('${o['value']}');
-                                  }
-                                });
-                                if (!multi) widget.onSelect(List.of(_selected));
+                                final value = '${o['value']}';
+                                if (multi) {
+                                  onChanged(on
+                                      ? [...selected, value]
+                                      : selected
+                                          .where((v) => v != value)
+                                          .toList());
+                                } else {
+                                  // Tapping the selected chip clears it.
+                                  onChanged(on ? [value] : const []);
+                                }
                               },
                       ),
                 ],
-              ),
-            ),
-          if (multi)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: widget.busy
-                    ? null
-                    : () => widget.onSelect(List.of(_selected)),
-                child: const Text('提交', style: TextStyle(fontSize: 12)),
               ),
             ),
         ],
