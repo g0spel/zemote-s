@@ -533,6 +533,60 @@ void main() {
       expect(byId[1]!.containsKey('_zemoteTs'), isFalse); // history unstamped
     });
 
+    test('resync snapshot keeps rows older than the tail window', () {
+      // Initial tail window + paged-in history below the window head.
+      _injectSnapshot(state, rows: [
+        {'rowId': 50, 'kind': 'userInput', 'text': 'newest'},
+      ], totalCount: 5, firstRowId: 1, seq: 1);
+      state.prependOlderRows([
+        {'rowId': 10, 'kind': 'assistantText', 'text': 'old A'},
+        {'rowId': 20, 'kind': 'assistantText', 'text': 'old B'},
+      ], 10);
+
+      // Reconnect resync delivers a fresh TAIL snapshot; row 20 also
+      // reappears inside the window (updated copy must win).
+      state.applyFrame({
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {
+            'rows': {
+              'window': [
+                {'rowId': 20, 'kind': 'assistantText', 'text': 'old B (upsert)'},
+                {'rowId': 50, 'kind': 'userInput', 'text': 'newest'},
+              ],
+              'totalCount': 5,
+              'firstRowId': 1,
+            },
+          },
+        },
+        'toSeq': 9,
+      }, onGap: () => fail('no gap'));
+
+      expect(state.rows.map((r) => r['rowId']), [10, 20, 50]);
+      // The window's copy replaced the stale kept row.
+      expect(
+          state.rows
+              .firstWhere((r) => r['rowId'] == 20)['text'],
+          'old B (upsert)');
+      expect(state.totalCount, 5);
+    });
+
+    test('empty snapshot window clears rows (session reset)', () {
+      _injectSnapshot(state, rows: [
+        {'rowId': 5, 'kind': 'userInput', 'text': 'x'},
+      ], totalCount: 1, firstRowId: 1, seq: 1);
+      state.applyFrame({
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {
+            'rows': {'window': [], 'totalCount': 0, 'firstRowId': null},
+          },
+        },
+        'toSeq': 2,
+      }, onGap: () => fail('no gap'));
+      expect(state.rows, isEmpty);
+    });
+
     test('row.upserted keeps the original stamp', () {
       _injectSnapshot(state, rows: [
         {'rowId': 1, 'kind': 'user', 'text': 'old'},

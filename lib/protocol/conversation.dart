@@ -1413,22 +1413,35 @@ class ConversationState extends ChangeNotifier {
     if (rowsObj is Map) {
       final window = rowsObj['window'];
       if (window is List) {
-        // Snapshots replace rows wholesale: carry view-layer arrival
-        // stamps across by rowId, else every resync wipes the HH:mm
-        // labels of rows observed live. History rows stay unstamped.
+        // Snapshots carry only a tail window: keep the older rows already
+        // loaded via rowsRange (rowId below the window head). A resync
+        // (gap, lock-screen reconnect, bridge recovery) must not wipe the
+        // paged-in history — the list would collapse and the viewport
+        // would slam to its top. View-layer arrival stamps carry over by
+        // rowId for the same reason.
+        final windowList = window.whereType<Map>().toList();
+        final windowHeadRowId =
+            windowList.isEmpty ? null : (windowList.first['rowId'] as num?)?.toInt();
         final prev = <String, dynamic>{};
+        final keepOld = <Map<String, dynamic>>[];
         for (final r in rows) {
           final id = r['rowId'];
           if (id != null) prev['$id'] = r['_zemoteTs'];
+          final rowId = (id as num?)?.toInt();
+          if (rowId != null &&
+              windowHeadRowId != null &&
+              rowId < windowHeadRowId) {
+            keepOld.add(r);
+          }
         }
         final list = <Map<String, dynamic>>[];
-        for (final e in window.whereType<Map>()) {
+        for (final e in windowList) {
           final row = e.cast<String, dynamic>();
           final ts = prev['${row['rowId']}'];
           if (ts != null) row['_zemoteTs'] = ts;
           list.add(row);
         }
-        rows = list;
+        rows = [...keepOld, ...list];
       } else {
         rows = [];
       }
@@ -1628,9 +1641,17 @@ class ConversationState extends ChangeNotifier {
   Map<String, dynamic>? get usage =>
       (snapshot?['usage'] as Map?)?.cast<String, dynamic>();
 
-  /// Older history exists beyond the current window.
+  /// Older history exists beyond the current window. Cleared logically by
+  /// [historyExhausted] once the server reports no more rows — the
+  /// snapshot's totalCount can stay above the loaded count while the
+  /// projection itself is out of paged rows.
   bool get canLoadOlder =>
-      firstRowId != null && totalCount > rows.length;
+      !historyExhausted && firstRowId != null && totalCount > rows.length;
+
+  /// Set when rowsRange came back empty with hasMore=false: there is
+  /// nothing older to fetch even though totalCount still counts rows the
+  /// profile filtered out.
+  bool historyExhausted = false;
 
   /// Prepends older rows loaded via rowsRange (deduped by rowId).
   void prependOlderRows(List<Map<String, dynamic>> older, int? newFirstRowId) {

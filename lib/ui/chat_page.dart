@@ -581,13 +581,21 @@ class _ChatPageState extends State<ChatPage> {
     if (state == null || sessionId == null || _loadingOlder) return;
     setState(() => _loadingOlder = true);
     try {
+      // The pagination cursor is the OLDEST row we already hold. The
+      // snapshot's `firstRowId` is the FULL projection's head (not the
+      // window head) — using it filters everything out and history paging
+      // dies at the first tap.
+      final oldestRowId = state.rows.isNotEmpty
+          ? (state.rows.first['rowId'] as num?)?.toInt()
+          : null;
       final res = await _transport.rowsRange(
         sessionId,
-        beforeRowId: state.firstRowId,
+        beforeRowId: oldestRowId ?? state.firstRowId,
         limit: 60,
       );
       List? rows;
       int? firstRowId;
+      var hasMore = false;
       if (res is Map) {
         final rowsObj = res['rows'];
         if (rowsObj is Map) {
@@ -598,6 +606,7 @@ class _ChatPageState extends State<ChatPage> {
         }
         rows ??= res['items'] as List? ?? res['window'] as List?;
         firstRowId ??= (res['firstRowId'] as num?)?.toInt();
+        hasMore = res['hasMore'] == true;
       } else if (res is List) {
         rows = res;
       }
@@ -611,8 +620,13 @@ class _ChatPageState extends State<ChatPage> {
         state.prependOlderRows(older, firstRowId);
         // Reverse list: prepended history extends the top end without
         // moving the viewport — no scroll compensation needed.
-      } else if (state.rows.isNotEmpty) {
-        _toast('没有更早的消息了');
+      } else {
+        // Exhausted (the server's hasMore is false): stop offering the
+        // button instead of re-tapping into empty responses.
+        if (!hasMore) state.historyExhausted = true;
+        if (state.rows.isNotEmpty) {
+          _toast('没有更早的消息了');
+        }
       }
     } catch (e) {
       _toast('加载失败: $e');
