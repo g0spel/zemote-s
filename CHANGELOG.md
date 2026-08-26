@@ -2,6 +2,11 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.9.7] - 2026-08-27
+
+### Fixed
+- **历史翻页保证到达最早一条**：分页游标下沉到协议层（`oldestRowId` = 已持有的最旧行）；非空批次且服务端 `hasMore=false` 时立即判定耗尽——最后一批到手即确认最早一条已加载，「加载更早」按钮当场退场。新增端到端状态机测试：按宿主 `getRowsRange` 的精确语义（`rowId < 游标` 过滤 + 尾部 limit 条 + hasMore）模拟 250 行会话从 60 行尾部快照翻页至 rowId 1，全程有序无重复；并覆盖翻页中途重同步（已加载历史保留、游标继续推进）。
+
 ## [0.9.6] - 2026-08-27
 
 ### Fixed
