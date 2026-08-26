@@ -579,18 +579,14 @@ class _ChatPageState extends State<ChatPage> {
     final state = _state;
     final sessionId = _sessionId;
     if (state == null || sessionId == null || _loadingOlder) return;
+    if (!state.canLoadOlder) return;
     setState(() => _loadingOlder = true);
     try {
-      // The pagination cursor is the OLDEST row we already hold. The
-      // snapshot's `firstRowId` is the FULL projection's head (not the
-      // window head) — using it filters everything out and history paging
-      // dies at the first tap.
-      final oldestRowId = state.rows.isNotEmpty
-          ? (state.rows.first['rowId'] as num?)?.toInt()
-          : null;
+      // The cursor is the protocol state's oldest held row — see
+      // ConversationState.oldestRowId.
       final res = await _transport.rowsRange(
         sessionId,
-        beforeRowId: oldestRowId ?? state.firstRowId,
+        beforeRowId: state.oldestRowId,
         limit: 60,
       );
       List? rows;
@@ -620,6 +616,9 @@ class _ChatPageState extends State<ChatPage> {
         state.prependOlderRows(older, firstRowId);
         // Reverse list: prepended history extends the top end without
         // moving the viewport — no scroll compensation needed.
+        // This batch was the last (server says nothing precedes it): the
+        // earliest message is now held — retire the button immediately.
+        if (!hasMore) state.historyExhausted = true;
       } else {
         // Exhausted (the server's hasMore is false): stop offering the
         // button instead of re-tapping into empty responses.

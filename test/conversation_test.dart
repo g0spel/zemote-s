@@ -607,6 +607,92 @@ void main() {
     });
   });
 
+  group('history paging to the earliest row', () {
+    late ConversationState state;
+
+    setUp(() {
+      state = ConversationState();
+    });
+
+    /// Mirrors the host's getRowsRange exactly: rows with a SMALLER
+    /// rowId than the cursor, last [limit] of them, plus hasMore.
+    (List<Map<String, dynamic>>, bool) serverRowsRange(
+        int? beforeRowId, int limit) {
+      var pool = List<Map<String, dynamic>>.generate(
+          250, (i) => {'rowId': i + 1, 'kind': 'assistantText', 'text': 'm$i'});
+      if (beforeRowId != null) {
+        pool = pool.where((r) => (r['rowId'] as num) < beforeRowId).toList();
+      }
+      final page =
+          pool.length > limit ? pool.sublist(pool.length - limit) : pool;
+      return (page, pool.length > page.length);
+    }
+
+    test('pages down to the first row of the conversation', () {
+      // Wire snapshot: 60-row tail window, totalCount/firstRowId of the
+      // FULL projection (host semantics).
+      final tail = List<Map<String, dynamic>>.generate(
+          60,
+          (i) =>
+              {'rowId': i + 191, 'kind': 'assistantText', 'text': 'm${i + 190}'});
+      _injectSnapshot(state, rows: tail, totalCount: 250, firstRowId: 1, seq: 1);
+
+      expect(state.canLoadOlder, isTrue, reason: 'totalCount 250 vs 60 rows');
+      // The snapshot's firstRowId is the projection head — the OLD cursor
+      // bug: using it as beforeRowId yields an empty page forever.
+      final (bugged, _) = serverRowsRange(state.firstRowId, 60);
+      expect(bugged, isEmpty,
+          reason: 'projection-head cursor filters everything out');
+
+      // Drive the fixed loop: cursor = oldest held row, until hasMore
+      // says the batch was the last.
+      var guard = 0;
+      while (state.canLoadOlder && guard++ < 10) {
+        final (page, hasMore) = serverRowsRange(state.oldestRowId, 60);
+        state.prependOlderRows(page, null);
+        if (!hasMore) state.historyExhausted = true;
+      }
+
+      expect(state.rows.first['rowId'], 1, reason: 'earliest row reached');
+      expect(state.rows, hasLength(250));
+      expect(state.rows.last['rowId'], 250);
+      expect(state.canLoadOlder, isFalse, reason: 'exhausted retires it');
+      // Rows stay ordered and deduped across pages.
+      for (var i = 0; i < state.rows.length; i++) {
+        expect(state.rows[i]['rowId'], i + 1);
+      }
+    });
+
+    test('resync mid-paging keeps the already-loaded older rows', () {
+      final tail = List<Map<String, dynamic>>.generate(
+          60, (i) => {'rowId': i + 191, 'kind': 'assistantText', 'text': 'm'});
+      _injectSnapshot(state, rows: tail, totalCount: 250, firstRowId: 1, seq: 1);
+      final (page, _) = serverRowsRange(state.oldestRowId, 60);
+      state.prependOlderRows(page, null);
+      expect(state.rows.first['rowId'], 131);
+
+      // Reconnect resync: fresh tail window (two new rows arrived).
+      _injectSnapshot(state,
+          rows: List<Map<String, dynamic>>.generate(
+              60, (i) => {'rowId': i + 193, 'kind': 'assistantText', 'text': 'm'}),
+          totalCount: 252,
+          firstRowId: 1,
+          seq: 5);
+
+      expect(state.rows.first['rowId'], 131, reason: 'paged-in history kept');
+      expect(state.rows.last['rowId'], 252);
+      // The cursor still advances from the kept head.
+      expect(state.oldestRowId, 131);
+      expect(state.canLoadOlder, isTrue);
+    });
+
+    test('oldestRowId falls back to firstRowId on an empty row list', () {
+      _injectSnapshot(state,
+          rows: const [], totalCount: 10, firstRowId: 3, seq: 1);
+      expect(state.oldestRowId, 3);
+    });
+  });
+
 }
 
 

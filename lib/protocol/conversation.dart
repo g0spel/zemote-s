@@ -1653,6 +1653,13 @@ class ConversationState extends ChangeNotifier {
   /// profile filtered out.
   bool historyExhausted = false;
 
+  /// rowsRange pagination cursor: the OLDEST row we already hold. The
+  /// snapshot's firstRowId is the FULL projection's head (not the window
+  /// head) — using it as beforeRowId filters everything out.
+  int? get oldestRowId => rows.isEmpty
+      ? firstRowId
+      : (rows.first['rowId'] as num?)?.toInt();
+
   /// Prepends older rows loaded via rowsRange (deduped by rowId).
   void prependOlderRows(List<Map<String, dynamic>> older, int? newFirstRowId) {
     final existing =
