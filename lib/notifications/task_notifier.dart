@@ -10,8 +10,9 @@ import 'notify_state.dart';
 /// Monitors the active workspace's sessions-index while a bridge is open.
 /// While tasks are running it drives the Android foreground-service
 /// notification with real-time preview updates, and fires silent completion
-/// notifications. Tapping a notification routes to the task's chat via
-/// [onOpenTask].
+/// notifications plus one silent alert per pending interaction (permission /
+/// input request blocking a task). Tapping a notification routes to the
+/// task's chat via [onOpenTask].
 class TaskNotifier {
   final BridgeSession bridge;
   final Map<String, dynamic> scope;
@@ -23,6 +24,13 @@ class TaskNotifier {
   /// taskId → lastActivityAt already announced. Stale repeats (identical
   /// preview, e.g. after reconnect snapshots) are suppressed.
   final Map<String, int> _lastNotifiedActivity = {};
+
+  /// interactionIds already seen in a pending snapshot. Ids are learned
+  /// even while the app is foregrounded (the user is looking at the popup)
+  /// so a later background replay of the same pending interaction does
+  /// not re-alert; resolved interactions drop out and free their ids.
+  final Set<String> _seenInteractionIds = {};
+
   /// Completion alerts are pointless while the user is looking at the app:
   /// they also re-fire on every resume via reconnect snapshots.
   bool _appResumed = true;
@@ -93,6 +101,23 @@ class TaskNotifier {
         payload: {'taskId': c.taskId, 'title': c.title},
       ));
     }
+
+    // Pending interactions (permission / input): one silent alert per
+    // interactionId, learned even in the foreground so replays stay
+    // quiet. Tapping routes to the chat where the popup lives.
+    final liveInteractionIds = <String>{};
+    for (final p in update.pendingInteractions) {
+      liveInteractionIds.add(p.interactionId);
+      if (!_seenInteractionIds.add(p.interactionId)) continue;
+      if (_appResumed) continue;
+      _safe(notifications.notifyTaskCompleted(
+        title: attentionTitleFor(p.kind, p.toolName),
+        text: p.title,
+        payload: {'taskId': p.taskId, 'title': p.title},
+      ));
+    }
+    _seenInteractionIds
+        .removeWhere((id) => !liveInteractionIds.contains(id));
 
     if (update.hasRunning) {
       _ensurePermission();

@@ -4,7 +4,7 @@ import 'package:zemote/notifications/notify_state.dart';
 import 'package:zemote/protocol/conversation.dart';
 
 SessionEntry _entry(String id, String phase,
-    {String title = 'Task', String? preview}) {
+    {String title = 'Task', String? preview, Map<String, dynamic>? pending}) {
   return SessionEntry({
     'sessionId': id,
     'title': title,
@@ -12,6 +12,7 @@ SessionEntry _entry(String id, String phase,
     'lastAssistantPreview': preview,
     'lastActivityAt': 0,
     'createdAt': 0,
+    if (pending != null) 'pendingInteraction': pending,
   });
 }
 
@@ -111,5 +112,45 @@ void main() {
     expect(completionTitleFor('error'), '任务失败');
     expect(completionTitleFor('completedInterrupted'), '任务中断');
     expect(completionTitleFor('cancelled'), '任务中断');
+  });
+
+  test('pending interactions surface as a snapshot with kind and tool',
+      () {
+    final update = computeNotifyUpdate(
+      sessions: [
+        _entry('a', 'waiting', pending: {
+          'interactionId': 'i-1',
+          'kind': 'permission',
+          'toolName': 'bash',
+        }),
+        _entry('b', 'waiting', pending: {
+          'interactionId': 'i-2',
+          'kind': 'userInput',
+        }),
+        _entry('c', 'running'),
+      ],
+      previousPhases: const {},
+    );
+    expect(update.pendingInteractions, hasLength(2));
+    final first = update.pendingInteractions[0];
+    expect(first.taskId, 'a');
+    expect(first.interactionId, 'i-1');
+    expect(first.kind, 'permission');
+    expect(first.toolName, 'bash');
+    expect(update.pendingInteractions[1].taskId, 'b');
+  });
+
+  test('interactions without an id are ignored', () {
+    final update = computeNotifyUpdate(
+      sessions: [_entry('a', 'waiting', pending: {'kind': 'permission'})],
+      previousPhases: const {},
+    );
+    expect(update.pendingInteractions, isEmpty);
+  });
+
+  test('attentionTitleFor names the blocker', () {
+    expect(attentionTitleFor('permission', 'bash'), '权限请求 · bash');
+    expect(attentionTitleFor('permission', ''), '权限请求等待批准');
+    expect(attentionTitleFor('userInput', ''), '等待你的输入');
   });
 }
