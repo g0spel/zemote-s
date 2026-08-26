@@ -10,7 +10,52 @@ import 'theme.dart';
 /// verified live against the desktop):
 ///   listAutomations / listAutomationRuns / createAutomation /
 ///   updateAutomation / setAutomationEnabled / deleteAutomation
+///   runAutomationNow / restartAutomation
+/// (the last two + the lifecycleStatus/scheduleRule fields were adopted
+/// from an upstream discovery; schemas verified in the host bundle).
 /// plus the `off-peak-task` queue `list`.
+/// Human-readable schedule: prefers the structured `scheduleRule`
+/// ({unit: minute|hour|day|week, interval, hour, minute, weekday}) and
+/// falls back to the raw cron expression. Pure for tests.
+String scheduleLabel(Map<String, dynamic> automation) {
+  final rule = automation['scheduleRule'];
+  final cron = '${automation['cronExpr'] ?? ''}';
+  if (rule is! Map) return cron.isEmpty ? '—' : cron;
+  final unit = '${rule['unit'] ?? ''}';
+  final interval = (rule['interval'] as num?)?.toInt() ?? 1;
+  String two(int v) => v.toString().padLeft(2, '0');
+  switch (unit) {
+    case 'minute':
+      return interval == 1 ? '每分钟' : '每 $interval 分钟';
+    case 'hour':
+      return interval == 1 ? '每小时' : '每 $interval 小时';
+    case 'day':
+      final h = (rule['hour'] as num?)?.toInt() ?? 0;
+      final m = (rule['minute'] as num?)?.toInt() ?? 0;
+      return interval == 1 ? '每天 ${two(h)}:${two(m)}' : '每 $interval 天 ${two(h)}:${two(m)}';
+    case 'week':
+      const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      final dow = rule['weekday'] ?? rule['dayOfWeek'];
+      final idx = dow is num ? dow.toInt() : -1;
+      final h = (rule['hour'] as num?)?.toInt() ?? 0;
+      final m = (rule['minute'] as num?)?.toInt() ?? 0;
+      final day = idx >= 0 && idx < 7 ? names[idx] : '每周';
+      return '$day ${two(h)}:${two(m)}';
+    default:
+      return cron.isEmpty ? '—' : cron;
+  }
+}
+
+/// Chinese label for the automation lifecycle (host enum:
+/// active|completed|failed|paused). Null for active — the default needs
+/// no badge.
+String? lifecycleLabel(String status) => switch (status) {
+      'completed' => '已完成',
+      'failed' => '失败',
+      'paused' => '已暂停',
+      _ => null,
+    };
+
 class AutomationApi {
   final BridgeSession bridge;
   final Map<String, dynamic> scope;
@@ -36,6 +81,21 @@ class AutomationApi {
 
   Future<void> delete(String automationId) =>
       _agent('deleteAutomation', {'automationId': automationId});
+
+  /// Queues an immediate run. Returns 'queued' | 'duplicate' | 'failed'.
+  Future<String> runNow(String automationId) async {
+    try {
+      final res = await _agent(
+          'runAutomationNow', {'automationId': automationId});
+      return res is Map ? '${res['status'] ?? 'queued'}' : 'queued';
+    } on ChannelRpcError {
+      return 'failed';
+    }
+  }
+
+  /// Restarts a completed/errored automation back to active scheduling.
+  Future<void> restart(String automationId) =>
+      _agent('restartAutomation', {'automationId': automationId});
 
   Future<void> create({
     required String title,
@@ -211,9 +271,35 @@ class _AutomationPageState extends State<AutomationPage> {
     if (saved == true) await _load();
   }
 
+  Future<void> _runNow(Map<String, dynamic> a) async {
+    final status = await _api.runNow('${a['automationId']}');
+    if (!mounted) return;
+    final message = switch (status) {
+      'queued' => '已加入执行队列',
+      'duplicate' => '该自动化已有执行在进行',
+      _ => '触发失败',
+    };
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+    if (status == 'queued') _load();
+  }
+
+  Future<void> _restart(Map<String, dynamic> a) async {
+    try {
+      await _api.restart('${a['automationId']}');
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('重启失败: $e')));
+      }
+    }
+  }
+
   void _showDetail(Map<String, dynamic> a) {
     final id = '${a['automationId']}';
     final runs = _runs[id] ?? const [];
+    final lifecycle = lifecycleLabel('${a['lifecycleStatus'] ?? ''}');
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -230,6 +316,17 @@ class _AutomationPageState extends State<AutomationPage> {
                     child: Text('${a['title']}',
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w600))),
+                IconButton(
+                  icon: const Icon(Icons.play_arrow, size: 22),
+                  tooltip: '立即运行',
+                  onPressed: () => _runNow(a),
+                ),
+                if (lifecycle != null)
+                  IconButton(
+                    icon: const Icon(Icons.restart_alt, size: 20),
+                    tooltip: '重新启动排程',
+                    onPressed: () => _restart(a),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.edit_outlined, size: 20),
                   tooltip: '编辑',
@@ -251,8 +348,9 @@ class _AutomationPageState extends State<AutomationPage> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Cron ${a['cronExpr']} · 模式 ${a['mode'] ?? '-'} · '
-              '${a['provider'] ?? '-'} · ${a['model'] ?? '-'}',
+              '${scheduleLabel(a)} · 模式 ${a['mode'] ?? '-'} · '
+              '${a['provider'] ?? '-'} · ${a['model'] ?? '-'}'
+              '${lifecycle != null ? ' · $lifecycle' : ''}',
               style: TextStyle(fontSize: 11, color: ZInk.faint(context)),
             ),
             const SizedBox(height: 8),
@@ -425,6 +523,7 @@ class _AutomationPageState extends State<AutomationPage> {
     final enabled = a['enabled'] == true;
     final runs = _runs[id] ?? const [];
     final lastOutcome = runs.isEmpty ? null : '${runs.first['outcome']}';
+    final lifecycle = lifecycleLabel('${a['lifecycleStatus'] ?? ''}');
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -433,13 +532,40 @@ class _AutomationPageState extends State<AutomationPage> {
       ),
       child: ListTile(
         onTap: () => _showDetail(a),
-        title: Text('${a['title']}',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text('${a['title']}',
+                  style:
+                      const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            if (lifecycle != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: ('${a['lifecycleStatus']}' == 'failed'
+                          ? ZColors.danger
+                          : ZInk.faint(context))
+                      .withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(lifecycle,
+                    style: TextStyle(
+                        fontSize: 9.5,
+                        color: '${a['lifecycleStatus']}' == 'failed'
+                            ? ZColors.danger
+                            : ZInk.faint(context))),
+              ),
+            ],
+          ],
+        ),
         subtitle: Text(
           [
-            '${a['cronExpr']}',
+            scheduleLabel(a),
             '下次 ${_fmtMs(a['nextRunAt'] as num?)}',
             '已运行 ${a['runCount'] ?? 0} 次',
             if (lastOutcome != null)
