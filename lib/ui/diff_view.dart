@@ -181,10 +181,9 @@ class DiffView extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.3),
+        color: ZInk.diffBg(context),
         borderRadius: BorderRadius.circular(10),
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: ZInk.tileBorder(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -194,7 +193,7 @@ class DiffView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.04),
+                color: ZInk.diffHeaderBg(context),
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(10)),
               ),
@@ -216,10 +215,8 @@ class DiffView extends StatelessWidget {
                 for (final line in diff.lines.take(400))
                   Container(
                     color: switch (line.type) {
-                      DiffLineType.added => const Color(0xFF22C55E)
-                          .withValues(alpha: 0.12),
-                      DiffLineType.removed => const Color(0xFFEF4444)
-                          .withValues(alpha: 0.12),
+                      DiffLineType.added => ZInk.diffAddedBg(context),
+                      DiffLineType.removed => ZInk.diffRemovedBg(context),
                       DiffLineType.context => Colors.transparent,
                     },
                     padding: const EdgeInsets.symmetric(
@@ -232,9 +229,9 @@ class DiffView extends StatelessWidget {
                         height: 1.45,
                         color: switch (line.type) {
                           DiffLineType.added =>
-                            const Color(0xFF86EFAC),
+                            ZInk.diffAddedText(context),
                           DiffLineType.removed =>
-                            const Color(0xFFFCA5A5),
+                            ZInk.diffRemovedText(context),
                           DiffLineType.context => ZInk.soft(context),
                         },
                       ),

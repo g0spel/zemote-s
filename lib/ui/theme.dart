@@ -120,6 +120,32 @@ class ZInk {
       _isLight(context)
           ? const Color(0xFF1E3A8A)
           : const Color(0xFF93C5FD);
+
+  /// Diff container background (follows the code block, so diffs and code
+  /// read as the same "code surface" in both themes).
+  static Color diffBg(BuildContext context) => codeBlockBg(context);
+
+  /// Diff header strip (a step above [diffBg]).
+  static Color diffHeaderBg(BuildContext context) =>
+      _isLight(context)
+          ? const Color(0xFFE2E8F0)
+          : Colors.white.withValues(alpha: 0.06);
+
+  /// Diff line fills — tinted enough to read as +/- bands in BOTH themes
+  /// (the old constant greens/reds were tuned for dark only).
+  static Color diffAddedBg(BuildContext context) => _isLight(context)
+      ? const Color(0x16B7EB8F)
+      : const Color(0xFF22C55E).withValues(alpha: 0.12);
+  static Color diffRemovedBg(BuildContext context) => _isLight(context)
+      ? const Color(0x16FCA5A5)
+      : const Color(0xFFEF4444).withValues(alpha: 0.12);
+
+  /// Diff line text — saturated base colors on light (pastels wash out
+  /// on white), the readable pastels on dark.
+  static Color diffAddedText(BuildContext context) =>
+      _isLight(context) ? const Color(0xFF15803D) : const Color(0xFF86EFAC);
+  static Color diffRemovedText(BuildContext context) =>
+      _isLight(context) ? const Color(0xFFB91C1C) : const Color(0xFFFCA5A5);
 }
 
 ThemeData buildDarkTheme() {

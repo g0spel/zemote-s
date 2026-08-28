@@ -1821,26 +1821,47 @@ class _ReasoningTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ZInk.tileBorder(context)),
       ),
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        dense: true,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-        title: Row(
-          children: [
-            Icon(Icons.psychology_outlined,
-                size: 14,
-                color: streaming ? ZColors.running : ZInk.faint(context)),
-            const SizedBox(width: 6),
-            Text(
-              streaming ? '思考中…' : '思考过程',
-              style: TextStyle(fontSize: 12, color: ZInk.muted(context)),
-            ),
-          ],
-        ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: ZemoteMarkdown(text, fontSize: 12),
+          // Status accent rail: blue while thinking, neutral when done —
+          // the tile's state is readable at a glance without opening it.
+          Container(
+            width: 3,
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: streaming ? ZColors.running : ZInk.hairline(context),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Expanded(
+            child: ExpansionTile(
+              initiallyExpanded: true,
+              dense: true,
+              tilePadding: const EdgeInsets.symmetric(horizontal: 10),
+              iconColor: ZInk.faint(context),
+              collapsedIconColor: ZInk.faint(context),
+              title: Row(
+                children: [
+                  Icon(Icons.psychology_outlined,
+                      size: 14,
+                      color:
+                          streaming ? ZColors.running : ZInk.faint(context)),
+                  const SizedBox(width: 6),
+                  Text(
+                    streaming ? '思考中…' : '思考过程',
+                    style:
+                        TextStyle(fontSize: 12, color: ZInk.muted(context)),
+                  ),
+                ],
+              ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: ZemoteMarkdown(text, fontSize: 12),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1894,8 +1915,10 @@ class _ToolCallTile extends StatelessWidget {
           ExpansionTile(
             initiallyExpanded: true,
             dense: true,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+            tilePadding: const EdgeInsets.only(left: 8, right: 12),
             leading: Icon(icon, size: 15, color: color),
+            iconColor: ZInk.faint(context),
+            collapsedIconColor: ZInk.faint(context),
             title: Text(toolName,
                 style: const TextStyle(
                     fontSize: 12.5, fontFamily: 'monospace')),
@@ -2587,7 +2610,15 @@ class _InsightsRowState extends State<_InsightsRow> {
     return '$e';
   }
 
-  int get _todoCount => deriveTodoSteps(widget.state.rows)?.length ?? 0;
+  int get _todoCount {
+    var n = deriveTodoSteps(widget.state.rows)?.length ?? 0;
+    final planItems = parseInsightList(
+        widget.state.plan ?? const {}, const ['items'], allowEmpty: false);
+    // Plan-mode progress counts toward the chip when no TodoWrite todos
+    // exist (the plan IS the active checklist then).
+    if (n == 0 && planItems != null) n = planItems.length;
+    return n;
+  }
 
   int get _turnFileTotal {
     var total = 0;
@@ -2738,8 +2769,20 @@ class _InsightsRowState extends State<_InsightsRow> {
 
   Widget _todoPanel(BuildContext context) {
     final steps = deriveTodoSteps(widget.state.rows);
+    // Plan-mode progress from the conversation snapshot
+    // (plan: {items: [{id, content, status: pending|inProgress|completed}],
+    // updatedAt}). Displayed INSIDE the todo panel — progress of the
+    // structured plan, not a separate surface.
+    final planObj = widget.state.plan;
+    final parsedPlanItems = planObj == null
+        ? null
+        : parseInsightList(planObj, const ['items'], allowEmpty: false);
+    final planItems = (parsedPlanItems == null || parsedPlanItems.isEmpty)
+        ? null
+        : parsedPlanItems;
+    final todoSteps = steps ?? const <PlanStep>[];
     final Widget body;
-    if (steps == null) {
+    if (todoSteps.isEmpty && planItems == null) {
       body = Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text('暂无待办',
@@ -2748,10 +2791,11 @@ class _InsightsRowState extends State<_InsightsRow> {
     } else {
       body = ListView.builder(
         shrinkWrap: true,
-        itemCount: steps.length,
+        itemCount: todoSteps.length + (planItems?.length ?? 0) + 1,
         itemBuilder: (context, i) {
-          final s = steps[i];
-          return Padding(
+          if (i < todoSteps.length) {
+            final s = todoSteps[i];
+            return Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2779,6 +2823,66 @@ class _InsightsRowState extends State<_InsightsRow> {
                           ? ZInk.faint(context)
                           : ZInk.solid(context),
                       decoration: s.completed ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+          }
+          // Plan section header before the first plan item.
+          if (i == todoSteps.length) {
+            final done = planItems!
+                .where((e) => '${e['status']}' == 'completed')
+                .length;
+            return Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.flag_outlined,
+                      size: 12, color: ZColors.primary),
+                  const SizedBox(width: 5),
+                  Text('计划进度 · $done / ${planItems.length}',
+                      style: TextStyle(
+                          fontSize: 10.5, color: ZInk.faint(context))),
+                ],
+              ),
+            );
+          }
+          final item =
+              planItems![i - todoSteps.length - 1];
+          final status = '${item['status']}';
+          final completed = status == 'completed';
+          final inProgress = status == 'inProgress';
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  completed
+                      ? Icons.check_circle
+                      : inProgress
+                          ? Icons.play_circle_outline
+                          : Icons.radio_button_unchecked,
+                  size: 14,
+                  color: completed
+                      ? ZColors.success
+                      : inProgress
+                          ? ZColors.primary
+                          : ZInk.faint(context),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${item['content'] ?? item['id'] ?? ''}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: completed
+                          ? ZInk.faint(context)
+                          : ZInk.solid(context),
+                      decoration:
+                          completed ? TextDecoration.lineThrough : null,
                     ),
                   ),
                 ),
