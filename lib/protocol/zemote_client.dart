@@ -487,6 +487,12 @@ class BridgeSession {
         _channels = ChannelClient(sendBody: (_) {}),
         _onDispose = onDispose;
 
+  /// Standalone session with a no-op send path — test scaffold for UI code
+  /// that holds a [BridgeSession] without a live relay connection.
+  @visibleForTesting
+  factory BridgeSession.detached(Map<String, dynamic> bridge) =>
+      BridgeSession._(bridge: bridge, onDispose: (_) {});
+
   static RpcFrameTransport _placeholderTransport(
           Map<String, dynamic> bridge) =>
       RpcFrameTransport(

@@ -10,7 +10,7 @@ import '../state/session_list_cache.dart';
 import 'channel_explorer_page.dart';
 import 'chat_page.dart';
 import 'log_page.dart';
-import 'main_shell.dart';
+import 'root_shell.dart';
 import 'rpc_explorer_page.dart';
 import 'task_detail_page.dart';
 import 'theme.dart';
