@@ -46,5 +46,15 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
 
+  fonts:
+    - family: Sarasa UI SC
+      fonts:
+        - asset: assets/fonts/ZemoteS-UI-Regular.ttf
+        - asset: assets/fonts/ZemoteS-UI-Bold.ttf
+          weight: 700
+    - family: Sarasa Term SC
+      fonts:
+        - asset: assets/fonts/ZemoteS-Term-Regular.ttf
+
   assets:
     - assets/icon/icon.png
