@@ -219,15 +219,20 @@ class _SessionDrawerState extends State<SessionDrawer> {
       };
 
   /// 批量置顶/归档/删除。列表以 sessions-index 推送为准(裁决):不做
-  /// 乐观移除,操作完成后等索引刷新。
-  Future<void> _applySelection(String method, String errorPrefix) async {
+  /// 乐观移除,操作完成后等索引刷新。[pinned] 仅 setTaskPinned 需要
+  /// (抽屉无取消置顶语义,恒 true;对照 integration_test 服务端契约)。
+  Future<void> _applySelection(
+    String method,
+    String errorPrefix, {
+    bool? pinned,
+  }) async {
     if (_acting || _selected.isEmpty) return;
     setState(() => _acting = true);
     var failed = 0;
     for (final id in _selected) {
       try {
         await widget.bridge.channels
-            .call(Channels.zcodeTask, method, [_taskArgs(id)]);
+            .call(Channels.zcodeTask, method, [_taskArgs(id, pinned: pinned)]);
       } catch (_) {
         failed++;
       }
@@ -430,7 +435,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
             child: OutlinedButton(
               onPressed: _acting
                   ? null
-                  : () => _applySelection('setTaskPinned', '置顶失败'),
+                  : () => _applySelection('setTaskPinned', '置顶失败',
+                      pinned: true),
               child: const Text('置顶'),
             ),
           ),

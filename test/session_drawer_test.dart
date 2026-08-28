@@ -1,0 +1,187 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:zemote/protocol/channel_client.dart';
+import 'package:zemote/protocol/ipc_codec.dart';
+import 'package:zemote/protocol/zemote_client.dart';
+import 'package:zemote/ui/conversation_list_page.dart';
+
+/// 真实协议驱动的抽屉测试。裸 SessionDrawer 在全新 detached bridge 上的
+/// channel 取号是确定性的(FIFO):id0 hello、id1 initialize、id2 索引帧
+/// 监听器(同步取号)、id3 subscribeSessionsIndexV4;之后的管理操作依次
+/// id4 setTaskPinned / id5 archiveTask / id6 deleteTask。
+///
+/// incoming 帧经 `channels.handleMessage` 注入;outgoing 请求由 recorder
+/// 的 sendBody 捕获,解码断言真实 wire 的 channel/method/args。
+
+Uint8List _inFrame(List<Object?> header, [Object? data]) {
+  final w = ValueWriter();
+  encodeValue(w, header);
+  if (data != null) encodeValue(w, data);
+  return w.toBytes();
+}
+
+void _respond(ChannelClient channels, int id, Object? result) => channels
+    .handleMessage(_inFrame([ChannelClient.resPromiseSuccess, id], result));
+
+/// 解码一条 outgoing 请求:([100, id, channel, method], args)。
+(Object?, Object?) _decodeRequest(Uint8List body) {
+  final reader = ValueReader(body);
+  final header = decodeValue(reader);
+  final args = decodeValue(reader);
+  return (header, args);
+}
+
+void main() {
+  late ChannelClient channels;
+  late BridgeSession bridge;
+  final sent = <Uint8List>[];
+  final picked = <String?>[];
+
+  final now = DateTime.now();
+  final entries = [
+    {
+      'sessionId': 's1',
+      'title': '修复登录',
+      'phase': 'running',
+      'lastActivityAt': now.millisecondsSinceEpoch,
+      'createdAt': 1,
+    },
+    {
+      'sessionId': 's2',
+      'title': '重构 API',
+      'phase': 'idle',
+      'lastActivityAt': now.subtract(const Duration(days: 2)).millisecondsSinceEpoch,
+      'createdAt': 1,
+    },
+  ];
+
+  Future<void> pumpDrawer(WidgetTester tester) async {
+    channels = ChannelClient(sendBody: (body) => sent.add(body));
+    bridge = BridgeSession.detached(
+      {'workspaceKey': '/ws-t'},
+      channels: channels,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SessionDrawer(
+          bridge: bridge,
+          scope: const {'workspacePath': '/ws-t'},
+          workspaceName: 'WS',
+          workspacePath: '/ws-t',
+          currentSessionId: null,
+          onPick: picked.add,
+          onSwitchWorkspace: () {},
+          onManageDevices: () {},
+          deviceCount: 1,
+          deviceOnline: true,
+        ),
+      ),
+    ));
+
+    // channel 初始化 + 按确定性顺序应答,随后推索引快照让列表渲染。
+    channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
+    await tester.pump(); // id0 hello
+    _respond(channels, 0, <String, dynamic>{});
+    await tester.pump(); // id1 initialize
+    _respond(channels, 1, <String, dynamic>{});
+    await tester.pump(); // id2 帧监听器 + id3 subscribeIndex
+    _respond(channels, 3, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+    // wire 帧{kind,topic,subscriptionId,frame};内层逻辑帧同样携带
+    // subscriptionId(_acceptLogicalFrame 以它过滤)。
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+      'kind': 'complete',
+      'topic': 'sessions-index//ws-t',
+      'subscriptionId': 'sub-test',
+      'frame': {
+        'subscriptionId': 'sub-test',
+        'toSeq': 1,
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {'sessions': entries},
+        },
+      },
+    }));
+    await tester.pump();
+    expect(find.text('修复登录'), findsOneWidget); // 列表已渲染
+  }
+
+  /// 选中一条并断言已进入多选。
+  Future<void> selectRow(WidgetTester tester) async {
+    await tester.tap(find.text('管理'));
+    await tester.pump();
+    await tester.tap(find.text('修复登录'));
+    await tester.pump();
+    expect(find.text('已选 1 项'), findsOneWidget);
+  }
+
+  testWidgets('点会话条目真实触发 onPick(sessionId)', (tester) async {
+    await pumpDrawer(tester);
+    await tester.tap(find.text('修复登录'));
+    await tester.pump();
+    expect(picked, ['s1']);
+    await tester.tap(find.text('重构 API'));
+    await tester.pump();
+    expect(picked, ['s1', 's2']);
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('管理操作依次发出 setTaskPinned(pinned:true)/archiveTask/deleteTask',
+      (tester) async {
+    await pumpDrawer(tester);
+
+    // 置顶:args 必须含 pinned:true(对照 integration_test 服务端契约)。
+    await selectRow(tester);
+    await tester.tap(find.widgetWithText(OutlinedButton, '置顶'));
+    await tester.pump();
+    final (pinHeader, pinArgs) = _decodeRequest(sent.last);
+    expect(pinHeader, [ChannelClient.reqPromise, 4, 'zcode-task', 'setTaskPinned']);
+    expect(pinArgs, [
+      {'taskId': 's1', 'workspacePath': '/ws-t', 'pinned': true},
+    ]);
+    _respond(channels, 4, <String, dynamic>{});
+    await tester.pump();
+    expect(find.text('已选 1 项'), findsNothing); // 完成后退出多选
+
+    // 归档:args 不带 pinned 字段。
+    await selectRow(tester);
+    await tester.tap(find.widgetWithText(OutlinedButton, '归档'));
+    await tester.pump();
+    final (archHeader, archArgs) = _decodeRequest(sent.last);
+    expect(archHeader, [ChannelClient.reqPromise, 5, 'zcode-task', 'archiveTask']);
+    expect(archArgs, [
+      {'taskId': 's1', 'workspacePath': '/ws-t'},
+    ]);
+    _respond(channels, 5, <String, dynamic>{});
+    await tester.pump();
+    expect(find.text('已选 1 项'), findsNothing);
+
+    // 删除:确认对话框 → deleteTask。
+    await selectRow(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.descendant(
+        of: find.byType(AlertDialog), matching: find.text('删除')));
+    await tester.pump();
+    final (delHeader, delArgs) = _decodeRequest(sent.last);
+    expect(delHeader, [ChannelClient.reqPromise, 6, 'zcode-task', 'deleteTask']);
+    expect(delArgs, [
+      {'taskId': 's1', 'workspacePath': '/ws-t'},
+    ]);
+    _respond(channels, 6, <String, dynamic>{});
+    await tester.pump();
+    expect(find.text('已选 1 项'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+}
