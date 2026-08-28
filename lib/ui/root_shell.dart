@@ -305,27 +305,6 @@ class _RootShellState extends State<RootShell> {
     );
   }
 
-  Future<void> _confirmExit() async {
-    final exit = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('返回设备列表？'),
-        content: const Text('连接会保持，稍后可直接回到当前设备'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('留在这里')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('返回')),
-        ],
-      ),
-    );
-    if (exit == true && mounted) {
-      Navigator.of(context).pop();
-    }
-  }
-
   void _retryConnect() {
     final account = widget.session.current ??
         (widget.store.accounts.isEmpty ? null : widget.store.accounts.first);
@@ -348,16 +327,13 @@ class _RootShellState extends State<RootShell> {
     return Scaffold(
       backgroundColor: colors.bg,
       body: PopScope(
-        // Predictable back behavior instead of silently exiting:
-        // any tab -> conversations tab -> confirm exit.
-        canPop: false,
+        // Back behavior under home mounting: on the conversations tab the
+        // system back exits as usual (canPop=true lets the root route pop);
+        // on other tabs back is intercepted and returns to conversations.
+        canPop: _tab == 0,
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) return;
-          if (_tab != 0) {
-            setState(() => _tab = 0);
-            return;
-          }
-          _confirmExit();
+          setState(() => _tab = 0);
         },
         child: SafeArea(
           child: Column(
@@ -703,7 +679,8 @@ class _EmptyDevices extends StatelessWidget {
   }
 }
 
-/// 断开态守卫:激活设备被挤下线/断开后的空态页(壳常驻 home,无设备页可退)。
+/// 设备缺席守卫:壳常驻 home 无设备页可退,首次添加设备后尚未连接、或
+/// 曾连上后被挤下线/断开,都落到这个中性空态页。
 class _DisconnectedView extends StatelessWidget {
   final VoidCallback onRetry;
 
@@ -720,13 +697,13 @@ class _DisconnectedView extends StatelessWidget {
           children: [
             Icon(Icons.link_off, size: 44, color: colors.textFaint),
             const SizedBox(height: EmberSpacing.gapM),
-            Text('当前设备已断开连接',
+            Text('设备未连接',
                 style: TextStyle(
                     fontSize: EmberType.section,
                     fontWeight: FontWeight.w600,
                     color: colors.textSolid)),
             const SizedBox(height: EmberSpacing.gapS),
-            Text('设备可能已被其他终端挤下线，或连接已断开',
+            Text('设备尚未连接，或连接已断开',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: EmberType.caption,
@@ -736,7 +713,7 @@ class _DisconnectedView extends StatelessWidget {
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('重新连接'),
+              label: const Text('连接设备'),
             ),
           ],
         ),

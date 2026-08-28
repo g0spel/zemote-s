@@ -235,13 +235,38 @@ void main() {
     await sessionOf(tester).disconnect(store.accounts[0].id);
     await tester.pumpAndSettle();
 
-    expect(find.text('当前设备已断开连接'), findsOneWidget);
-    expect(find.text('重新连接'), findsOneWidget);
+    // 文案中性:同一守卫页也覆盖“首次添加设备后尚未连接”的落点。
+    expect(find.text('设备未连接'), findsOneWidget);
+    expect(find.text('连接设备'), findsOneWidget);
     expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         0);
     expect(_conversationKey(tester), isNull); // 残留 bridge 已卸载
     await _flushPendingTimers(tester);
+  });
+
+  testWidgets('对话 Tab 系统 back 可退出,非对话 Tab back 回对话 Tab', (tester) async {
+    await _pumpShell(tester, urls: [_deviceUrl], autoConnect: false);
+    // byType 撞 PopScope<T> 的泛型实例化,用谓词匹配。
+    PopScope shellPopScope() => tester.widget<PopScope>(
+          find.byWidgetPredicate((w) => w is PopScope),
+        );
+
+    // 对话 Tab:canPop=true,系统 back 交给系统默认(可退出)。
+    expect(shellPopScope().canPop, isTrue);
+
+    // 非对话 Tab:back 被拦截,壳切回对话 Tab 而不是退出应用。
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(shellPopScope().canPop, isFalse);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0);
+
+    // 回到对话 Tab 后,back 恢复为系统默认(可退出)。
+    expect(shellPopScope().canPop, isTrue);
   });
 }
 
