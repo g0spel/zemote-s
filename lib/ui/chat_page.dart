@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -14,6 +15,26 @@ import 'diff_view.dart';
 import 'markdown_view.dart';
 import 'theme.dart';
 
+/// 协作模式徽标文案(spec §7.1:非默认模式才在模型 pill 追加徽段)。
+/// build 是默认 → null(不显示);plan/edit/yolo 用定案文案;
+/// 桌面端自定义模式原样透传,不丢信息。
+String? modeBadge(String mode) => switch (mode) {
+      'build' => null,
+      'plan' => '计划',
+      'edit' => '编辑',
+      'yolo' => 'YOLO',
+      _ => mode,
+    };
+
+/// 模式徽标颜色:plan 权限敏感(Ember 主色橙)、edit 感知级(run 蓝)、
+/// yolo 危险(err 红)、其余(含 build)中性 muted。
+Color modeBadgeColor(String mode, EmberColors c) => switch (mode) {
+      'plan' => c.primary,
+      'edit' => c.run,
+      'yolo' => c.err,
+      _ => c.textMuted,
+    };
+
 /// Chat view for one task (session), backed by Conversation V4 subscription.
 /// Draft mode (no [sessionId]): the first message issues `createSession`.
 class ChatPage extends StatefulWidget {
@@ -24,15 +45,26 @@ class ChatPage extends StatefulWidget {
   final String title;
 
   /// Embedded mode (Ember conversations tab): no Scaffold/AppBar shell —
-  /// the host renders its own header, this widget outputs the message
-  /// stream + banners + composer directly. Pushed usages (automation run
-  /// history) keep the Scaffold chrome.
+  /// this widget renders the conversations-tab header row itself (device
+  /// capsule + session title + stop + model pill + overflow + drawer) and
+  /// outputs the message stream + banners + composer below it. Pushed
+  /// usages (automation run history) keep the Scaffold chrome.
   final bool embedded;
 
   /// Embedded title push: fires whenever the desktop's title for this
   /// session changes (created/renamed — esp. right after a draft's
-  /// createSession). Never fires in Scaffold mode.
-  final ValueChanged<String>? onSessionInfo;
+  /// createSession) and once when a draft adopts its session id, so the
+  /// host can write back the now-current session. Never fires in
+  /// Scaffold mode.
+  final void Function(String sessionId, String title)? onSessionInfo;
+
+  /// Embedded header pieces owned by the host shell: the device capsule
+  /// (built by the shell, opens the device switcher) and the drawer open
+  /// callback. The session title comes through [headerTitle] so renames
+  /// land without rebuilding the shell. All ignored in Scaffold mode.
+  final Widget? headerLeading;
+  final ValueListenable<String?>? headerTitle;
+  final VoidCallback? onOpenDrawer;
 
   const ChatPage({
     super.key,
@@ -43,6 +75,9 @@ class ChatPage extends StatefulWidget {
     required this.title,
     this.embedded = false,
     this.onSessionInfo,
+    this.headerLeading,
+    this.headerTitle,
+    this.onOpenDrawer,
   });
 
   @override
@@ -131,6 +166,7 @@ class _ChatPageState extends State<ChatPage> {
   /// mounted in embedded mode. The desktop generates/renames titles
   /// asynchronously, so the host header needs pushes when it changes.
   SessionsIndexSubscription? _titleSub;
+  String? _pushedSessionId;
   String? _pushedTitle;
 
   /// Draft-mode (no session yet) model/mode/thought selection, passed as
@@ -194,7 +230,7 @@ class _ChatPageState extends State<ChatPage> {
     final titleSub = _titleSub;
     _titleSub = null;
     if (titleSub != null) {
-      titleSub.state.removeListener(_pushSessionTitle);
+      titleSub.state.removeListener(_pushSessionInfo);
       titleSub.dispose();
     }
     _inputController.dispose();
@@ -210,30 +246,34 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
       _titleSub = sub;
-      sub.state.addListener(_pushSessionTitle);
-      _pushSessionTitle();
+      sub.state.addListener(_pushSessionInfo);
+      _pushSessionInfo();
     } catch (_) {
       // Title is header cosmetics only — on failure keep the placeholder.
     }
   }
 
-  void _pushSessionTitle() {
+  /// 推送 (sessionId, title) 给宿主:会话 id 只在变化时推一次(draft 采纳
+  /// 后宿主立即回写,标题未生成时带空串);标题有值且变化时再推。
+  void _pushSessionInfo() {
     final sub = _titleSub;
     final sessionId = _sessionId;
     if (sub == null || sessionId == null || !mounted) return;
     final title = sub.state.sessions[sessionId]?.title ?? '';
-    if (title.isNotEmpty && title != _pushedTitle) {
-      _pushedTitle = title;
-      widget.onSessionInfo!(title);
-    }
+    final idNew = sessionId != _pushedSessionId;
+    final titleNew = title.isNotEmpty && title != _pushedTitle;
+    if (!idNew && !titleNew) return;
+    _pushedSessionId = sessionId;
+    if (titleNew) _pushedTitle = title;
+    widget.onSessionInfo!(sessionId, title);
   }
 
   /// Draft 首条消息创建会话后的采纳。索引推送(含桌面端生成的标题)可能
   /// 先于 createSession 返回到达——监听器此刻读到的 _sessionId 还是
-  /// null,之后不会再触发;采纳后必须补跑一次标题推送。
+  /// null,之后不会再触发;采纳后必须补跑一次推送。
   void _adoptCreatedSession(String sessionId) {
     _sessionId = sessionId;
-    _pushSessionTitle();
+    _pushSessionInfo();
   }
 
   Future<void> _subscribe() async {
@@ -793,7 +833,14 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     final state = _state;
     final body = _content(context, state);
-    if (widget.embedded) return body;
+    if (widget.embedded) {
+      return Column(
+        children: [
+          _embeddedHeader(context, state),
+          Expanded(child: body),
+        ],
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -871,6 +918,216 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  // ------------------------------------------------- embedded header
+
+  /// 对话 Tab 顶栏(spec §7.1:设备胶囊 | 会话名 | 停止 + 模型 pill +
+  /// 溢出菜单 | 会话抽屉)。胶囊与抽屉回调由壳注入;会话态驱动的停止/
+  /// pill/溢出菜单在订阅通知处刷新。
+  Widget _embeddedHeader(BuildContext context, ConversationState? state) {
+    final colors = EmberColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(EmberSpacing.page, EmberSpacing.gapS,
+          EmberSpacing.page, EmberSpacing.gapS),
+      child: Row(
+        children: [
+          if (widget.headerLeading != null) widget.headerLeading!,
+          const SizedBox(width: EmberSpacing.gapM),
+          Expanded(child: _embeddedTitle(context)),
+          _headerActions(context, state, colors),
+          if (widget.onOpenDrawer != null)
+            IconButton(
+              icon: const Icon(Icons.menu, size: 22),
+              tooltip: '会话列表',
+              onPressed: widget.onOpenDrawer,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 会话名:null/空显示「新会话」;经 listenable 跟进桌面端生成的标题。
+  Widget _embeddedTitle(BuildContext context) {
+    final colors = EmberColors.of(context);
+    final listenable = widget.headerTitle;
+    if (listenable == null) {
+      return Text(widget.title,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              fontSize: EmberType.body,
+              fontWeight: FontWeight.w600,
+              color: colors.textSolid));
+    }
+    return ValueListenableBuilder<String?>(
+      valueListenable: listenable,
+      builder: (context, title, _) => Text(
+        title == null || title.isEmpty ? '新会话' : title,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            fontSize: EmberType.body,
+            fontWeight: FontWeight.w600,
+            color: colors.textSolid),
+      ),
+    );
+  }
+
+  /// 停止(isRunning 才出现)+ 模型 pill + 溢出菜单(辅助对话/压缩/
+  /// 用量/计划,原 AppBar 入口)。state 为 null(draft 未订阅)时静态
+  /// 渲染一次,订阅建立后由 AnimatedBuilder 跟进。
+  Widget _headerActions(
+      BuildContext context, ConversationState? state, EmberColors colors) {
+    Widget build() {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (state != null && state.isRunning && _sessionId != null)
+            IconButton(
+              icon: Icon(Icons.stop_circle_outlined,
+                  size: 22, color: colors.err),
+              tooltip: '停止',
+              onPressed: () =>
+                  _run('停止失败', () => _transport.stop(_sessionId!)),
+            ),
+          _modelPill(context, state),
+          if (_sessionId != null)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_horiz, size: 20, color: colors.textMuted),
+              tooltip: '更多',
+              onSelected: (action) {
+                switch (action) {
+                  case 'side':
+                    _openSideChat();
+                  case 'compact':
+                    _run('压缩失败',
+                        () => _transport.compact(_sessionId!));
+                  case 'usage':
+                    _showUsageSheet();
+                  case 'plans':
+                    _showPlansSheet();
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'side', child: Text('辅助对话')),
+                PopupMenuItem(
+                    value: 'compact',
+                    child: Text('压缩上下文 (compact)')),
+                PopupMenuItem(value: 'usage', child: Text('用量统计')),
+                PopupMenuItem(value: 'plans', child: Text('计划')),
+              ],
+            ),
+        ],
+      );
+    }
+
+    if (state == null) return build();
+    return AnimatedBuilder(animation: state, builder: (context, _) => build());
+  }
+
+  /// 模型 pill:`模型名 | 强度档名` + 模式徽段(非默认模式才显示)。
+  /// 显示名优先取 prepareWorkspace 模型/思考选项里当前值的展示名,
+  /// 回退会话 config 的裸值;点击展开模型/模式面板。
+  Widget _modelPill(BuildContext context, ConversationState? state) {
+    final colors = EmberColors.of(context);
+    final model = _pillModelLabel(state);
+    final thought = _pillThoughtLabel(state);
+    final mode = state?.currentMode ?? _draftConfig['mode'] ?? 'build';
+    final badge = modeBadge(mode);
+    final badgeColor = modeBadgeColor(mode, colors);
+    return InkWell(
+      borderRadius: BorderRadius.circular(EmberRadius.control),
+      onTap: _showModelSheet,
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          border: Border.all(color: colors.hairline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(model,
+                style: TextStyle(
+                    fontSize: EmberType.body,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textSolid)),
+            if (thought != null) ...[
+              const SizedBox(width: 6),
+              Text('|',
+                  style: TextStyle(
+                      fontSize: EmberType.caption,
+                      color: colors.textFaint)),
+              const SizedBox(width: 6),
+              Text(thought,
+                  style: TextStyle(
+                      fontSize: EmberType.body,
+                      color: colors.textMuted)),
+            ],
+            if (badge != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.15),
+                  borderRadius:
+                      BorderRadius.circular(EmberRadius.avatar),
+                ),
+                child: Text(badge,
+                    style: TextStyle(
+                        fontSize: EmberType.caption,
+                        fontWeight: FontWeight.w600,
+                        color: badgeColor)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String? _optionLabel(ConfigOption? opt, String value) {
+    for (final v in opt?.options ?? const <ConfigOptionValue>[]) {
+      if (v.value == value) return v.name;
+    }
+    return null;
+  }
+
+  /// pill 的模型显示名。draft 用草稿选择/准备默认值;活动会话用
+  /// provider/model 现场值(展示名匹配不上时退裸模型名)。
+  String _pillModelLabel(ConversationState? state) {
+    final opt = _prep?.option('model');
+    final isDraft = state == null || _sessionId == null || _sessionId!.isEmpty;
+    String value;
+    if (isDraft) {
+      value = _draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
+    } else {
+      final config = state.config ?? const {};
+      value = '${config['provider'] ?? ''}/${config['model'] ?? ''}';
+      if ('${config['model'] ?? ''}'.isEmpty) {
+        value = _draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
+      }
+    }
+    if (value.isEmpty) return '模型';
+    return _optionLabel(opt, value) ??
+        (value.contains('/')
+            ? value.substring(value.lastIndexOf('/') + 1)
+            : value);
+  }
+
+  /// pill 的思考强度档名;无值(draft 未选且准备数据未到)时不显示该段。
+  String? _pillThoughtLabel(ConversationState? state) {
+    final opt = _prep?.option('thought_level');
+    final isDraft = state == null || _sessionId == null || _sessionId!.isEmpty;
+    final value = isDraft
+        ? (_draftConfig['thought'] ?? '${opt?.currentValue ?? ''}')
+        : (state.currentThought.isNotEmpty
+            ? state.currentThought
+            : '${opt?.currentValue ?? ''}');
+    if (value.isEmpty) return null;
+    return _optionLabel(opt, value) ?? value;
+  }
+
   /// 消息流 + 横幅组 + 输入区。embedded(对话 Tab 内嵌)直接输出,
   /// 不包 Scaffold/AppBar 外壳。
   Widget _content(BuildContext context, ConversationState? state) => Column(
@@ -899,6 +1156,11 @@ class _ChatPageState extends State<ChatPage> {
                 transport: _transport,
                 sessionId: _sessionId!,
               ),
+            ),
+          if (state != null)
+            AnimatedBuilder(
+              animation: state,
+              builder: (context, _) => _ModeBanner(mode: state.currentMode),
             ),
           Expanded(
             child: state == null
@@ -1067,6 +1329,47 @@ class _ChatPageState extends State<ChatPage> {
 }
 
 // ---------------------------------------------------------------- rows
+
+/// plan/yolo 模式的流内状态条(spec §7.1:权限级提示,模式切回 build
+/// 即消失)。计划橙条提示只读需确认,YOLO 红条警示免确认风险。
+class _ModeBanner extends StatelessWidget {
+  final String mode;
+
+  const _ModeBanner({required this.mode});
+
+  @override
+  Widget build(BuildContext context) {
+    final yolo = mode == 'yolo';
+    final plan = mode == 'plan';
+    if (!yolo && !plan) return const SizedBox.shrink();
+    final colors = EmberColors.of(context);
+    final color = yolo ? colors.err : colors.warn;
+    final text = yolo
+        ? 'YOLO 模式 · 全部操作免确认，请确认在工作机上'
+        : '计划模式中 · 只读研究，方案产出后需你确认';
+    return Container(
+      width: double.infinity,
+      color: color.withValues(alpha: 0.15),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          Icon(
+              yolo
+                  ? Icons.warning_amber_rounded
+                  : Icons.visibility_outlined,
+              size: 14,
+              color: color),
+          const SizedBox(width: EmberSpacing.gapS),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(
+                    fontSize: EmberType.secondary, color: color)),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Shows while the bridge is degraded (relay drop / recovery in progress)
 /// so the user knows a send may be paused waiting to reconnect.
@@ -4220,73 +4523,71 @@ class _ModelModeSheet extends StatelessWidget {
                 style: const TextStyle(
                     fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
-            if (modelOption != null && modelOption.options.isNotEmpty) ...[
-              Text(modelOption.name,
-                  style: const TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              for (final v in modelOption.options)
+            // 分区顺序按 spec §7.1:模式 → 思考强度 → 模型。
+            const Text('协作模式', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 8),
+            if (modeOption != null && modeOption.options.isNotEmpty)
+              for (final v in modeOption.options)
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
-                    currentModelValue == v.value
+                    currentModeValue == v.value
                         ? Icons.radio_button_checked
                         : Icons.radio_button_off,
                     size: 18,
-                    color: currentModelValue == v.value
+                    color: currentModeValue == v.value
                         ? ZColors.primary
                         : ZInk.ghost(context),
                   ),
                   title: Text(v.name,
                       style: const TextStyle(fontSize: 13)),
-                  subtitle: v.modelProviderName != null
-                      ? Text(v.modelProviderName!,
+                  subtitle: v.description != null
+                      ? Text(v.description!,
                           style: TextStyle(
                               fontSize: 11, color: ZInk.faint(context)))
                       : null,
                   onTap: () {
                     if (_isDraft) {
-                      onDraftChange?.call('model', v.value);
+                      onDraftChange?.call('mode', v.value);
                     } else {
-                      final (provider, model) =
-                          _splitModelValue(v.value);
-                      // thought must be valid for the target model:
-                      // keep current if supported, else fall back to the
-                      // thought option's currentValue (Turbo: enabled/off)
-                      final currentThought =
-                          state?.currentThought ?? '';
-                      final thoughtOpt = prep?.option('thought_level');
-                      final thought = currentThought.isNotEmpty &&
-                              (thoughtOpt?.options.any(
-                                      (o) => o.value == currentThought) ??
-                                  false)
-                          ? currentThought
-                          : '${thoughtOpt?.currentValue ?? (currentThought.isNotEmpty ? currentThought : 'enabled')}';
                       _apply(
                         context,
-                        () => transport.switchModelConfig(
-                          sid,
-                          provider: provider,
-                          model: model,
-                          thought: thought,
-                        ),
+                        () => transport.switchCollaborationMode(
+                            sid, v.value),
                         onAccepted: () => state?.optimisticPatch({
                           'config': {
                             ...?state!.config,
-                            'provider': provider,
-                            'model': model,
-                            'thought': thought,
+                            'mode': v.value,
                           },
                         }),
                       );
                     }
                   },
-                ),
-              const SizedBox(height: 12),
-            ] else
-              Text('当前模型: ${state?.currentModel ?? ''}',
-                  style: TextStyle(
-                      fontSize: 12, color: ZInk.muted(context))),
+                )
+            else
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final m in const ['build', 'edit', 'plan', 'yolo'])
+                    ChoiceChip(
+                      label: Text(m),
+                      selected: currentModeValue == m,
+                      onSelected: (_) {
+                        if (_isDraft) {
+                          onDraftChange?.call('mode', m);
+                        } else {
+                          _apply(
+                            context,
+                            () => transport.switchCollaborationMode(
+                                sid, m),
+                          );
+                        }
+                      },
+                    ),
+                ],
+              ),
+            const SizedBox(height: 12),
             if (thoughtOption != null &&
                 thoughtOption.options.isNotEmpty) ...[
               Text(thoughtOption.name,
@@ -4355,70 +4656,73 @@ class _ModelModeSheet extends StatelessWidget {
                 ],
               ),
             ],
-            const SizedBox(height: 16),
-            const Text('协作模式', style: TextStyle(fontSize: 13)),
-            const SizedBox(height: 8),
-            if (modeOption != null && modeOption.options.isNotEmpty)
-              for (final v in modeOption.options)
+            const SizedBox(height: 12),
+            if (modelOption != null && modelOption.options.isNotEmpty) ...[
+              Text(modelOption.name,
+                  style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              for (final v in modelOption.options)
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
-                    currentModeValue == v.value
+                    currentModelValue == v.value
                         ? Icons.radio_button_checked
                         : Icons.radio_button_off,
                     size: 18,
-                    color: currentModeValue == v.value
+                    color: currentModelValue == v.value
                         ? ZColors.primary
                         : ZInk.ghost(context),
                   ),
                   title: Text(v.name,
                       style: const TextStyle(fontSize: 13)),
-                  subtitle: v.description != null
-                      ? Text(v.description!,
+                  subtitle: v.modelProviderName != null
+                      ? Text(v.modelProviderName!,
                           style: TextStyle(
                               fontSize: 11, color: ZInk.faint(context)))
                       : null,
                   onTap: () {
                     if (_isDraft) {
-                      onDraftChange?.call('mode', v.value);
+                      onDraftChange?.call('model', v.value);
                     } else {
+                      final (provider, model) =
+                          _splitModelValue(v.value);
+                      // thought must be valid for the target model:
+                      // keep current if supported, else fall back to the
+                      // thought option's currentValue (Turbo: enabled/off)
+                      final currentThought =
+                          state?.currentThought ?? '';
+                      final thoughtOpt = prep?.option('thought_level');
+                      final thought = currentThought.isNotEmpty &&
+                              (thoughtOpt?.options.any(
+                                      (o) => o.value == currentThought) ??
+                                  false)
+                          ? currentThought
+                          : '${thoughtOpt?.currentValue ?? (currentThought.isNotEmpty ? currentThought : 'enabled')}';
                       _apply(
                         context,
-                        () => transport.switchCollaborationMode(
-                            sid, v.value),
+                        () => transport.switchModelConfig(
+                          sid,
+                          provider: provider,
+                          model: model,
+                          thought: thought,
+                        ),
                         onAccepted: () => state?.optimisticPatch({
                           'config': {
                             ...?state!.config,
-                            'mode': v.value,
+                            'provider': provider,
+                            'model': model,
+                            'thought': thought,
                           },
                         }),
                       );
                     }
                   },
-                )
-            else
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final m in const ['build', 'edit', 'plan', 'yolo'])
-                    ChoiceChip(
-                      label: Text(m),
-                      selected: currentModeValue == m,
-                      onSelected: (_) {
-                        if (_isDraft) {
-                          onDraftChange?.call('mode', m);
-                        } else {
-                          _apply(
-                            context,
-                            () => transport.switchCollaborationMode(
-                                sid, m),
-                          );
-                        }
-                      },
-                    ),
-                ],
-              ),
+                ),
+            ] else
+              Text('当前模型: ${state?.currentModel ?? ''}',
+                  style: TextStyle(
+                      fontSize: 12, color: ZInk.muted(context))),
             if (!_isDraft) ...[
               const SizedBox(height: 16),
               const Text('后续消息', style: TextStyle(fontSize: 13)),

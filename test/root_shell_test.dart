@@ -374,6 +374,66 @@ void main() {
     await _flushPendingTimers(tester);
   });
 
+  testWidgets('draft 首条消息创建会话后回写选择:切走再切回不再开新 draft',
+      (tester) async {
+    await pumpWithBridge(tester);
+    expect(_chatSessionId(tester), isNull);
+
+    // 模拟 draft 首条消息 createSession 成功后 ChatPage 的回写
+    // (onSessionInfo 自 Task 4 起携带 sessionId)。
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s-new', '桌面起的标题');
+    await tester.pump();
+
+    // 标题即时上头部(ValueListenable);回写不重建内嵌实例(draft 态保留)。
+    expect(find.text('桌面起的标题'), findsOneWidget);
+    await _openDrawer(tester);
+    expect(
+      tester
+          .widget<SessionDrawer>(find.byType(SessionDrawer))
+          .currentSessionId,
+      's-new', // 抽屉高亮跟随回写
+    );
+    await _pumpDrawerClose(tester);
+
+    // 切走(自动化 Tab 卸载内嵌 ChatPage)再切回:按回写的会话恢复,
+    // 而不是落到一个新 draft。
+    await tester.tap(find.text('自动化'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('对话'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(_chatSessionId(tester), 's-new');
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('回写后抽屉点「新会话」仍显式开新 draft,点回写会话无缝恢复',
+      (tester) async {
+    await pumpWithBridge(tester);
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s-new', '桌面起的标题');
+    await tester.pump();
+
+    // 显式「＋新会话」:用户意图优先,回到全新 draft(不动回写前的实例态)。
+    await _openDrawer(tester);
+    tester
+        .widget<SessionDrawer>(find.byType(SessionDrawer))
+        .onPick(null);
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), isNull);
+    expect(find.text('输入消息开始新会话'), findsOneWidget);
+
+    // 点回写会话:恢复 s-new,不再是 draft。
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s-new');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's-new');
+    await _flushPendingTimers(tester);
+  });
+
   testWidgets('选中会话后切换设备:抽屉关闭回到 draft(复位)', (tester) async {
     final store = await _pumpShell(
       tester,

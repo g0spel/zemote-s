@@ -33,7 +33,7 @@ void main() {
   testWidgets('draft:索引标题先于 createSession 返回时,采纳会话后补推标题',
       (tester) async {
     final bridge = BridgeSession.detached({'workspaceKey': '/ws-t'});
-    final pushed = <String>[];
+    final pushed = <List<String>>[];
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: ChatPage(
@@ -43,7 +43,8 @@ void main() {
           sessionId: null,
           title: '新会话',
           embedded: true,
-          onSessionInfo: pushed.add,
+          onSessionInfo: (sessionId, title) =>
+              pushed.add([sessionId, title]),
         ),
       ),
     ));
@@ -110,8 +111,11 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    // 修复点:采纳 sessionId 后补跑标题推送(修复前此处为空)。
-    expect(pushed, ['桌面起的标题']);
+    // 修复点:采纳 sessionId 后补跑推送,且携带会话 id 供壳回写
+    // (修复前此处为空;Task 4 起回调签名为 (sessionId, title))。
+    expect(pushed, [
+      ['s-new', '桌面起的标题'],
+    ]);
     // 回归:发送完成后 composer 回到可输入态。
     expect(find.byIcon(Icons.arrow_upward), findsOneWidget);
 
