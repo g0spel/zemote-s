@@ -434,6 +434,46 @@ void main() {
     await _flushPendingTimers(tester);
   });
 
+  testWidgets('抽屉重选当前会话标题保持且实例存活;选另一会话清空后由新实例回写',
+      (tester) async {
+    await pumpWithBridge(tester);
+
+    // 回写会话选择 + 桌面端生成的标题(存活实例的标题推送只在变化时发)。
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s1', '桌面起的标题');
+    await tester.pump();
+    expect(find.text('桌面起的标题'), findsOneWidget);
+
+    // 重选当前高亮会话:只关抽屉——实例存活(element 不换)、标题保持,
+    // 不回落「新会话」占位(清了就没有人再推了)。
+    final elementBefore = tester.element(find.byType(ChatPage));
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
+    await _pumpDrawerClose(tester);
+    expect(find.byType(SessionDrawer), findsNothing);
+    expect(tester.element(find.byType(ChatPage)), same(elementBefore));
+    expect(find.text('桌面起的标题'), findsOneWidget);
+    expect(find.text('新会话'), findsNothing);
+
+    // 选不同会话:重建代数递增 → 全新实例,旧标题清空回落「新会话」占位。
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s2');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's2');
+    expect(tester.element(find.byType(ChatPage)), isNot(same(elementBefore)));
+    expect(find.text('桌面起的标题'), findsNothing);
+    expect(find.text('新会话'), findsOneWidget);
+
+    // 新实例经 onSessionInfo 回写后标题恢复。
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s2', '另一会话的标题');
+    await tester.pump();
+    expect(find.text('另一会话的标题'), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
   testWidgets('选中会话后切换设备:抽屉关闭回到 draft(复位)', (tester) async {
     final store = await _pumpShell(
       tester,

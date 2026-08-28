@@ -327,12 +327,14 @@ class _RootShellState extends State<RootShell> {
 
   /// 抽屉选择:null = 新会话(draft);否则内嵌打开该会话。标题不随
   /// 选择注入,由 ChatPage 的 sessions-index 推送回写(桌面端生成)。
-  /// 选到不同会话才递增重建代数(重选当前会话只关抽屉,不重置实例)。
+  /// 切到不同会话才递增重建代数并清标题(重选当前会话只关抽屉:实例
+  /// 存活且其标题推送只在变化时发一次,清了头部就永远停在「新会话」)。
   void _pickFromDrawer(String? sessionId) {
-    if (sessionId != _activeSessionId.value) _sessionEpoch++;
+    final changed = sessionId != _activeSessionId.value;
+    if (changed) _sessionEpoch++;
     setState(() {
       _activeSessionId.value = sessionId;
-      _activeSessionTitle.value = null;
+      if (changed) _activeSessionTitle.value = null;
     });
     _closeDrawer();
   }
