@@ -370,3 +370,51 @@ String relativeTime(int? millis) {
   return '${time.year}-${time.month.toString().padLeft(2, '0')}-'
       '${time.day.toString().padLeft(2, '0')}';
 }
+
+/// Ember 设计语言色板单一来源(spec §2)。后续界面统一经此类取色;
+/// ZInk 保留为兼容层,逐步迁移后移除。
+class EmberColors {
+  final bool isDark;
+  const EmberColors._(this.isDark);
+  const EmberColors.dark() : this._(true);
+  const EmberColors.light() : this._(false);
+
+  static EmberColors of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.light
+          ? const EmberColors.light()
+          : const EmberColors.dark();
+
+  // 暗色(设计基准)
+  static const _dBg = Color(0xFF1B1917);
+  static const _dCard = Color(0xFF262320);
+  static const _dRaise = Color(0xFF35302B);
+  static const _dHairline = Color(0xFF3A342E);
+  static const _dSolid = Color(0xFFEEE7DC);
+  static const _dSoft = Color(0xFFC9BFAF);
+  static const _dMuted = Color(0xFF8A8074);
+  static const _dFaint = Color(0xFF5C554B);
+
+  // 浅色(暖纸白)
+  static const _lBg = Color(0xFFF7F3EC);
+  static const _lCard = Color(0xFFFFFFFF);
+  static const _lRaise = Color(0xFFEFE9DF);
+  static const _lPrimary = Color(0xFFC25E3A);
+  static const _lSolid = Color(0xFF2A241E);
+  static const _lSoft = Color(0xFF4A4238);
+  static const _lMuted = Color(0xFF786D5E);
+  static const _lFaint = Color(0xFFA69B8C);
+
+  Color get bg => isDark ? _dBg : _lBg;
+  Color get card => isDark ? _dCard : _lCard;
+  Color get raise => isDark ? _dRaise : _lRaise;
+  Color get hairline => isDark ? _dHairline : const Color(0xFFE2D9CC);
+  Color get primary => isDark ? const Color(0xFFD97757) : _lPrimary;
+  Color get ok => isDark ? const Color(0xFF7FB069) : const Color(0xFF5A8C46);
+  Color get err => isDark ? const Color(0xFFE5484D) : const Color(0xFFC53035);
+  Color get warn => isDark ? const Color(0xFFD4A72C) : const Color(0xFFA8851F);
+  Color get run => isDark ? const Color(0xFF6A9BD8) : const Color(0xFF4A7BB5);
+  Color get textSolid => isDark ? _dSolid : _lSolid;
+  Color get textSoft => isDark ? _dSoft : _lSoft;
+  Color get textMuted => isDark ? _dMuted : _lMuted;
+  Color get textFaint => isDark ? _dFaint : _lFaint;
+}
