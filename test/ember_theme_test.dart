@@ -85,14 +85,17 @@ void main() {
   });
 
   testWidgets('app theme uses Sarasa UI family', (tester) async {
-    late ThemeData theme;
-    await tester.pumpWidget(MaterialApp(
-      theme: buildDarkTheme(),
-      home: Builder(builder: (context) {
-        theme = Theme.of(context);
-        return const SizedBox.shrink();
-      }),
-    ));
-    expect(theme.textTheme.bodyMedium!.fontFamily, 'Sarasa UI SC');
+    for (final themeData in [buildDarkTheme(), buildLightTheme()]) {
+      late ThemeData theme;
+      await tester.pumpWidget(MaterialApp(
+        theme: themeData,
+        home: Builder(builder: (context) {
+          theme = Theme.of(context);
+          return const SizedBox.shrink();
+        }),
+      ));
+      expect(theme.textTheme.bodyMedium!.fontFamily, 'Sarasa UI SC');
+      expect(theme.appBarTheme.titleTextStyle!.fontFamily, 'Sarasa UI SC');
+    }
   });
 }

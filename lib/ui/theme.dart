@@ -172,6 +172,7 @@ ThemeData buildDarkTheme() {
       titleTextStyle: TextStyle(
         fontSize: 17,
         fontWeight: FontWeight.w600,
+        fontFamily: EmberFonts.ui,
         color: Colors.white,
       ),
       iconTheme: IconThemeData(color: Colors.white70),
@@ -202,7 +203,8 @@ ThemeData buildDarkTheme() {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: ZColors.primary, width: 1.5),
       ),
-      hintStyle: const TextStyle(color: Colors.white30, fontSize: 14),
+      hintStyle: const TextStyle(
+          color: Colors.white30, fontSize: 14, fontFamily: EmberFonts.ui),
     ),
     dividerTheme: const DividerThemeData(
       color: ZColors.darkBorder,
@@ -212,7 +214,8 @@ ThemeData buildDarkTheme() {
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: ZColors.darkCard,
-      contentTextStyle: const TextStyle(color: Colors.white),
+      contentTextStyle:
+          const TextStyle(color: Colors.white, fontFamily: EmberFonts.ui),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
     bottomSheetTheme: const BottomSheetThemeData(
@@ -264,6 +267,7 @@ ThemeData buildLightTheme() {
       titleTextStyle: TextStyle(
         fontSize: 17,
         fontWeight: FontWeight.w600,
+        fontFamily: EmberFonts.ui,
         color: Color(0xFF0F172A),
       ),
       iconTheme: IconThemeData(color: Color(0xFF475569)),
@@ -294,7 +298,8 @@ ThemeData buildLightTheme() {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: ZColors.primary, width: 1.5),
       ),
-      hintStyle: const TextStyle(color: Colors.black26, fontSize: 14),
+      hintStyle: const TextStyle(
+          color: Colors.black26, fontSize: 14, fontFamily: EmberFonts.ui),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
