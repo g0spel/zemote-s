@@ -1524,16 +1524,19 @@ class _MsgBadge extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 1.4)),
           const SizedBox(width: 3),
           Text('处理中',
-              style:
-                  TextStyle(fontSize: 9.5, color: ZColors.running)),
+              style: TextStyle(
+                  fontSize: 9.5,
+                  color: EmberColors.of(context).run)),
         ]);
       default: // failed
         content = Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.error_outline, size: 12, color: ZColors.danger),
+          Icon(Icons.error_outline,
+              size: 12, color: EmberColors.of(context).err),
           const SizedBox(width: 3),
           Text('发送失败 · 点击重试',
-              style:
-                  TextStyle(fontSize: 9.5, color: ZColors.danger)),
+              style: TextStyle(
+                  fontSize: 9.5,
+                  color: EmberColors.of(context).err)),
         ]);
     }
     if (!failed) {
@@ -1582,12 +1585,12 @@ class _UserBubble extends StatelessWidget {
         margin: const EdgeInsets.only(left: 56, top: 4, bottom: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: ZColors.primary.withValues(alpha: 0.22),
+          color: EmberColors.of(context).primary,
           borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(4),
+            topLeft: Radius.circular(EmberRadius.content),
+            topRight: Radius.circular(EmberRadius.content),
+            bottomLeft: Radius.circular(EmberRadius.content),
+            bottomRight: Radius.circular(EmberRadius.bubbleTail),
           ),
         ),
         child: Column(
@@ -1603,7 +1606,8 @@ class _UserBubble extends StatelessWidget {
                   ),
             if (text.isNotEmpty)
               SelectableText(text,
-                  style: const TextStyle(fontSize: 14, height: 1.5)),
+                  style: const TextStyle(
+                      fontSize: 14, height: 1.5, color: Colors.white)),
             if (badge != null)
               _MsgBadge(status: badge!, onRetry: onRetry),
           ],
@@ -1745,10 +1749,20 @@ class _AssistantBubble extends StatelessWidget {
     final feedback = row['feedback'] as String?;
     return Container(
       margin: const EdgeInsets.only(right: 24, top: 4, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: EmberColors.of(context).card,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(EmberRadius.content),
+          topRight: Radius.circular(EmberRadius.content),
+          bottomRight: Radius.circular(EmberRadius.content),
+          bottomLeft: Radius.circular(EmberRadius.bubbleTail),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ZemoteMarkdown(text),
+          ZemoteMarkdown(text, fontSize: 13),
           if (showFeedback)
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -1806,20 +1820,33 @@ class _FeedbackButton extends StatelessWidget {
   }
 }
 
-class _ReasoningTile extends StatelessWidget {
+/// Assistant thinking block. Ember look: tile one step darker than card
+/// (the bg↔card midpoint, per theme), 10pt radius, 3px state rail (run
+/// while streaming, faint when done). The label is a standalone faint
+/// caption row (▸/▾ prefix) toggling the body, replacing the old
+/// ExpansionTile header text.
+class _ReasoningTile extends StatefulWidget {
   final String text;
   final bool streaming;
 
   const _ReasoningTile({required this.text, this.streaming = false});
 
   @override
+  State<_ReasoningTile> createState() => _ReasoningTileState();
+}
+
+class _ReasoningTileState extends State<_ReasoningTile> {
+  bool _open = true;
+
+  @override
   Widget build(BuildContext context) {
+    final e = EmberColors.of(context);
+    final arrow = _open ? '▾ ' : '▸ ';
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: ZInk.tile(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ZInk.tileBorder(context)),
+        color: Color.lerp(e.bg, e.card, 0.5),
+        borderRadius: BorderRadius.circular(EmberRadius.control),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1830,36 +1857,31 @@ class _ReasoningTile extends StatelessWidget {
             width: 3,
             margin: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              color: streaming ? ZColors.running : ZInk.hairline(context),
+              color: widget.streaming ? e.run : e.textFaint,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           Expanded(
-            child: ExpansionTile(
-              initiallyExpanded: true,
-              dense: true,
-              tilePadding: const EdgeInsets.symmetric(horizontal: 10),
-              iconColor: ZInk.faint(context),
-              collapsedIconColor: ZInk.faint(context),
-              title: Row(
-                children: [
-                  Icon(Icons.psychology_outlined,
-                      size: 14,
-                      color:
-                          streaming ? ZColors.running : ZInk.faint(context)),
-                  const SizedBox(width: 6),
-                  Text(
-                    streaming ? '思考中…' : '思考过程',
-                    style:
-                        TextStyle(fontSize: 12, color: ZInk.muted(context)),
-                  ),
-                ],
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: ZemoteMarkdown(text, fontSize: 12),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _open = !_open),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    child: Text(
+                      '$arrow${widget.streaming ? '思考中…' : '思考过程'}',
+                      style: TextStyle(
+                          fontSize: EmberType.caption, color: e.textFaint),
+                    ),
+                  ),
                 ),
+                if (_open)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: ZemoteMarkdown(widget.text, fontSize: 12),
+                  ),
               ],
             ),
           ),
@@ -1869,13 +1891,26 @@ class _ReasoningTile extends StatelessWidget {
   }
 }
 
-class _ToolCallTile extends StatelessWidget {
+/// Tool call block. Ember look matches [_ReasoningTile]: tile one step
+/// darker than card, 10pt radius, 3px rail colored by status (success→ok,
+/// error→err, running→run). The tool name is a standalone faint caption row
+/// (▸/▾ prefix, term font) toggling the input/output/error detail.
+class _ToolCallTile extends StatefulWidget {
   final Map<String, dynamic> row;
 
   const _ToolCallTile({required this.row});
 
   @override
+  State<_ToolCallTile> createState() => _ToolCallTileState();
+}
+
+class _ToolCallTileState extends State<_ToolCallTile> {
+  bool _open = true;
+
+  @override
   Widget build(BuildContext context) {
+    final row = widget.row;
+    final e = EmberColors.of(context);
     final toolName = row['toolName'] as String? ?? 'tool';
     final status = row['status'] as String? ?? '';
     final inputText = row['inputText'] as String? ?? '';
@@ -1889,12 +1924,12 @@ class _ToolCallTile extends StatelessWidget {
     final (icon, color) = switch (status) {
       'running' || 'inputStreaming' || 'pendingApproval' => (
           Icons.hourglass_top,
-          ZColors.running
+          e.run
         ),
-      'success' => (Icons.check, ZColors.success),
-      'error' => (Icons.error_outline, ZColors.danger),
-      'cancelled' => (Icons.block, ZColors.warning),
-      _ => (Icons.build_outlined, ZInk.faint(context)),
+      'success' => (Icons.check, e.ok),
+      'error' => (Icons.error_outline, e.err),
+      'cancelled' => (Icons.block, e.warn),
+      _ => (Icons.build_outlined, e.textFaint),
     };
 
     final images = display is Map &&
@@ -1906,58 +1941,86 @@ class _ToolCallTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 3),
       decoration: BoxDecoration(
-        color: ZInk.tile(context),
-        borderRadius: BorderRadius.circular(12),
+        color: Color.lerp(e.bg, e.card, 0.5),
+        borderRadius: BorderRadius.circular(EmberRadius.control),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ExpansionTile(
-            initiallyExpanded: true,
-            dense: true,
-            tilePadding: const EdgeInsets.only(left: 8, right: 12),
-            leading: Icon(icon, size: 15, color: color),
-            iconColor: ZInk.faint(context),
-            collapsedIconColor: ZInk.faint(context),
-            title: Text(toolName,
-                style: const TextStyle(
-                    fontSize: 12.5, fontFamily: 'monospace')),
-            subtitle: Text(status,
-                style: TextStyle(
-                    fontSize: 10.5, color: ZInk.faint(context))),
-            children: [
-              if (inputText.isNotEmpty) _kv(context, '输入', inputText),
-              if (outputText.isNotEmpty) _kv(context, '输出', outputText),
-              if (error is Map)
-                _kv(context, '错误',
-                    '${error['code'] ?? ''} ${error['message'] ?? ''}'),
-            ],
-          ),
-          if (progress is Map) _ProgressRow(progress: progress),
-          if (diff != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: DiffView(diff: diff),
+          // Status rail mirrors the icon color so the state reads at a
+          // glance even while collapsed.
+          Container(
+            width: 3,
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
             ),
-          for (final image in images)
-            if (image is Map && image['base64'] is String)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(
-                    base64Decode(image['base64'] as String),
-                    fit: BoxFit.contain,
-                    // Cap the decode at viewport width — inline tool
-                    // outputs can embed multi-megapixel renders.
-                    cacheWidth: (MediaQuery.sizeOf(context).width *
-                            MediaQuery.devicePixelRatioOf(context))
-                        .round(),
-                    errorBuilder: (_, __, ___) =>
-                        const SizedBox.shrink(),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _open = !_open),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    child: Row(
+                      children: [
+                        Text(_open ? '▾ ' : '▸ ',
+                            style: TextStyle(
+                                fontSize: EmberType.caption,
+                                color: e.textFaint)),
+                        Icon(icon, size: 12, color: color),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(toolName,
+                              style: TextStyle(
+                                  fontSize: EmberType.caption,
+                                  fontFamily: EmberFonts.term,
+                                  color: e.textFaint),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+                if (_open) ...[
+                  if (inputText.isNotEmpty) _kv(context, '输入', inputText),
+                  if (outputText.isNotEmpty) _kv(context, '输出', outputText),
+                  if (error is Map)
+                    _kv(context, '错误',
+                        '${error['code'] ?? ''} ${error['message'] ?? ''}'),
+                ],
+                if (progress is Map) _ProgressRow(progress: progress),
+                if (diff != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: DiffView(diff: diff),
+                  ),
+                for (final image in images)
+                  if (image is Map && image['base64'] is String)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(
+                          base64Decode(image['base64'] as String),
+                          fit: BoxFit.contain,
+                          // Cap the decode at viewport width — inline tool
+                          // outputs can embed multi-megapixel renders.
+                          cacheWidth: (MediaQuery.sizeOf(context).width *
+                                  MediaQuery.devicePixelRatioOf(context))
+                              .round(),
+                          errorBuilder: (_, __, ___) =>
+                              const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -3754,22 +3817,23 @@ class _InteractionCardState extends State<_InteractionCard> {
         ? '权限请求 · ${payload['toolName'] ?? ''}'
         : '等待你的输入';
 
+    final ember = EmberColors.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 4, 14, 0),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: ZColors.warning.withValues(alpha: 0.1),
+        color: ember.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
         border:
-            Border.all(color: ZColors.warning.withValues(alpha: 0.35)),
+            Border.all(color: ember.primary.withValues(alpha: 0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.privacy_tip_outlined,
-                  size: 14, color: ZColors.warning),
+              Icon(Icons.privacy_tip_outlined,
+                  size: 14, color: ember.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -3807,6 +3871,8 @@ class _InteractionCardState extends State<_InteractionCard> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         minimumSize: Size.zero,
+                        foregroundColor: ember.primary,
+                        side: BorderSide(color: ember.primary),
                       ),
                       onPressed: _busy
                           ? null
