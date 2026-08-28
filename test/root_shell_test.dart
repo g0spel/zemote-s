@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:zemote/protocol/connection_params.dart';
+import 'package:zemote/protocol/conversation.dart';
 import 'package:zemote/protocol/zemote_client.dart';
+import 'package:zemote/ui/chat_page.dart';
 import 'package:zemote/state/account_store.dart';
 import 'package:zemote/state/app_session.dart';
 import 'package:zemote/ui/conversation_list_page.dart';
@@ -267,6 +269,69 @@ void main() {
 
     // 回到对话 Tab 后,back 恢复为系统默认(可退出)。
     expect(shellPopScope().canPop, isTrue);
+  });
+
+  /// 开一条带工作区 bridge 的假链,链完成后对话 Tab 处于"未选会话"态。
+  Future<void> pumpWithBridge(WidgetTester tester) async {
+    await _pumpShell(
+      tester,
+      urls: [_deviceUrl],
+      clientFactory: (params, onLog) => _FakeClient(
+        params,
+        workspaces: [
+          {'workspacePath': '/ws-a', 'label': 'WS'},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle(); // 链完成
+  }
+
+  testWidgets('有 bridge 时对话 Tab 默认渲染会话列表(未选会话)', (tester) async {
+    await pumpWithBridge(tester);
+    expect(find.byType(ConversationListPage), findsOneWidget);
+    expect(find.byType(ChatPage), findsNothing);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('选中会话后对话 Tab 内嵌渲染消息流(无 AppBar,头部回写会话名)',
+      (tester) async {
+    await pumpWithBridge(tester);
+
+    final list = tester.widget<ConversationListPage>(
+      find.byType(ConversationListPage),
+    );
+    list.onPick(SessionEntry({
+      'sessionId': 's1',
+      'title': '修复登录',
+      'lastActivityAt': 1,
+    }));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ConversationListPage), findsNothing);
+    expect(find.byType(ChatPage), findsOneWidget);
+    // embedded 模式:无 Scaffold/AppBar 外壳(壳自身用自定义 _TopBar)。
+    expect(find.byType(AppBar), findsNothing);
+    // 头部会话名来自 onPick 注入的标题。
+    expect(find.text('修复登录'), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('新会话入口进入 draft 模式(输入框可发)', (tester) async {
+    await pumpWithBridge(tester);
+
+    await tester.tap(find.widgetWithText(FloatingActionButton, '新会话'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ConversationListPage), findsNothing);
+    expect(find.byType(ChatPage), findsOneWidget);
+    // draft(sessionId=null):消息流空态 + 可用的输入框。
+    expect(find.text('输入消息开始新会话'), findsOneWidget);
+    final field = tester.widget<TextField>(find.byType(TextField));
+    // TextField.enabled 默认 null(null 即启用),只要不是显式禁用。
+    expect(field.enabled, isNot(false));
+    await _flushPendingTimers(tester);
   });
 }
 

@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
+import '../protocol/conversation.dart';
 import '../protocol/relay_client.dart';
 import '../protocol/zemote_client.dart';
 import '../state/account_store.dart';
@@ -78,6 +80,15 @@ class _RootShellState extends State<RootShell> {
   TaskNotifier? _taskNotifier;
   AppLifecycleListener? _lifecycle;
 
+  /// 对话 Tab 的会话选择:未选会话 = ''(临时列表态,Task 3 抽屉化);
+  /// null = draft 新会话(内嵌 ChatPage sessionId:null,首条消息
+  /// createSession);其余值 = 内嵌会话 id(经 ValueKey 重建)。
+  final ValueNotifier<String?> _activeSessionId = ValueNotifier('');
+
+  /// 头部会话名:null 显示"新会话";由列表条目注入 / ChatPage 的
+  /// onSessionInfo 回写(桌面端生成或重命名标题时)。
+  final ValueNotifier<String?> _activeSessionTitle = ValueNotifier(null);
+
   /// 当前壳已加载/正在加载的设备 id(防止 session 通知重复触发引导链)。
   String? _loadedAccountId;
 
@@ -144,6 +155,7 @@ class _RootShellState extends State<RootShell> {
           _phase = _ConnectPhase.idle;
           _connectError = null;
           _workspaces = const [];
+          _resetSessionState();
         });
         return;
       }
@@ -173,6 +185,7 @@ class _RootShellState extends State<RootShell> {
       _workspaces = const [];
       _activeWorkspace = null;
       _bridge = null;
+      _resetSessionState();
     });
     try {
       final client = await widget.session.connect(account);
@@ -295,6 +308,33 @@ class _RootShellState extends State<RootShell> {
           'workspaceIdentity': workspace['workspaceIdentity'],
       };
 
+  /// 设备切换/断开后会话选择失效:回到未选(列表)态。
+  void _resetSessionState() {
+    _activeSessionId.value = '';
+    _activeSessionTitle.value = null;
+  }
+
+  /// 列表条目点击:内嵌打开该会话(不再 push)。
+  void _pickSession(SessionEntry entry) {
+    setState(() {
+      _activeSessionId.value = entry.sessionId;
+      _activeSessionTitle.value = entry.title.isEmpty ? null : entry.title;
+    });
+  }
+
+  /// 「新会话」:draft 模式,内嵌 ChatPage 首条消息走 createSession。
+  void _newDraftSession() {
+    setState(() {
+      _activeSessionId.value = null;
+      _activeSessionTitle.value = null;
+    });
+  }
+
+  /// 内嵌 ChatPage 回写的标题(桌面端生成/重命名)。
+  void _onSessionInfo(String title) {
+    _activeSessionTitle.value = title;
+  }
+
   void _showDeviceSwitcher() {
     showModalBottomSheet(
       context: context,
@@ -342,6 +382,7 @@ class _RootShellState extends State<RootShell> {
                 account: session.current,
                 workspaceName:
                     workspace == null ? null : workspaceTitle(workspace),
+                sessionTitle: _tab == 0 ? _activeSessionTitle : null,
                 onSwitch: _showDeviceSwitcher,
                 onManageDevices: _openDeviceManagement,
               ),
@@ -374,6 +415,17 @@ class _RootShellState extends State<RootShell> {
           ),
         ),
       ),
+      floatingActionButton:
+          _tab == 0 &&
+              _phase == _ConnectPhase.done &&
+              _bridge != null &&
+              _activeSessionId.value == ''
+          ? FloatingActionButton.extended(
+              onPressed: _newDraftSession,
+              icon: const Icon(Icons.add),
+              label: const Text('新会话'),
+            )
+          : null,
       bottomNavigationBar: NavigationBarTheme(
         data: NavigationBarThemeData(
           backgroundColor: colors.card,
@@ -463,11 +515,27 @@ class _RootShellState extends State<RootShell> {
         return _failedView(colors);
       case _ConnectPhase.done:
         if (bridge != null && workspace != null) {
-          return ConversationListPage(
-            key: ValueKey(workspaceKeyOf(workspace)),
-            bridge: bridge,
+          final sessionId = _activeSessionId.value;
+          // '' = 未选会话:临时列表(Task 3 抽屉化),配「新会话」FAB。
+          if (sessionId != null && sessionId.isEmpty) {
+            return ConversationListPage(
+              key: ValueKey(workspaceKeyOf(workspace)),
+              bridge: bridge,
+              scope: _scopeOf(workspace),
+              workspaceKey: workspaceKeyOf(workspace) ?? '',
+              onPick: _pickSession,
+            );
+          }
+          // 内嵌当前会话(null = draft 新会话,首条消息 createSession)。
+          return ChatPage(
+            key: ValueKey(sessionId),
+            embedded: true,
+            session: bridge,
             scope: _scopeOf(workspace),
             workspaceKey: workspaceKeyOf(workspace) ?? '',
+            sessionId: sessionId,
+            title: _activeSessionTitle.value ?? '新会话',
+            onSessionInfo: _onSessionInfo,
           );
         }
         return _mutedHint('桌面端没有打开的工作区', colors);
@@ -529,16 +597,20 @@ class _RootShellState extends State<RootShell> {
   }
 }
 
-/// 顶栏:设备切换胶囊(头像圆 + 设备名 + ▾)+ 当前工作区名 + 管理设备入口。
+/// 顶栏:设备切换胶囊(头像圆 + 设备名 + ▾)+ 中段信息 + 右侧动作。
+/// 对话 Tab([sessionTitle] 非 null)中段为会话名(null → "新会话")、
+/// 右侧留空占位(模型 pill 是 Task 4);其他 Tab 显示工作区名 + 管理设备。
 class _TopBar extends StatelessWidget {
   final Account? account;
   final String? workspaceName;
+  final ValueListenable<String?>? sessionTitle;
   final VoidCallback onSwitch;
   final VoidCallback onManageDevices;
 
   const _TopBar({
     required this.account,
     required this.workspaceName,
+    this.sessionTitle,
     required this.onSwitch,
     required this.onManageDevices,
   });
@@ -607,18 +679,38 @@ class _TopBar extends StatelessWidget {
             ),
             const SizedBox(width: EmberSpacing.gapM),
             Expanded(
-              child: Text(
-                workspaceName ?? host,
-                style: TextStyle(
-                    fontSize: EmberType.secondary, color: colors.textMuted),
-                overflow: TextOverflow.ellipsis,
+              child: sessionTitle != null
+                  ? ValueListenableBuilder<String?>(
+                      valueListenable: sessionTitle!,
+                      builder: (context, title, _) => Text(
+                        title == null || title.isEmpty
+                            ? '新会话'
+                            : title,
+                        style: TextStyle(
+                          fontSize: EmberType.body,
+                          fontWeight: FontWeight.w600,
+                          color: colors.textSolid,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )
+                  : Text(
+                      workspaceName ?? host,
+                      style: TextStyle(
+                          fontSize: EmberType.secondary,
+                          color: colors.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+            ),
+            // 对话 Tab 右侧为模型 pill 占位(Task 4);其余 Tab 保留管理设备。
+            if (sessionTitle != null)
+              const SizedBox.shrink()
+            else
+              IconButton(
+                icon: const Icon(Icons.devices_other, size: 20),
+                tooltip: '管理设备',
+                onPressed: onManageDevices,
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.devices_other, size: 20),
-              tooltip: '管理设备',
-              onPressed: onManageDevices,
-            ),
           ],
         ),
       ),

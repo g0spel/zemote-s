@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../protocol/conversation.dart';
 import '../protocol/zemote_client.dart';
 import '../state/log_store.dart';
-import 'chat_page.dart';
 import 'theme.dart';
 
 /// Conversation list for one workspace (Ember shell Tab content, no
@@ -16,11 +15,15 @@ class ConversationListPage extends StatefulWidget {
   final Map<String, dynamic> scope;
   final String workspaceKey;
 
+  /// 条目点击上抛(宿主内嵌打开会话;2b 起 push 已移除)。
+  final void Function(SessionEntry entry) onPick;
+
   const ConversationListPage({
     super.key,
     required this.bridge,
     required this.scope,
     required this.workspaceKey,
+    required this.onPick,
   });
 
   @override
@@ -113,20 +116,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
     });
   }
 
-  void _open(SessionEntry entry) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatPage(
-          session: widget.bridge,
-          scope: widget.scope,
-          workspaceKey: widget.workspaceKey,
-          sessionId: entry.sessionId,
-          title: entry.title.isEmpty ? entry.sessionId : entry.title,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
@@ -176,7 +165,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     final dot = statusDotColor(entry.phase);
     final preview = entry.lastAssistantPreview ?? '';
     return InkWell(
-      onTap: () => _open(entry),
+      onTap: () => widget.onPick(entry),
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: EmberSpacing.cardPad, vertical: 10),

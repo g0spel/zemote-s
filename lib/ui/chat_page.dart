@@ -23,6 +23,17 @@ class ChatPage extends StatefulWidget {
   final String? sessionId;
   final String title;
 
+  /// Embedded mode (Ember conversations tab): no Scaffold/AppBar shell —
+  /// the host renders its own header, this widget outputs the message
+  /// stream + banners + composer directly. Pushed usages (automation run
+  /// history) keep the Scaffold chrome.
+  final bool embedded;
+
+  /// Embedded title push: fires whenever the desktop's title for this
+  /// session changes (created/renamed — esp. right after a draft's
+  /// createSession). Never fires in Scaffold mode.
+  final ValueChanged<String>? onSessionInfo;
+
   const ChatPage({
     super.key,
     required this.session,
@@ -30,6 +41,8 @@ class ChatPage extends StatefulWidget {
     required this.workspaceKey,
     this.sessionId,
     required this.title,
+    this.embedded = false,
+    this.onSessionInfo,
   });
 
   @override
@@ -114,6 +127,12 @@ class _ChatPageState extends State<ChatPage> {
   List<SkillEntry> _skills = [];
   bool _skillsLoading = false;
 
+  /// Live sessions-index watch driving [ChatPage.onSessionInfo]; only
+  /// mounted in embedded mode. The desktop generates/renames titles
+  /// asynchronously, so the host header needs pushes when it changes.
+  SessionsIndexSubscription? _titleSub;
+  String? _pushedTitle;
+
   /// Draft-mode (no session yet) model/mode/thought selection, passed as
   /// `config` to createSession on first send.
   final Map<String, String> _draftConfig = {};
@@ -134,6 +153,9 @@ class _ChatPageState extends State<ChatPage> {
       _subscribe();
     }
     _loadPrep();
+    if (widget.onSessionInfo != null) {
+      _watchSessionTitle();
+    }
     _inputController.addListener(() {
       final text = _inputController.text;
       final show = (text.startsWith('/') || text.startsWith('\$')) &&
@@ -169,9 +191,41 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _subscription?.dispose();
+    final titleSub = _titleSub;
+    _titleSub = null;
+    if (titleSub != null) {
+      titleSub.state.removeListener(_pushSessionTitle);
+      titleSub.dispose();
+    }
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _watchSessionTitle() async {
+    try {
+      final sub = await _transport.subscribeSessionsIndex();
+      if (!mounted) {
+        await sub.dispose();
+        return;
+      }
+      _titleSub = sub;
+      sub.state.addListener(_pushSessionTitle);
+      _pushSessionTitle();
+    } catch (_) {
+      // Title is header cosmetics only — on failure keep the placeholder.
+    }
+  }
+
+  void _pushSessionTitle() {
+    final sub = _titleSub;
+    final sessionId = _sessionId;
+    if (sub == null || sessionId == null || !mounted) return;
+    final title = sub.state.sessions[sessionId]?.title ?? '';
+    if (title.isNotEmpty && title != _pushedTitle) {
+      _pushedTitle = title;
+      widget.onSessionInfo!(title);
+    }
   }
 
   Future<void> _subscribe() async {
@@ -730,6 +784,8 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final state = _state;
+    final body = _content(context, state);
+    if (widget.embedded) return body;
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -803,7 +859,13 @@ class _ChatPageState extends State<ChatPage> {
             ),
         ],
       ),
-      body: Column(
+      body: body,
+    );
+  }
+
+  /// 消息流 + 横幅组 + 输入区。embedded(对话 Tab 内嵌)直接输出,
+  /// 不包 Scaffold/AppBar 外壳。
+  Widget _content(BuildContext context, ConversationState? state) => Column(
         children: [
           if (_error != null)
             Material(
@@ -993,9 +1055,7 @@ class _ChatPageState extends State<ChatPage> {
             onSkills: _openSkillsPicker,
           ),
         ],
-      ),
-    );
-  }
+      );
 }
 
 // ---------------------------------------------------------------- rows
