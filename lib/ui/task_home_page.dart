@@ -6,6 +6,7 @@ import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
 import '../protocol/zemote_client.dart';
 import '../state/log_store.dart';
+import '../state/session_list_cache.dart';
 import 'channel_explorer_page.dart';
 import 'chat_page.dart';
 import 'log_page.dart';
@@ -82,12 +83,17 @@ class _TaskHomePageState extends State<TaskHomePage>
 
   String get _workspaceKey => workspaceKeyOf(widget.workspace) ?? '';
 
+  /// Per-workspace cache for instant list display before the live data
+  /// lands (write-through on successful channel loads only).
+  static const SessionListCache _listCache = SessionListCache();
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _convTransport = widget.session.conversation(_scope, onLog: log);
     _subscribeSessionsIndex();
+    _hydrateFromCache();
     _updatedSub = widget.client.workspaceListUpdated.listen((result) {
       if (!mounted || result is! Map) return;
       final tasks = result['tasks'];
@@ -187,28 +193,39 @@ class _TaskHomePageState extends State<TaskHomePage>
     });
   }
 
+  /// Seeds the list from the last successful load while live data is in
+  /// flight — the page opens with content instead of a spinner.
+  Future<void> _hydrateFromCache() async {
+    final cached = await _listCache.read(widget.workspace);
+    if (!mounted || cached.isEmpty || _tasks.isNotEmpty) return;
+    setState(() {
+      _tasks = cached;
+      _loading = _tasks.isEmpty;
+    });
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final results = await Future.wait([
-        widget.session.channels
-            .call(Channels.zcodeTask, 'listTasks', [_scope])
-            .catchError((Object _) => const []),
-        widget.session.channels
-            .call(Channels.zcodeTask, 'listPinnedTasks', [_scope])
-            .catchError((Object _) => const []),
-        widget.session.channels
-            .call(Channels.zcodeTask, 'listArchivedTasks', [_scope])
-            .catchError((Object _) => const []),
-      ]);
+      // Channel failures must NOT wipe the list: a failed listTasks with a
+      // not-yet-ready sessions-index would blank the page (the merge keeps
+      // channel tasks the index hasn't reported yet). Each call reports
+      // [ok, data]; on failure the previous list is kept.
+      Future<(bool, dynamic)> call(String method) => widget.session.channels
+          .call(Channels.zcodeTask, method, [_scope])
+          .then((r) => (true, r))
+          .catchError((Object _) => (false, const <dynamic>[]));
+      final (tasksOk, tasksData) = await call('listTasks');
+      final (pinnedOk, pinnedData) = await call('listPinnedTasks');
+      final (archivedOk, archivedData) = await call('listArchivedTasks');
       if (!mounted) return;
       setState(() {
-        _tasks = results[0] is List ? results[0] : const [];
-        _pinned = results[1] is List ? results[1] : const [];
-        _archived = results[2] is List ? results[2] : const [];
+        if (tasksOk && tasksData is List) _tasks = tasksData;
+        if (pinnedOk && pinnedData is List) _pinned = pinnedData;
+        if (archivedOk && archivedData is List) _archived = archivedData;
         _archivedIds
           ..clear()
           ..addAll([
@@ -216,6 +233,20 @@ class _TaskHomePageState extends State<TaskHomePage>
               if (t is Map && t['taskId'] != null) '${t['taskId']}',
           ]);
         _loading = false;
+        if (tasksOk && tasksData is List && tasksData.isNotEmpty) {
+          _listCache.write(widget.workspace,
+              tasksData.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList());
+        }
+        if (!tasksOk) {
+          // listTasks died: keep showing the live sessions-index merge and
+          // surface why the channel list is stale.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _mergeSessions();
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('任务列表 RPC 失败，显示会话索引数据')));
+          });
+        }
       });
     } catch (e) {
       if (!mounted) return;
