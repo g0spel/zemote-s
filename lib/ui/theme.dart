@@ -418,3 +418,33 @@ class EmberColors {
   Color get textMuted => isDark ? _dMuted : _lMuted;
   Color get textFaint => isDark ? _dFaint : _lFaint;
 }
+
+/// 圆角双轨(spec §4):内容区大圆角、控制区小圆角。
+abstract final class EmberRadius {
+  static const content = 16.0;   // 气泡/卡片
+  static const bubbleTail = 4.0; // 气泡尾角
+  static const sheet = 20.0;     // sheet 顶部
+  static const control = 10.0;   // 任务卡/设置行组/按钮
+  static const avatar = 8.0;     // 缩略图/头像
+}
+
+/// 4px 网格间距(spec §4)。
+abstract final class EmberSpacing {
+  static const page = 16.0;
+  static const cardPad = 12.0;
+  static const listItemH = 12.0;
+  static const listItemV = 8.0;
+  static const gapS = 8.0;
+  static const gapM = 12.0;
+}
+
+/// 六档字阶 + 行高(spec §3)。
+abstract final class EmberType {
+  static const title = 22.0;
+  static const section = 17.0;
+  static const emphasis = 15.0;
+  static const body = 13.0;
+  static const secondary = 12.0;
+  static const caption = 11.0;
+  static const lineHeight = 1.5;
+}

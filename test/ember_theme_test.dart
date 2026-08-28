@@ -52,4 +52,35 @@ void main() {
       expect(captured.bg, const Color(0xFFF7F3EC));
     });
   });
+
+  group('Ember tokens', () {
+    test('radius dual-track matches spec', () {
+      expect(EmberRadius.content, 16.0);
+      expect(EmberRadius.bubbleTail, 4.0);
+      expect(EmberRadius.sheet, 20.0);
+      expect(EmberRadius.control, 10.0);
+      expect(EmberRadius.avatar, 8.0);
+    });
+
+    test('spacing grid is 4px-aligned', () {
+      expect(EmberSpacing.page, 16.0);
+      expect(EmberSpacing.cardPad, 12.0);
+      expect(EmberSpacing.gapS, 8.0);
+      expect(EmberSpacing.gapM, 12.0);
+      for (final v in [EmberSpacing.page, EmberSpacing.cardPad,
+        EmberSpacing.listItemV, EmberSpacing.listItemH,
+        EmberSpacing.gapS, EmberSpacing.gapM]) {
+        expect(v % 4, 0, reason: '4px 网格对齐');
+      }
+    });
+
+    test('type scale matches spec', () {
+      expect(EmberType.title, 22.0);
+      expect(EmberType.section, 17.0);
+      expect(EmberType.emphasis, 15.0);
+      expect(EmberType.body, 13.0);
+      expect(EmberType.secondary, 12.0);
+      expect(EmberType.caption, 11.0);
+    });
+  });
 }
