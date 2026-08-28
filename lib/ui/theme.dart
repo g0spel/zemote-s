@@ -161,6 +161,7 @@ ThemeData buildDarkTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
+    fontFamily: EmberFonts.ui,
     colorScheme: scheme,
     scaffoldBackgroundColor: ZColors.darkBg,
     appBarTheme: const AppBarTheme(
@@ -171,6 +172,7 @@ ThemeData buildDarkTheme() {
       titleTextStyle: TextStyle(
         fontSize: 17,
         fontWeight: FontWeight.w600,
+        fontFamily: EmberFonts.ui,
         color: Colors.white,
       ),
       iconTheme: IconThemeData(color: Colors.white70),
@@ -201,7 +203,8 @@ ThemeData buildDarkTheme() {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: ZColors.primary, width: 1.5),
       ),
-      hintStyle: const TextStyle(color: Colors.white30, fontSize: 14),
+      hintStyle: const TextStyle(
+          color: Colors.white30, fontSize: 14, fontFamily: EmberFonts.ui),
     ),
     dividerTheme: const DividerThemeData(
       color: ZColors.darkBorder,
@@ -211,7 +214,8 @@ ThemeData buildDarkTheme() {
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: ZColors.darkCard,
-      contentTextStyle: const TextStyle(color: Colors.white),
+      contentTextStyle:
+          const TextStyle(color: Colors.white, fontFamily: EmberFonts.ui),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
     bottomSheetTheme: const BottomSheetThemeData(
@@ -252,6 +256,7 @@ ThemeData buildLightTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
+    fontFamily: EmberFonts.ui,
     colorScheme: scheme,
     scaffoldBackgroundColor: ZColors.lightBg,
     appBarTheme: const AppBarTheme(
@@ -262,6 +267,7 @@ ThemeData buildLightTheme() {
       titleTextStyle: TextStyle(
         fontSize: 17,
         fontWeight: FontWeight.w600,
+        fontFamily: EmberFonts.ui,
         color: Color(0xFF0F172A),
       ),
       iconTheme: IconThemeData(color: Color(0xFF475569)),
@@ -292,7 +298,8 @@ ThemeData buildLightTheme() {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: ZColors.primary, width: 1.5),
       ),
-      hintStyle: const TextStyle(color: Colors.black26, fontSize: 14),
+      hintStyle: const TextStyle(
+          color: Colors.black26, fontSize: 14, fontFamily: EmberFonts.ui),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
@@ -369,4 +376,88 @@ String relativeTime(int? millis) {
   if (diff.inDays < 30) return '${diff.inDays}天前';
   return '${time.year}-${time.month.toString().padLeft(2, '0')}-'
       '${time.day.toString().padLeft(2, '0')}';
+}
+
+/// Ember 设计语言色板单一来源(spec §2)。后续界面统一经此类取色;
+/// ZInk 保留为兼容层,逐步迁移后移除。
+class EmberColors {
+  final bool isDark;
+  const EmberColors._(this.isDark);
+  const EmberColors.dark() : this._(true);
+  const EmberColors.light() : this._(false);
+
+  static EmberColors of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.light
+          ? const EmberColors.light()
+          : const EmberColors.dark();
+
+  // 暗色(设计基准)
+  static const _dBg = Color(0xFF1B1917);
+  static const _dCard = Color(0xFF262320);
+  static const _dRaise = Color(0xFF35302B);
+  static const _dHairline = Color(0xFF3A342E);
+  static const _dSolid = Color(0xFFEEE7DC);
+  static const _dSoft = Color(0xFFC9BFAF);
+  static const _dMuted = Color(0xFF8A8074);
+  static const _dFaint = Color(0xFF5C554B);
+
+  // 浅色(暖纸白)
+  static const _lBg = Color(0xFFF7F3EC);
+  static const _lCard = Color(0xFFFFFFFF);
+  static const _lRaise = Color(0xFFEFE9DF);
+  static const _lPrimary = Color(0xFFC25E3A);
+  static const _lSolid = Color(0xFF2A241E);
+  static const _lSoft = Color(0xFF4A4238);
+  static const _lMuted = Color(0xFF786D5E);
+  static const _lFaint = Color(0xFFA69B8C);
+
+  Color get bg => isDark ? _dBg : _lBg;
+  Color get card => isDark ? _dCard : _lCard;
+  Color get raise => isDark ? _dRaise : _lRaise;
+  Color get hairline => isDark ? _dHairline : const Color(0xFFE2D9CC);
+  Color get primary => isDark ? const Color(0xFFD97757) : _lPrimary;
+  Color get ok => isDark ? const Color(0xFF7FB069) : const Color(0xFF5A8C46);
+  Color get err => isDark ? const Color(0xFFE5484D) : const Color(0xFFC53035);
+  Color get warn => isDark ? const Color(0xFFD4A72C) : const Color(0xFFA8851F);
+  Color get run => isDark ? const Color(0xFF6A9BD8) : const Color(0xFF4A7BB5);
+  Color get textSolid => isDark ? _dSolid : _lSolid;
+  Color get textSoft => isDark ? _dSoft : _lSoft;
+  Color get textMuted => isDark ? _dMuted : _lMuted;
+  Color get textFaint => isDark ? _dFaint : _lFaint;
+}
+
+/// 圆角双轨(spec §4):内容区大圆角、控制区小圆角。
+abstract final class EmberRadius {
+  static const content = 16.0;   // 气泡/卡片
+  static const bubbleTail = 4.0; // 气泡尾角
+  static const sheet = 20.0;     // sheet 顶部
+  static const control = 10.0;   // 任务卡/设置行组/按钮
+  static const avatar = 8.0;     // 缩略图/头像
+}
+
+/// 4px 网格间距(spec §4)。
+abstract final class EmberSpacing {
+  static const page = 16.0;
+  static const cardPad = 12.0;
+  static const listItemH = 12.0;
+  static const listItemV = 8.0;
+  static const gapS = 8.0;
+  static const gapM = 12.0;
+}
+
+/// 六档字阶 + 行高(spec §3)。
+abstract final class EmberType {
+  static const title = 22.0;
+  static const section = 17.0;
+  static const emphasis = 15.0;
+  static const body = 13.0;
+  static const secondary = 12.0;
+  static const caption = 11.0;
+  static const lineHeight = 1.5;
+}
+
+/// 字体族单一来源:UI 正文用 Sarasa UI,等宽/代码用 Sarasa Term。
+abstract final class EmberFonts {
+  static const ui = 'Sarasa UI SC';
+  static const term = 'Sarasa Term SC';
 }
