@@ -10,7 +10,7 @@ import 'state/account_store.dart';
 import 'state/app_session.dart';
 import 'state/crash_report.dart';
 import 'state/log_store.dart';
-import 'ui/accounts_page.dart';
+import 'ui/root_shell.dart';
 import 'ui/theme.dart';
 import 'ui/ui_settings.dart';
 import 'update/update_checker.dart';
@@ -101,7 +101,7 @@ class _ZemoteAppState extends State<ZemoteApp> {
             theme: buildLightTheme(),
             darkTheme: buildDarkTheme(),
             themeMode: _theme.mode,
-            home: AccountsPage(store: _store, session: _session),
+            home: RootShell(store: _store, session: _session),
             builder: (context, child) => MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 textScaler:

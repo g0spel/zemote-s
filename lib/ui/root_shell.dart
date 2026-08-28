@@ -12,6 +12,7 @@ import 'automation_page.dart';
 import 'chat_page.dart';
 import 'conversation_list_page.dart';
 import 'delayed_banner.dart';
+import 'device_management_page.dart';
 import 'settings_page.dart';
 import 'theme.dart';
 
@@ -73,14 +74,26 @@ class _RootShellState extends State<RootShell> {
   List<dynamic> _workspaces = const [];
   Map<String, dynamic>? _activeWorkspace;
   BridgeSession? _bridge;
-  bool _bridgeOpening = false;
   StreamSubscription? _updatedSub;
   TaskNotifier? _taskNotifier;
   AppLifecycleListener? _lifecycle;
 
   /// 当前壳已加载/正在加载的设备 id(防止 session 通知重复触发引导链)。
   String? _loadedAccountId;
-  bool _chainInFlight = false;
+
+  /// 上一次见到的激活设备 id:session 通知不带增量,靠它识别"激活设备换人了"
+  /// (开链)与"设备消失"(断开重置)。connect 进行中的同步通知 current 尚未
+  /// 变化,不会被误判成新切换。
+  String? _lastSeenCurrentId;
+
+  /// Monotonic chain generation: every bootstrap chain captures its own
+  /// generation and may only commit shell state while it is still the
+  /// newest one. A switch (or an external disconnect) bumps the counter,
+  /// which invalidates all in-flight chains instead of dropping their
+  /// requests — the last requested device always ends up on screen.
+  int _chainGeneration = 0;
+
+  bool _isCurrentChain(int gen) => mounted && gen == _chainGeneration;
 
   @override
   void initState() {
@@ -111,25 +124,50 @@ class _RootShellState extends State<RootShell> {
     if (mounted) setState(() {});
   }
 
-  /// Active device changed (auto-connect finished, or a sheet switch):
-  /// bootstrap the shell for the new device.
+  /// Session notifications: a new active device starts its bootstrap chain
+  /// (never dropped — generation invalidation supersedes in-flight chains);
+  /// a vanished active device (kicked / disconnected externally) resets the
+  /// shell to the disconnected state instead of showing stale content.
   void _onSessionChanged() {
     if (!mounted) return;
-    setState(() {});
     final account = widget.session.current;
-    if (account != null && account.id != _loadedAccountId) {
-      _openAccount(account);
+    final prevId = _lastSeenCurrentId;
+    _lastSeenCurrentId = account?.id;
+    if (account == null) {
+      if (prevId != null) {
+        // Had an active device, now none: kicked or disconnected externally.
+        _chainGeneration++;
+        _loadedAccountId = null;
+        _teardownDeviceState();
+        setState(() {
+          _tab = 0;
+          _phase = _ConnectPhase.idle;
+          _connectError = null;
+          _workspaces = const [];
+        });
+        return;
+      }
+      setState(() {});
+      return;
     }
+    final changed = prevId != account.id;
+    if (changed && account.id != _loadedAccountId) {
+      _openAccount(account);
+      return;
+    }
+    setState(() {});
   }
 
   /// Connect (or reuse) [account]'s device, then bootstrap workspaces and
-  /// auto-open the first one. Runs at most once at a time.
+  /// auto-open the first one. Chains may overlap; only the newest
+  /// generation commits state, so a mid-flight switch always lands on the
+  /// device the user asked for last.
   Future<void> _openAccount(Account account) async {
-    if (_chainInFlight) return;
-    _chainInFlight = true;
+    final gen = ++_chainGeneration;
     _loadedAccountId = account.id;
     _teardownDeviceState();
     setState(() {
+      _tab = 0;
       _phase = _ConnectPhase.connecting;
       _connectError = null;
       _workspaces = const [];
@@ -138,30 +176,29 @@ class _RootShellState extends State<RootShell> {
     });
     try {
       final client = await widget.session.connect(account);
-      if (!mounted) return;
+      if (!_isCurrentChain(gen)) return;
       _resubscribe(client);
       final bootstrap = await client.bootstrap();
-      if (!mounted) return;
+      if (!_isCurrentChain(gen)) return;
       final list = bootstrap['workspaces'];
       setState(() => _workspaces = list is List ? list : const []);
       // Auto-open a workspace (web mobile flow): the only one, else the first.
       for (final w in _workspaces) {
         if (w is Map) {
-          await _openWorkspace(w.cast<String, dynamic>());
+          await _openWorkspace(w.cast<String, dynamic>(), gen);
           break;
         }
       }
-      if (!mounted) return;
+      if (!_isCurrentChain(gen)) return;
       setState(() => _phase = _ConnectPhase.done);
     } catch (e) {
+      // A superseded chain failing must not clobber the newer chain's UI.
+      if (!_isCurrentChain(gen)) return;
       _loadedAccountId = null;
-      if (!mounted) return;
       setState(() {
         _phase = _ConnectPhase.failed;
         _connectError = '$e';
       });
-    } finally {
-      _chainInFlight = false;
     }
   }
 
@@ -184,26 +221,23 @@ class _RootShellState extends State<RootShell> {
     });
   }
 
-  Future<void> _openWorkspace(Map<String, dynamic> workspace) async {
+  Future<void> _openWorkspace(Map<String, dynamic> workspace, int gen) async {
     final key = workspaceKeyOf(workspace);
     final client = widget.session.client;
-    if (key == null || client == null || _bridgeOpening) return;
-    setState(() => _bridgeOpening = true);
+    if (key == null || client == null || !_isCurrentChain(gen)) return;
     try {
       final session = await client.openBridge(key);
-      if (!mounted) {
+      if (!_isCurrentChain(gen)) {
         session.dispose();
         return;
       }
       setState(() {
         _bridge = session;
         _activeWorkspace = workspace;
-        _bridgeOpening = false;
       });
       _startTaskNotifier(session, workspace);
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _bridgeOpening = false);
+      if (!mounted || !_isCurrentChain(gen)) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('打开工作区失败: $e')));
     }
@@ -298,10 +332,11 @@ class _RootShellState extends State<RootShell> {
     if (account != null) _openAccount(account);
   }
 
+  /// Settings entry: drop the active device's connection. The shell stays
+  /// mounted (it is the app home) and shows the disconnected state.
   void _disconnectCurrent() {
     final account = widget.session.current;
     if (account != null) widget.session.disconnect(account.id);
-    Navigator.of(context).pop();
   }
 
   @override
@@ -332,6 +367,7 @@ class _RootShellState extends State<RootShell> {
                 workspaceName:
                     workspace == null ? null : workspaceTitle(workspace),
                 onSwitch: _showDeviceSwitcher,
+                onManageDevices: _openDeviceManagement,
               ),
               if (session.client != null)
                 _ConnectionBanner(client: session.client!),
@@ -351,6 +387,8 @@ class _RootShellState extends State<RootShell> {
                   _ => SettingsPage(
                       client: session.client,
                       bridge: bridge,
+                      store: widget.store,
+                      session: session,
                       onDisconnect: _disconnectCurrent,
                       themeController: ThemeControllerProvider.of(context),
                     ),
@@ -410,56 +448,43 @@ class _RootShellState extends State<RootShell> {
     );
   }
 
+  /// 设备管理页(home 挂载下 push,无可 pop 回的设备页)。
+  void _openDeviceManagement() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DeviceManagementPage(
+          store: widget.store,
+          session: widget.session,
+        ),
+      ),
+    );
+  }
+
   Widget _conversationsTab(BuildContext context, BridgeSession? bridge) {
     final colors = EmberColors.of(context);
     final session = widget.session;
     final workspace = _activeWorkspace;
-    if (session.current == null && widget.store.accounts.isEmpty) {
-      return _EmptyDevices(onAddDevice: () => Navigator.of(context).pop());
+    final account = session.current;
+    if (account == null) {
+      // 设备缺席的三种形态:没设备(引导添加)/首次连接进行中(转圈)/
+      // 连接失败(重试)/曾连上后被挤下线或断开(断开态守卫)。
+      if (widget.store.accounts.isEmpty) {
+        return _EmptyDevices(onAddDevice: _openDeviceManagement);
+      }
+      switch (_phase) {
+        case _ConnectPhase.connecting:
+          return _connectingView(colors);
+        case _ConnectPhase.failed:
+          return _failedView(colors);
+        default:
+          return _DisconnectedView(onRetry: _retryConnect);
+      }
     }
     switch (_phase) {
       case _ConnectPhase.connecting:
-      case _ConnectPhase.idle when _bridgeOpening:
-        return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(height: EmberSpacing.gapM),
-              Text('连接设备中…',
-                  style: TextStyle(
-                      fontSize: EmberType.caption, color: colors.textMuted)),
-            ],
-          ),
-        );
+        return _connectingView(colors);
       case _ConnectPhase.failed:
-        return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: EmberSpacing.page),
-                child: Text(
-                  '连接失败: ${_connectError ?? ''}',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: EmberType.caption, color: colors.err),
-                ),
-              ),
-              const SizedBox(height: EmberSpacing.gapM),
-              TextButton(
-                onPressed: _retryConnect,
-                style: TextButton.styleFrom(foregroundColor: colors.primary),
-                child: const Text('重试'),
-              ),
-            ],
-          ),
-        );
+        return _failedView(colors);
       case _ConnectPhase.done:
         if (bridge != null && workspace != null) {
           return ConversationListPage(
@@ -475,6 +500,50 @@ class _RootShellState extends State<RootShell> {
     }
   }
 
+  Widget _connectingView(EmberColors colors) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(height: EmberSpacing.gapM),
+          Text('连接设备中…',
+              style: TextStyle(
+                  fontSize: EmberType.caption, color: colors.textMuted)),
+        ],
+      ),
+    );
+  }
+
+  Widget _failedView(EmberColors colors) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: EmberSpacing.page),
+            child: Text(
+              '连接失败: ${_connectError ?? ''}',
+              textAlign: TextAlign.center,
+              style:
+                  TextStyle(fontSize: EmberType.caption, color: colors.err),
+            ),
+          ),
+          const SizedBox(height: EmberSpacing.gapM),
+          TextButton(
+            onPressed: _retryConnect,
+            style: TextButton.styleFrom(foregroundColor: colors.primary),
+            child: const Text('重试'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _mutedHint(String text, EmberColors colors) {
     return Center(
       child: Text(text,
@@ -484,16 +553,18 @@ class _RootShellState extends State<RootShell> {
   }
 }
 
-/// 顶栏:设备切换胶囊(头像圆 + 设备名 + ▾)+ 当前工作区名。
+/// 顶栏:设备切换胶囊(头像圆 + 设备名 + ▾)+ 当前工作区名 + 管理设备入口。
 class _TopBar extends StatelessWidget {
   final Account? account;
   final String? workspaceName;
   final VoidCallback onSwitch;
+  final VoidCallback onManageDevices;
 
   const _TopBar({
     required this.account,
     required this.workspaceName,
     required this.onSwitch,
+    required this.onManageDevices,
   });
 
   @override
@@ -567,6 +638,11 @@ class _TopBar extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            IconButton(
+              icon: const Icon(Icons.devices_other, size: 20),
+              tooltip: '管理设备',
+              onPressed: onManageDevices,
+            ),
           ],
         ),
       ),
@@ -619,6 +695,48 @@ class _EmptyDevices extends StatelessWidget {
               onPressed: onAddDevice,
               icon: const Icon(Icons.add, size: 18),
               label: const Text('添加设备'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 断开态守卫:激活设备被挤下线/断开后的空态页(壳常驻 home,无设备页可退)。
+class _DisconnectedView extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _DisconnectedView({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.link_off, size: 44, color: colors.textFaint),
+            const SizedBox(height: EmberSpacing.gapM),
+            Text('当前设备已断开连接',
+                style: TextStyle(
+                    fontSize: EmberType.section,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textSolid)),
+            const SizedBox(height: EmberSpacing.gapS),
+            Text('设备可能已被其他终端挤下线，或连接已断开',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: EmberType.caption,
+                    color: colors.textFaint,
+                    height: EmberType.lineHeight)),
+            const SizedBox(height: EmberSpacing.gapM),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重新连接'),
             ),
           ],
         ),

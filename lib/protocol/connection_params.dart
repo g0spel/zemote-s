@@ -71,6 +71,6 @@ class ZemoteConnectionParams {
 
   /// Whether the source points at the official ZCode relay host. Devices on
   /// other hosts receive every message the user sends, so the UI warns
-  /// before saving them (see `accounts_page.dart`).
+  /// before saving them (see `device_management_page.dart`).
   bool get isOfficialHost => source.host.toLowerCase() == 'zcode.z.ai';
 }

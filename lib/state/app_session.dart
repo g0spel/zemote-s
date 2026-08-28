@@ -1,8 +1,14 @@
 import 'package:flutter/foundation.dart';
 
+import '../protocol/connection_params.dart';
 import '../protocol/zemote_client.dart';
 import '../state/log_store.dart';
 import 'account_store.dart';
+
+/// Creates the [ZemoteClient] for one device. Production builds the real
+/// relay client; tests inject fakes through [AppSession.clientFactory].
+typedef ZemoteClientFactory = ZemoteClient Function(
+    ZemoteConnectionParams params, void Function(String line)? onLog);
 
 /// Translates low-level connect failures into an actionable Chinese
 /// explanation shown in the device list. Unknown reasons pass through.
@@ -40,8 +46,9 @@ String describeConnectFailure(Object e) {
 
 /// Manages connections to multiple devices simultaneously. Each account can
 /// have an independent live connection; exactly one is "active" and drives
-/// the MainShell view. Switching to an already-connected device does not
-/// reconnect.
+/// the RootShell view. Switching to an already-connected device does not
+/// reconnect, and the last connect/switch request always wins activation —
+/// a slow in-flight connect never yanks the active device back.
 class AppSession extends ChangeNotifier {
   final Map<String, ZemoteClient> _connections = {};
   final Set<String> _connecting = {};
@@ -49,7 +56,17 @@ class AppSession extends ChangeNotifier {
   String? _activeId;
   Account? _activeAccount;
 
-  /// Currently active device client (drives MainShell).
+  /// Monotonic activation-intent counter: every request that wants a device
+  /// active (connect/switchTo/_activate) bumps it. A slow in-flight connect
+  /// whose epoch is no longer current must not steal activation back after
+  /// the user switched to another device — the last request wins.
+  int _activationEpoch = 0;
+
+  final ZemoteClientFactory? clientFactory;
+
+  AppSession({@visibleForTesting this.clientFactory});
+
+  /// Currently active device client (drives the shell).
   ZemoteClient? get client => _connections[_activeId];
 
   /// Currently active device account.
@@ -71,7 +88,9 @@ class AppSession extends ChangeNotifier {
   bool get connectingAny => _connecting.isNotEmpty;
 
   /// Ensure [account] is connected and make it active. Reuses an existing
-  /// live connection; otherwise establishes a new one.
+  /// live connection; otherwise establishes a new one. If the user switched
+  /// to another device while this connect was in flight, the device is added
+  /// to the pool silently (stays connected) without stealing activation.
   Future<ZemoteClient> connect(Account account) async {
     final existing = _connections[account.id];
     if (existing != null) {
@@ -81,6 +100,7 @@ class AppSession extends ChangeNotifier {
     _connecting.add(account.id);
     _errors.remove(account.id);
     notifyListeners();
+    final epoch = ++_activationEpoch;
     final params = account.params;
     if (params == null) {
       _connecting.remove(account.id);
@@ -88,12 +108,22 @@ class AppSession extends ChangeNotifier {
       notifyListeners();
       throw StateError(_errors[account.id]!);
     }
-    final c = ZemoteClient(params, onLog: log);
+    final factory = clientFactory;
+    final c = factory != null
+        ? factory(params, log)
+        : ZemoteClient(params, onLog: log);
     try {
       await c.connect();
       await c.waitPaired(timeout: const Duration(seconds: 90));
       _connections[account.id] = c;
-      _activate(account);
+      if (epoch == _activationEpoch) {
+        _activate(account);
+      } else {
+        // A newer connect/switchTo superseded this one; still connected in
+        // the background, just not active.
+        _connecting.remove(account.id);
+        notifyListeners();
+      }
       return c;
     } catch (e, st) {
       _connecting.remove(account.id);
@@ -115,6 +145,7 @@ class AppSession extends ChangeNotifier {
   }
 
   void _activate(Account account) {
+    _activationEpoch++;
     _activeId = account.id;
     _activeAccount = account;
     _connecting.remove(account.id);
@@ -122,8 +153,10 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Disconnect a single device.
+  /// Disconnect a single device. Bumps the activation epoch so an in-flight
+  /// connect for this device cannot re-activate it after the disconnect.
   Future<void> disconnect(String accountId) async {
+    _activationEpoch++;
     final conn = _connections.remove(accountId);
     _connecting.remove(accountId);
     _errors.remove(accountId);
@@ -137,6 +170,7 @@ class AppSession extends ChangeNotifier {
 
   /// Disconnect everything.
   Future<void> disconnectAll() async {
+    _activationEpoch++;
     final all = _connections.values.toList();
     _connections.clear();
     _connecting.clear();
