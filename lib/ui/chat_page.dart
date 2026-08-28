@@ -177,7 +177,7 @@ class _ChatPageState extends State<ChatPage> {
       final prep = await _transport.prepareWorkspace();
       if (mounted) setState(() => _prep = prep);
     } catch (_) {}
-    setState(() => _skillsLoading = true);
+    if (mounted) setState(() => _skillsLoading = true);
     try {
       final skills = await _transport.skills();
       if (mounted) setState(() => _skills = skills);
@@ -226,6 +226,14 @@ class _ChatPageState extends State<ChatPage> {
       _pushedTitle = title;
       widget.onSessionInfo!(title);
     }
+  }
+
+  /// Draft 首条消息创建会话后的采纳。索引推送(含桌面端生成的标题)可能
+  /// 先于 createSession 返回到达——监听器此刻读到的 _sessionId 还是
+  /// null,之后不会再触发;采纳后必须补跑一次标题推送。
+  void _adoptCreatedSession(String sessionId) {
+    _sessionId = sessionId;
+    _pushSessionTitle();
   }
 
   Future<void> _subscribe() async {
@@ -478,7 +486,7 @@ class _ChatPageState extends State<ChatPage> {
           return;
         }
         log('[chat] createSession ok in ${sw.elapsedMilliseconds}ms');
-        _sessionId = sessionId;
+        _adoptCreatedSession(sessionId);
         // 2) subscribe in the background — must NOT block sending
         setState(() => _progress = null);
         if (canUseFirstInput) {
