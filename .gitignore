@@ -54,3 +54,4 @@ app.*.map.json
 # Local screenshots / scratch
 /screenshots/
 /scratch/
+.superpowers/
