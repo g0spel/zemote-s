@@ -1148,15 +1148,6 @@ class _ChatPageState extends State<ChatPage> {
               animation: state,
               builder: (context, _) => _ContextUsageBar(state: state),
             ),
-          if (state != null && _sessionId != null)
-            AnimatedBuilder(
-              animation: state,
-              builder: (context, _) => _InsightsRow(
-                state: state,
-                transport: _transport,
-                sessionId: _sessionId!,
-              ),
-            ),
           if (state != null)
             AnimatedBuilder(
               animation: state,
@@ -1316,6 +1307,15 @@ class _ChatPageState extends State<ChatPage> {
               uploadProgress: _uploadProgress,
               onRemove: (i) =>
                   setState(() => _pendingFiles.removeAt(i)),
+            ),
+          if (state != null && _sessionId != null)
+            AnimatedBuilder(
+              animation: state,
+              builder: (context, _) => InsightsHandle(
+                state: state,
+                transport: _transport,
+                sessionId: _sessionId!,
+              ),
             ),
           _InputBar(
             controller: _inputController,
@@ -2932,25 +2932,127 @@ Map<String, dynamic>? latestCompletedTurn(List<Map<String, dynamic>> rows) {
   return null;
 }
 
-class _InsightsRow extends StatefulWidget {
+/// 后台把手计数徽(spec §7.1 洞察 sheet):运行中的后台任务(无 endedAt
+/// 的 running)+ 消息流内联 subagent 行,与后台面板的条目口径一致。
+/// Pure for tests.
+int insightsBgCount({
+  required List<Map<String, dynamic>> backgroundWorks,
+  required List<Map<String, dynamic>> rows,
+}) {
+  return backgroundWorks
+          .where((w) => w['status'] == 'running' && w['endedAt'] == null)
+          .length +
+      rows.where((r) => r['kind'] == 'subagent').length;
+}
+
+/// 洞察 sheet 把手(spec §7.1):输入区上方常驻的 40×4 圆角条,点击或
+/// 上滑呼出底部 sheet;后台有运行任务时右端浮出「后台 N」计数徽,
+/// 面板数据为空也常驻。公开给测试(与 SessionDrawer 同例)。
+class InsightsHandle extends StatelessWidget {
   final ConversationState state;
   final ConversationTransport transport;
   final String sessionId;
 
-  const _InsightsRow({
+  const InsightsHandle({
+    super.key,
     required this.state,
     required this.transport,
     required this.sessionId,
   });
 
+  void _openSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.62,
+        builder: (context, scrollController) => InsightsSheet(
+          state: state,
+          transport: transport,
+          sessionId: sessionId,
+          scrollController: scrollController,
+        ),
+      ),
+    );
+  }
+
   @override
-  State<_InsightsRow> createState() => _InsightsRowState();
+  Widget build(BuildContext context) {
+    final ember = EmberColors.of(context);
+    final bg = insightsBgCount(
+        backgroundWorks: state.backgroundWorks, rows: state.rows);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openSheet(context),
+      onVerticalDragEnd: (details) {
+        if ((details.primaryVelocity ?? 0) < 0) _openSheet(context);
+      },
+      child: SizedBox(
+        height: 20,
+        width: double.infinity,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ember.textFaint,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            if (bg > 0)
+              Positioned(
+                right: EmberSpacing.page,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: ember.primary.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(EmberRadius.control),
+                  ),
+                  child: Text('后台 $bg',
+                      style: TextStyle(
+                          fontSize: EmberType.caption, color: ember.primary)),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _InsightsRowState extends State<_InsightsRow> {
+/// 洞察底部 sheet(spec §7.1):62% 高升起、可拖至全屏;三 chip 切换
+/// 待办/文件/后台面板。数据逻辑自 _InsightsRowState 整体平移——文件
+/// 的 fire-once 预加载与 stale 重试语义保持(sheet 打开期间每个新完成
+/// 回合只拉一次;选「文件」chip 时无数据才补拉)。公开给测试。
+class InsightsSheet extends StatefulWidget {
+  final ConversationState state;
+  final ConversationTransport transport;
+  final String sessionId;
+
+  /// DraggableScrollableSheet 的滚动控制器,接入各面板主列表,让列表
+  /// 区域的拖拽可以展开/收起 sheet。
+  final ScrollController scrollController;
+
+  const InsightsSheet({
+    super.key,
+    required this.state,
+    required this.transport,
+    required this.sessionId,
+    required this.scrollController,
+  });
+
+  @override
+  State<InsightsSheet> createState() => _InsightsSheetState();
+}
+
+class _InsightsSheetState extends State<InsightsSheet> {
   static const _todo = 0, _files = 1, _bg = 2;
 
-  int? _open;
+  int _tab = _todo;
 
   dynamic _fileChanges;
   bool _filesLoading = false;
@@ -2969,7 +3071,7 @@ class _InsightsRowState extends State<_InsightsRow> {
   }
 
   @override
-  void didUpdateWidget(_InsightsRow oldWidget) {
+  void didUpdateWidget(InsightsSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state != widget.state) {
       oldWidget.state.removeListener(_onStateChanged);
@@ -2991,10 +3093,10 @@ class _InsightsRowState extends State<_InsightsRow> {
     _loadFiles();
   }
 
-  void _toggle(int index) {
-    setState(() => _open = _open == index ? null : index);
+  void _selectTab(int index) {
+    setState(() => _tab = index);
     // Skip when a prefetch for this turn is already in flight.
-    if (_open == _files &&
+    if (_tab == _files &&
         !_filesLoading &&
         _fileChanges == null &&
         _filesError == null) {
@@ -3067,51 +3169,64 @@ class _InsightsRowState extends State<_InsightsRow> {
     return total;
   }
 
-  int get _bgCount =>
-      widget.state.backgroundWorks.where((w) {
-        return w['status'] == 'running' && w['endedAt'] == null;
-      }).length +
-      widget.state.rows.where((r) => r['kind'] == 'subagent').length;
+  int get _bgCount => insightsBgCount(
+      backgroundWorks: widget.state.backgroundWorks,
+      rows: widget.state.rows);
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+    final ember = EmberColors.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: ember.raise,
+        borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(EmberRadius.sheet)),
+      ),
       child: Column(
         children: [
-          Row(
-            children: [
-              _chip(context, _todo, Icons.checklist_outlined, '待办',
-                  _todoCount),
-              const SizedBox(width: 6),
-              _chip(context, _files, Icons.folder_outlined, '文件',
-                  _turnFileTotal),
-              const SizedBox(width: 6),
-              _chip(context, _bg, Icons.hub_outlined, '后台', _bgCount),
-            ],
+          // sheet 顶部把手条(与输入区把手同形,提示可拖拽)。
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              decoration: BoxDecoration(
+                color: ember.textFaint,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
           ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOut,
-            alignment: Alignment.topCenter,
-            child: _open == null
-                ? const SizedBox(width: double.infinity)
-                : Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(top: 6),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: ZInk.tile(context),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    constraints:
-                        const BoxConstraints(maxHeight: 260),
-                    child: switch (_open) {
-                      _todo => _todoPanel(context),
-                      _files => _filesPanel(context),
-                      _ => _bgPanel(context),
-                    },
-                  ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+            child: Row(
+              children: [
+                _chip(context, _todo, Icons.checklist_outlined, '待办',
+                    _todoCount),
+                const SizedBox(width: 6),
+                _chip(context, _files, Icons.folder_outlined, '文件',
+                    _turnFileTotal),
+                const SizedBox(width: 6),
+                _chip(context, _bg, Icons.hub_outlined, '后台', _bgCount),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: ZInk.tile(context),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: switch (_tab) {
+                  _todo => _todoPanel(context),
+                  _files => _filesPanel(context),
+                  _ => _bgPanel(context),
+                },
+              ),
+            ),
           ),
         ],
       ),
@@ -3120,10 +3235,10 @@ class _InsightsRowState extends State<_InsightsRow> {
 
   Widget _chip(
       BuildContext context, int index, IconData icon, String label, int? count) {
-    final selected = _open == index;
+    final selected = _tab == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () => _toggle(index),
+        onTap: () => _selectTab(index),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
@@ -3192,6 +3307,7 @@ class _InsightsRowState extends State<_InsightsRow> {
   Widget _jsonFallback(dynamic data) {
     const encoder = JsonEncoder.withIndent('  ');
     return SingleChildScrollView(
+      controller: widget.scrollController,
       child: SelectableText(
         data == null ? '（无数据）' : encoder.convert(data),
         style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
@@ -3224,8 +3340,13 @@ class _InsightsRowState extends State<_InsightsRow> {
       );
     } else {
       body = ListView.builder(
+        controller: widget.scrollController,
         shrinkWrap: true,
-        itemCount: todoSteps.length + (planItems?.length ?? 0) + 1,
+        // +1 slot is the plan-section header — only when a plan exists
+        // (todos without a plan snapshot must not dereference it).
+        itemCount: todoSteps.length +
+            (planItems?.length ?? 0) +
+            (planItems != null ? 1 : 0),
         itemBuilder: (context, i) {
           if (i < todoSteps.length) {
             final s = todoSteps[i];
@@ -3403,6 +3524,7 @@ class _InsightsRowState extends State<_InsightsRow> {
           else
             Flexible(
               child: ListView.builder(
+                controller: widget.scrollController,
                 shrinkWrap: true,
                 itemCount: entries.length,
                 itemBuilder: (context, i) =>
@@ -3728,6 +3850,7 @@ class _InsightsRowState extends State<_InsightsRow> {
         _panelHeader(context, '后台', () {}),
         Flexible(
           child: ListView(
+            controller: widget.scrollController,
             shrinkWrap: true,
             children: [
               for (final w in works) _workTile(context, w),
