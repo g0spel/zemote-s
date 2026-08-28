@@ -36,7 +36,7 @@ class ZemoteMarkdown extends StatelessWidget {
       h4: const TextStyle(
           fontSize: 15, fontWeight: FontWeight.w600, height: 1.6),
       code: TextStyle(
-        fontFamily: 'monospace',
+        fontFamily: EmberFonts.term,
         fontSize: codeFont,
         backgroundColor: ZInk.codeInlineBg(context),
         color: ZInk.codeText(context),
@@ -143,7 +143,7 @@ class _CodeBlock extends StatelessWidget {
                   style: TextStyle(
                       fontSize: 10.5,
                       color: ZInk.faint(context),
-                      fontFamily: 'monospace'),
+                      fontFamily: EmberFonts.term),
                 ),
                 const Spacer(),
                 InkWell(
@@ -173,7 +173,7 @@ class _CodeBlock extends StatelessWidget {
                   ? code.substring(0, code.length - 1)
                   : code,
               style: TextStyle(
-                fontFamily: 'monospace',
+                fontFamily: EmberFonts.term,
                 fontSize: fontSize - 1.5,
                 height: 1.5,
                 color: ZInk.codeText(context),

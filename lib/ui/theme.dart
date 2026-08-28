@@ -161,6 +161,7 @@ ThemeData buildDarkTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
+    fontFamily: EmberFonts.ui,
     colorScheme: scheme,
     scaffoldBackgroundColor: ZColors.darkBg,
     appBarTheme: const AppBarTheme(
@@ -252,6 +253,7 @@ ThemeData buildLightTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
+    fontFamily: EmberFonts.ui,
     colorScheme: scheme,
     scaffoldBackgroundColor: ZColors.lightBg,
     appBarTheme: const AppBarTheme(
@@ -447,4 +449,10 @@ abstract final class EmberType {
   static const secondary = 12.0;
   static const caption = 11.0;
   static const lineHeight = 1.5;
+}
+
+/// 字体族单一来源:UI 正文用 Sarasa UI,等宽/代码用 Sarasa Term。
+abstract final class EmberFonts {
+  static const ui = 'Sarasa UI SC';
+  static const term = 'Sarasa Term SC';
 }
