@@ -326,7 +326,7 @@ void main() {
       (tester) async {
     await pumpWithBridge(tester);
     expect(find.byType(ChatPage), findsOneWidget);
-    expect(find.byType(SessionDrawer), findsNothing);
+    expect(find.byType(SessionDrawer), findsNothing); // 设备切换卸载整壳
     expect(find.text('输入消息开始新会话'), findsOneWidget);
     await _flushPendingTimers(tester);
   });
@@ -366,10 +366,12 @@ void main() {
         of: find.byType(SessionDrawer), matching: find.text('新会话')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(SessionDrawer), findsNothing); // 选后自动关
+    // 常驻抽屉:面板留在树上(数据保活),关闭态仅滑出+禁交互。
+    expect(find.byType(SessionDrawer), findsOneWidget);
     expect(find.byType(ChatPage), findsOneWidget);
     expect(find.text('输入消息开始新会话'), findsOneWidget);
-    final field = tester.widget<TextField>(find.byType(TextField));
+    final field = tester.widget<TextField>(find.descendant(
+        of: find.byType(ChatPage), matching: find.byType(TextField)));
     expect(field.enabled, isNot(false));
     await _flushPendingTimers(tester);
   });
@@ -384,7 +386,8 @@ void main() {
         .onPick('s1'); // 模拟点会话条目
     await _pumpDrawerClose(tester);
 
-    expect(find.byType(SessionDrawer), findsNothing); // 选后自动关
+    // 常驻抽屉:面板留在树上(数据保活),关闭态仅滑出+禁交互。
+    expect(find.byType(SessionDrawer), findsOneWidget);
     expect(_chatSessionId(tester), 's1');
     expect(find.byType(ChatPage), findsOneWidget);
     // embedded 模式:无 Scaffold/AppBar 外壳(壳自身用自定义 _TopBar)。
@@ -473,11 +476,15 @@ void main() {
     await _openDrawer(tester);
     tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
     await _pumpDrawerClose(tester);
-    expect(find.byType(SessionDrawer), findsNothing);
+    // 常驻抽屉:关闭后仍挂载(关闭态滑出+禁交互),不再断言摘除。
+    expect(find.byType(SessionDrawer), findsOneWidget);
     expect(_chatSessionId(tester), 's1'); // 仍是该会话,但实例已重建
     expect(tester.element(find.byType(ChatPage)), isNot(same(elementBefore)));
     expect(find.text('桌面起的标题'), findsNothing);
-    expect(find.text('新会话'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byType(ChatPage), matching: find.text('新会话')),
+        findsOneWidget);
 
     // 新实例经 onSessionInfo 回写后标题恢复。
     _pushSessionInfo(tester, 's1', '重开后的标题');
@@ -546,7 +553,7 @@ void main() {
     await _pickFirstWorkspace(tester);
 
     // 复位:抽屉关闭、会话选择失效,落到 B 的 draft。
-    expect(find.byType(SessionDrawer), findsNothing);
+    expect(find.byType(SessionDrawer), findsNothing); // 设备切换卸载整壳
     expect(_chatSessionId(tester), isNull);
     expect(find.text('输入消息开始新会话'), findsOneWidget);
     await _flushPendingTimers(tester);
@@ -630,7 +637,7 @@ void main() {
     await _pumpDrawerClose(tester);
 
     expect(find.text('设备未连接'), findsOneWidget);
-    expect(find.byType(SessionDrawer), findsNothing);
+    expect(find.byType(SessionDrawer), findsNothing); // 壳卸载,抽屉随之消失
     expect(find.byType(ChatPage), findsNothing);
     await _flushPendingTimers(tester);
   });

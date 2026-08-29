@@ -1069,7 +1069,9 @@ class _DrawerHostState extends State<_DrawerHost>
   late final AnimationController _controller;
   late final Animation<Offset> _slide;
 
-  /// 面板是否在树上(关闭动画播完才摘除,收起也有过渡)。
+  /// 面板是否在树上。首次打开后常驻(关闭仅滑出屏幕):抽屉数据源
+  /// (订阅/置顶/任务列表)随宿主实时推进,再次打开即完整渲染,不再
+  /// 每次 mount 从种子/空列表重建造成可见跳变。
   bool _shown = false;
 
   /// 左缘把手本次拖拽的累计水平位移。
@@ -1087,11 +1089,8 @@ class _DrawerHostState extends State<_DrawerHost>
       CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
     _shown = widget.open;
-    _controller.addStatusListener((status) {
-      if (status == AnimationStatus.dismissed && _shown) {
-        setState(() => _shown = false);
-      }
-    });
+    // dismissed 不再摘除(_shown 常驻);关闭态由 SlideTransition 移出
+    // 屏幕并 IgnorePointer。
   }
 
   @override
@@ -1156,15 +1155,19 @@ class _DrawerHostState extends State<_DrawerHost>
                 ),
               ),
             ),
+            // 关闭态常驻但不可交互(Slide 已在屏外,双保险)。
             Positioned(
               left: 0,
               top: 0,
               bottom: 0,
-              child: SizedBox(
-                width: width,
-                child: SlideTransition(
-                  position: _slide,
-                  child: widget.drawer,
+              child: IgnorePointer(
+                ignoring: !widget.open,
+                child: SizedBox(
+                  width: width,
+                  child: SlideTransition(
+                    position: _slide,
+                    child: widget.drawer,
+                  ),
                 ),
               ),
             ),
