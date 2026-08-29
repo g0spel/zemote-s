@@ -948,7 +948,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
             // Protocol drift must not kill the whole subscription: skip the
             // malformed frame and leave evidence for diagnosis.
             _transport._log('[$_logTag][诊断] 逻辑帧处理失败，已跳过该帧: $e — '
-                '上游协议可能已变更，请导出协议日志反馈');
+                '桌面端协议可能已变更，请导出协议日志反馈');
           }
         }
         break;
@@ -958,7 +958,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       default:
         _transport._log('[$_logTag][诊断] 未知 wire 帧类型 "${frame['kind']}"'
             '（字段: ${frame.keys.toList().join(', ')}）— '
-            '上游协议可能已变更，请导出协议日志反馈');
+            '桌面端协议可能已变更，请导出协议日志反馈');
         break;
     }
   }

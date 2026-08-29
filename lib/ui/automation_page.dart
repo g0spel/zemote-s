@@ -12,8 +12,8 @@ import 'theme.dart';
 ///   listAutomations / listAutomationRuns / createAutomation /
 ///   updateAutomation / setAutomationEnabled / deleteAutomation
 ///   runAutomationNow / restartAutomation
-/// (the last two + the lifecycleStatus/scheduleRule fields were adopted
-/// from an upstream discovery; schemas verified in the host bundle).
+/// (the last two + the lifecycleStatus/scheduleRule fields; schemas
+/// verified in the host bundle).
 /// plus the `off-peak-task` queue `list`.
 /// Human-readable schedule: prefers the structured `scheduleRule`
 /// ({unit: minute|hour|day|week, interval, hour, minute, weekday}) and

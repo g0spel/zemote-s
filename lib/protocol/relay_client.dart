@@ -215,7 +215,7 @@ class RelayClient {
       }
     } catch (e) {
       _log('[relay] bad frame: $e');
-      _log('[诊断] relay 连接收到无法解析的帧 — 上游协议可能已变更或链路异常，'
+      _log('[诊断] relay 连接收到无法解析的帧 — 桌面端协议可能已变更或链路异常，'
           '请导出协议日志反馈');
       return;
     }
@@ -224,7 +224,7 @@ class RelayClient {
       case 'auth_challenge':
         final nonce = frame['nonce'] as String?;
         if (nonce == null || nonce.isEmpty) {
-          _log('[诊断] 配对挑战缺少 nonce 字段 — 上游协议可能已变更，'
+          _log('[诊断] 配对挑战缺少 nonce 字段 — 桌面端协议可能已变更，'
               '请导出协议日志反馈');
           _handleRelayError('auth-malformed', 'auth_challenge without nonce');
           return;
@@ -258,7 +258,7 @@ class RelayClient {
       default:
         _log('[诊断] 收到未知帧类型 "${frame['type']}"'
             '（字段: ${frame.keys.toList().join(', ')}）— '
-            '上游协议可能已变更，请导出协议日志反馈');
+            '桌面端协议可能已变更，请导出协议日志反馈');
         break;
     }
   }

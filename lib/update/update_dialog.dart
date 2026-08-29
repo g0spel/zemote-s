@@ -71,7 +71,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     });
     try {
       final dir = await apkChannel.invokeMethod<String>('getApkDir');
-      final file = File('$dir/zemote-${widget.info.latestVersion}.apk');
+      final file = File('$dir/ZemoteS-${widget.info.latestVersion}.apk');
       // Partial files are kept for resume; a corrupt download is caught by
       // the checksum step (which deletes the file) and retried fresh.
       await _download(apkUrl, file.path, (p) {

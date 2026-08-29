@@ -30,8 +30,8 @@ class UpdateInfo {
 
 /// Queries `https://api.github.com/repos/g0spel/zemote-s/releases/latest`
 /// and compares the release tag with [currentVersion]. The release tag is
-/// `vX.Y.Z`; the CI (`build-apk.yml`) uploads `app-release.apk` and
-/// `app-release.apk.sha256` as assets.
+/// `vX.Y.Z`; the CI (`build-apk.yml`) uploads `ZemoteS-vX.Y.Z-arm64.apk` and
+/// its `.sha256` as assets.
 Future<UpdateInfo> checkForUpdates({
   String currentVersion = appVersion,
 }) async {
@@ -86,7 +86,7 @@ class UpdateCheckException implements Exception {
 }
 
 /// Extracts the hex digest from a `sha256sum` checksum file
-/// (`<64 hex chars>  app-release.apk`). Returns null when no valid digest
+/// (`<64 hex chars>  <apk file name>`). Returns null when no valid digest
 /// is present.
 String? parseChecksumHex(String content) {
   final m = RegExp(r'\b[0-9a-fA-F]{64}\b').firstMatch(content);

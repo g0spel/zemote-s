@@ -33,10 +33,10 @@ String describeConnectFailure(Object e) {
     return '已被桌面端断开（kicked）';
   }
   if (s.contains('auth-malformed')) {
-    return '配对协议异常（挑战帧格式变化）：上游协议可能已变更，请导出协议日志反馈';
+    return '配对协议异常（挑战帧格式变化）：桌面端协议可能已变更，请导出协议日志反馈';
   }
   if (s.contains('pairing timeout')) {
-    return '配对超时：桌面未响应，凭据可能已失效，或上游协议已变更（请导出协议日志排查）';
+    return '配对超时：桌面未响应，凭据可能已失效，或桌面端协议已变更（请导出协议日志排查）';
   }
   if (s.contains('TimeoutException') || s.contains('SocketException')) {
     return '网络错误：无法到达服务器（$s）';

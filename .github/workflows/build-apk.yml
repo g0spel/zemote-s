@@ -70,8 +70,10 @@ jobs:
       - name: Generate SHA-256 checksum
         run: |
           cd build/app/outputs/flutter-apk
-          sha256sum app-release.apk > app-release.apk.sha256
-          cat app-release.apk.sha256
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/ZemoteS-v$VERSION-arm64.apk
+          sha256sum ZemoteS-v$VERSION-arm64.apk > ZemoteS-v$VERSION-arm64.apk.sha256
+          cat ZemoteS-v$VERSION-arm64.apk.sha256
 
       # Manual dispatches build but never publish — publishing requires a tag.
       - name: Upload APK to GitHub Release
@@ -79,8 +81,8 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-release.apk.sha256
+            build/app/outputs/flutter-apk/ZemoteS-v$VERSION-arm64.apk
+            build/app/outputs/flutter-apk/ZemoteS-v$VERSION-arm64.apk.sha256
           name: ${{ github.ref_name }}
           body: |
             Zemote ${{ github.ref_name }}
