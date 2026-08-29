@@ -95,7 +95,25 @@ Future<AccountStore> _pumpShell(
     ),
   );
   await tester.pump();
+  // U1:连接完成后进入工作区选择;测试统一选第一个工作区,
+  // 等价于旧流程的"连接后自动进入工作区"。
+  await _pickFirstWorkspace(tester);
   return store;
+}
+
+/// U1:设备切换/连接完成后落在工作区选择器,统一选第一个工作区。
+Future<void> _pickFirstWorkspace(WidgetTester tester) async {
+  for (var i = 0;
+      i < 20 &&
+          find.text('选择工作区').evaluate().isEmpty &&
+          tester.widgetList<ChatPage>(find.byType(ChatPage)).isEmpty;
+      i++) {
+    await tester.pump(const Duration(milliseconds: 25));
+  }
+  if (find.text('选择工作区').evaluate().isNotEmpty) {
+    await tester.tap(find.byType(ListTile).first);
+    await tester.pump();
+  }
 }
 
 String? _chatSessionId(WidgetTester tester) =>
@@ -192,6 +210,7 @@ void main() {
     await sessionOf(tester).switchTo(store.accounts[1]);
     await tester.pump();
     await tester.pump();
+    await _pickFirstWorkspace(tester);
     expect(find.text('DeviceB'), findsOneWidget); // 顶栏胶囊
     expect(_chatSessionId(tester), isNull); // B 的工作区 draft
 
@@ -227,6 +246,7 @@ void main() {
 
     await sessionOf(tester).switchTo(store.accounts[1]);
     await tester.pumpAndSettle();
+    await _pickFirstWorkspace(tester);
     expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         0);
@@ -523,6 +543,7 @@ void main() {
     await _openDrawer(tester); // 抽屉开着时切换设备
     await sessionOf(tester).switchTo(store.accounts[1]);
     await _pumpDrawerClose(tester);
+    await _pickFirstWorkspace(tester);
 
     // 复位:抽屉关闭、会话选择失效,落到 B 的 draft。
     expect(find.byType(SessionDrawer), findsNothing);

@@ -112,6 +112,9 @@ class _RootShellState extends State<RootShell> {
   /// requests — the last requested device always ends up on screen.
   int _chainGeneration = 0;
 
+  /// autoConnect 因设备尚未加载完而挂起时置位,加载完成后补连一次。
+  bool _pendingAutoConnect = false;
+
   bool _isCurrentChain(int gen) => mounted && gen == _chainGeneration;
 
   @override
@@ -127,6 +130,10 @@ class _RootShellState extends State<RootShell> {
     );
     if (widget.autoConnect && widget.store.accounts.isNotEmpty) {
       _openAccount(widget.store.accounts.first);
+    } else if (widget.autoConnect) {
+      // 配对设备是异步加载的:挂载时还没到就把标记挂起,加载完成
+      // (_onChanged)后补连,保证冷启动 autoConnect 与加载时序无关。
+      _pendingAutoConnect = true;
     }
   }
 
@@ -140,7 +147,14 @@ class _RootShellState extends State<RootShell> {
   }
 
   void _onChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_pendingAutoConnect &&
+        widget.store.accounts.isNotEmpty &&
+        widget.session.current == null) {
+      _pendingAutoConnect = false;
+      _openAccount(widget.store.accounts.first);
+    }
+    setState(() {});
   }
 
   /// Session notifications: a new active device starts its bootstrap chain
@@ -203,13 +217,8 @@ class _RootShellState extends State<RootShell> {
       if (!_isCurrentChain(gen)) return;
       final list = bootstrap['workspaces'];
       setState(() => _workspaces = list is List ? list : const []);
-      // Auto-open a workspace (web mobile flow): the only one, else the first.
-      for (final w in _workspaces) {
-        if (w is Map) {
-          await _openWorkspace(w.cast<String, dynamic>(), gen);
-          break;
-        }
-      }
+      // 连接完成不直接开新会话:进入工作区/会话选择(抽屉),
+      // 由用户决定进入哪个工作区、哪个会话。
       if (!_isCurrentChain(gen)) return;
       setState(() => _phase = _ConnectPhase.done);
     } catch (e) {
@@ -621,7 +630,16 @@ class _RootShellState extends State<RootShell> {
             ),
           );
         }
-        return _mutedHint('桌面端没有打开的工作区', colors);
+        // 已连接但未进入工作区:列出可选工作区(U1 连接完成不直接
+        // 开会话,由用户选择工作区后再经抽屉选会话)。bridge 是工作区
+        // 级的,此刻必为 null,按 relay client 在线判定。
+        if (session.client != null) {
+          return _WorkspacePicker(
+            workspaces: _workspaces,
+            onPick: (w) => _openWorkspace(w, _chainGeneration),
+          );
+        }
+        return _mutedHint('设备未连接', colors);
       case _ConnectPhase.idle:
         return _mutedHint('设备未连接', colors);
     }
@@ -676,6 +694,81 @@ class _RootShellState extends State<RootShell> {
       child: Text(text,
           style:
               TextStyle(fontSize: EmberType.caption, color: colors.textMuted)),
+    );
+  }
+}
+
+/// 连接完成、尚未进入工作区时的工作区选择列表(U1:连接后不直接开会话,
+/// 先选工作区,再由抽屉选会话或开新会话)。
+class _WorkspacePicker extends StatelessWidget {
+  final List<dynamic> workspaces;
+  final void Function(Map<String, dynamic> workspace) onPick;
+
+  const _WorkspacePicker({required this.workspaces, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return Material(
+      color: colors.bg,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  EmberSpacing.page, EmberSpacing.gapM, EmberSpacing.page,
+                  EmberSpacing.gapS),
+              child: Text('选择工作区',
+                  style: TextStyle(
+                      fontSize: EmberType.title,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textSolid)),
+            ),
+            Expanded(
+              child: workspaces.isEmpty
+                  ? Center(
+                      child: Text('桌面端没有可用的工作区',
+                          style: TextStyle(
+                              fontSize: EmberType.caption,
+                              color: colors.textMuted)))
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(
+                          EmberSpacing.page, 0, EmberSpacing.page,
+                          EmberSpacing.page),
+                      children: [
+                        for (final w in workspaces)
+                          if (w is Map)
+                            ListTile(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      EmberRadius.control)),
+                              leading: Icon(Icons.folder_open,
+                                  size: 20, color: colors.primary),
+                              title: Text(workspaceTitle(
+                                  w.cast<String, dynamic>()),
+                                  style: TextStyle(
+                                      fontSize: EmberType.body,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.textSolid)),
+                              subtitle: w['workspacePath'] != null &&
+                                      '${w['workspacePath']}'.isNotEmpty
+                                  ? Text('${w['workspacePath']}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          fontSize: EmberType.caption,
+                                          fontFamily: EmberFonts.term,
+                                          color: colors.textFaint))
+                                  : null,
+                              onTap: () => onPick(w.cast<String, dynamic>()),
+                            ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -67,6 +67,9 @@ class _ZflowAppState extends State<ZflowApp> {
   void initState() {
     super.initState();
     notificationsService.init();
+    // 配对设备启动即加载:否则冷启动后设备选择器为空,要进一次设备
+    // 管理页才会出现(RootShell 监听 store,加载完成会自行刷新)。
+    _store.load();
     _theme.load();
     _uiSettings.load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());

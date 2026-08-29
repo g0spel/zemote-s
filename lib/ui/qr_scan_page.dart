@@ -133,8 +133,12 @@ class _QrScanPageState extends State<QrScanPage> {
 
 /// Decodes a QR code from image bytes using the pure-Dart zxing2 reader.
 String? decodeQrFromImageBytes(Uint8List bytes) {
-  final image = img_lib.decodeImage(bytes);
-  if (image == null) return null;
+  final decoded = img_lib.decodeImage(bytes);
+  if (decoded == null) return null;
+  // uint1/uint4 等小位深格式下通道值不是 0-255,直接读会得到垃圾亮度,先归一。
+  final image = decoded.format == img_lib.Format.uint8
+      ? decoded
+      : decoded.convert(format: img_lib.Format.uint8);
   final width = image.width;
   final height = image.height;
   if (width > 4096 || height > 4096) {
@@ -150,13 +154,19 @@ String? decodeQrFromImageBytes(Uint8List bytes) {
     pixels[i++] = (a << 24) | (r << 16) | (g << 8) | b;
   }
   final source = RGBLuminanceSource(width, height, pixels);
-  final bitmap = BinaryBitmap(HybridBinarizer(source));
-  try {
-    final result = QRCodeReader().decode(bitmap);
-    final text = result.text;
-    if (ZflowConnectionParams.parse(text) != null) return text;
-    return text.isEmpty ? null : text;
-  } catch (_) {
-    return null;
+  // 暗色主题下桌面端可能渲染反色码;普通失败后再试反色与 TRY_HARDER。
+  for (final candidate in [source, source.invert()]) {
+    try {
+      final result = QRCodeReader().decode(
+        BinaryBitmap(HybridBinarizer(candidate)),
+        hints: DecodeHints()..put(DecodeHintType.tryHarder),
+      );
+      final text = result.text;
+      if (ZflowConnectionParams.parse(text) != null) return text;
+      return text.isEmpty ? null : text;
+    } catch (_) {
+      continue;
+    }
   }
+  return null;
 }

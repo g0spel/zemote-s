@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
@@ -15,28 +16,6 @@ import 'diff_view.dart';
 import 'markdown_view.dart';
 import 'theme.dart';
 
-/// 协作模式徽标文案(spec §7.1:非默认模式才在模型 pill 追加徽段)。
-/// build 是默认 → null(不显示);plan/edit/yolo 用定案文案;
-/// 桌面端自定义模式原样透传,不丢信息。
-String? modeBadge(String mode) => switch (mode) {
-      'build' => null,
-      'plan' => '计划',
-      'edit' => '编辑',
-      'yolo' => 'YOLO',
-      _ => mode,
-    };
-
-/// 模式徽标颜色:plan 权限敏感(Ember 主色橙)、edit 感知级(run 蓝)、
-/// yolo 危险(err 红)、其余(含 build)中性 muted。
-Color modeBadgeColor(String mode, EmberColors c) => switch (mode) {
-      'plan' => c.primary,
-      'edit' => c.run,
-      'yolo' => c.err,
-      _ => c.textMuted,
-    };
-
-/// Chat view for one task (session), backed by Conversation V4 subscription.
-/// Draft mode (no [sessionId]): the first message issues `createSession`.
 class ChatPage extends StatefulWidget {
   final BridgeSession session;
   final Map<String, dynamic> scope;
@@ -193,6 +172,7 @@ class _ChatPageState extends State<ChatPage> {
     _sessionId = widget.sessionId;
     _transport = widget.session.conversation(widget.scope);
     _scrollController.addListener(_onScroll);
+    _loadDraftPrefs();
     if (_sessionId != null) {
       _subscribe();
     }
@@ -219,7 +199,10 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _loadPrep() async {
     try {
       final prep = await _transport.prepareWorkspace();
-      if (mounted) setState(() => _prep = prep);
+      if (mounted) {
+        setState(() => _prep = prep);
+        _validateDraftAgainstPrep();
+      }
     } catch (_) {}
     if (mounted) setState(() => _skillsLoading = true);
     try {
@@ -641,6 +624,52 @@ class _ChatPageState extends State<ChatPage> {
     return sessionId;
   }
 
+  /// 草稿选择(模型/思考档/模式)持久化:跨启动恢复上次选择。
+  /// prep 到达后按宿主可选项校验,宿主已不提供的值自动丢弃,避免把
+  /// 过期模型发给 createSession。
+  Future<void> _loadDraftPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        for (final k in const ['model', 'thought', 'mode']) {
+          final v = prefs.getString('draft.$k');
+          if (v != null && v.isNotEmpty) _draftConfig[k] = v;
+        }
+      });
+      _validateDraftAgainstPrep();
+    } catch (_) {}
+  }
+
+  void _validateDraftAgainstPrep() {
+    final prep = _prep;
+    if (prep == null) return;
+    final changed = <String, String>{..._draftConfig};
+    for (final entry in changed.entries.toList()) {
+      final option = prep.option(entry.key == 'thought' ? 'thought_level' : entry.key);
+      if (option != null &&
+          option.options.isNotEmpty &&
+          !option.options.any((o) => o.value == entry.value)) {
+        _draftConfig.remove(entry.key);
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _saveDraftPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final k in const ['model', 'thought', 'mode']) {
+        final v = _draftConfig[k];
+        if (v == null || v.isEmpty) {
+          await prefs.remove('draft.$k');
+        } else {
+          await prefs.setString('draft.$k', v);
+        }
+      }
+    } catch (_) {}
+  }
+
   /// Builds the createSession `config` payload from the draft selection.
   Map<String, dynamic>? _buildDraftConfig() {
     if (_draftConfig.isEmpty) return null;
@@ -759,6 +788,7 @@ class _ChatPageState extends State<ChatPage> {
         draftConfig: _draftConfig,
         onDraftChange: (key, value) {
           setState(() => _draftConfig[key] = value);
+          _saveDraftPrefs();
         },
       ),
     );
@@ -789,19 +819,88 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// Dedicated skill picker so skills are one tap away (no `/` guessing).
-  void _openSkillsPicker() {
+  /// 当前协作模式展示名(U2 输入框模式按钮):活动会话用现场值,
+  /// 草稿用草稿选择,展示名优先取 prepareWorkspace 选项的命名。
+  String get _currentModeLabel {
+    final mode = _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
+    return _optionLabel(_prep?.option('mode'), mode) ?? mode;
+  }
+
+  /// 协作模式菜单(U2):与模型面板的模式区同源,选择即时生效。
+  void _showModeMenu() {
+    final option = _prep?.option('mode');
+    final options = option != null && option.options.isNotEmpty
+        ? [for (final v in option.options) (v.value, v.name)]
+        : const [('build', 'build'), ('edit', 'edit'), ('plan', 'plan'), ('yolo', 'yolo')];
+    final current = _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (context) => _SkillsPickerSheet(
-        skills: _skills,
+      builder: (sheetContext) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('协作模式',
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w600)))),
+          for (final (value, name) in options)
+            ListTile(
+              dense: true,
+              leading: Icon(
+                current == value
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+                size: 18,
+                color: current == value
+                    ? EmberColors.of(context).primary
+                    : EmberColors.of(context).textFaint,
+              ),
+              title: Text(name, style: const TextStyle(fontSize: 13)),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                if (_sessionId == null || _sessionId!.isEmpty) {
+                  setState(() => _draftConfig['mode'] = value);
+                  _saveDraftPrefs();
+                } else {
+                  _run('切换失败', () async {
+                    await _transport.switchCollaborationMode(
+                        _sessionId!, value);
+                    _state?.optimisticPatch({
+                      'config': {
+                        ...?_state!.config,
+                        'mode': value,
+                      },
+                    });
+                  });
+                }
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// "+"面板(U2):斜杠命令 / Skills / 附件,三段合一。
+  void _openPlusSheet() {
+    final items = _slashItems;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => _PlusSheet(
+        slashItems: items,
         loading: _skillsLoading,
-        onSelect: (skill) {
-          _inputController.text = '\$${skill.name} ';
+        onSelect: (text) {
+          _inputController.text = text;
           _inputController.selection = TextSelection.collapsed(
               offset: _inputController.text.length);
-          Navigator.of(context).pop();
+          Navigator.of(sheetContext).pop();
           setState(() => _showSlash = false);
+        },
+        onAttach: () {
+          Navigator.of(sheetContext).pop();
+          _pickFiles();
         },
         onRefresh: _loadPrep,
       ),
@@ -896,31 +995,40 @@ class _ChatPageState extends State<ChatPage> {
             ),
           IconButton(
             icon: const Icon(Icons.tune, size: 20),
-            tooltip: '模型 / 模式',
+            tooltip: '模型',
             onPressed: _showModelSheet,
           ),
-          if (state != null)
-            PopupMenuButton<String>(
-              onSelected: (action) {
-                switch (action) {
-                  case 'compact':
-                    _run('压缩失败',
-                        () => _transport.compact(_sessionId!));
-                  case 'usage':
-                    _showUsageSheet();
-                  case 'plans':
-                    _showPlansSheet();
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                    value: 'compact',
-                    child: Text('压缩上下文 (compact)')),
-                PopupMenuItem(
-                    value: 'usage', child: Text('用量统计')),
-                PopupMenuItem(value: 'plans', child: Text('计划')),
-              ],
-            ),
+          // 常驻(草稿态禁用会话级条目):出现/消失会导致右侧布局跳动,
+          // 把会话列表按钮挤出屏幕。
+          PopupMenuButton<String>(
+            onSelected: _sessionId == null
+                ? null
+                : (action) {
+                    switch (action) {
+                      case 'compact':
+                        _run('压缩失败',
+                            () => _transport.compact(_sessionId!));
+                      case 'usage':
+                        _showUsageSheet();
+                      case 'plans':
+                        _showPlansSheet();
+                    }
+                  },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                  value: 'compact',
+                  enabled: _sessionId != null,
+                  child: Text('压缩上下文 (compact)')),
+              PopupMenuItem(
+                  value: 'usage',
+                  enabled: _sessionId != null,
+                  child: Text('用量统计')),
+              PopupMenuItem(
+                  value: 'plans',
+                  enabled: _sessionId != null,
+                  child: Text('计划')),
+            ],
+          ),
         ],
       ),
       body: body,
@@ -997,32 +1105,45 @@ class _ChatPageState extends State<ChatPage> {
                   _run('停止失败', () => _transport.stop(_sessionId!)),
             ),
           _modelPill(context, state),
-          if (_sessionId != null)
-            PopupMenuButton<String>(
-              icon: Icon(Icons.more_horiz, size: 20, color: colors.textMuted),
-              tooltip: '更多',
-              onSelected: (action) {
-                switch (action) {
-                  case 'side':
-                    _openSideChat();
-                  case 'compact':
-                    _run('压缩失败',
-                        () => _transport.compact(_sessionId!));
-                  case 'usage':
-                    _showUsageSheet();
-                  case 'plans':
-                    _showPlansSheet();
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'side', child: Text('辅助对话')),
-                PopupMenuItem(
-                    value: 'compact',
-                    child: Text('压缩上下文 (compact)')),
-                PopupMenuItem(value: 'usage', child: Text('用量统计')),
-                PopupMenuItem(value: 'plans', child: Text('计划')),
-              ],
-            ),
+          // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
+          // 右侧会话列表入口挤出屏幕。
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_horiz, size: 20, color: colors.textMuted),
+            tooltip: '更多',
+            onSelected: _sessionId == null
+                ? null
+                : (action) {
+                    switch (action) {
+                      case 'side':
+                        _openSideChat();
+                      case 'compact':
+                        _run('压缩失败',
+                            () => _transport.compact(_sessionId!));
+                      case 'usage':
+                        _showUsageSheet();
+                      case 'plans':
+                        _showPlansSheet();
+                    }
+                  },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                  value: 'side',
+                  enabled: _sessionId != null,
+                  child: Text('辅助对话')),
+              PopupMenuItem(
+                  value: 'compact',
+                  enabled: _sessionId != null,
+                  child: Text('压缩上下文 (compact)')),
+              PopupMenuItem(
+                  value: 'usage',
+                  enabled: _sessionId != null,
+                  child: Text('用量统计')),
+              PopupMenuItem(
+                  value: 'plans',
+                  enabled: _sessionId != null,
+                  child: Text('计划')),
+            ],
+          ),
         ],
       );
     }
@@ -1031,16 +1152,13 @@ class _ChatPageState extends State<ChatPage> {
     return AnimatedBuilder(animation: state, builder: (context, _) => build());
   }
 
-  /// 模型 pill:`模型名 | 强度档名` + 模式徽段(非默认模式才显示)。
-  /// 显示名优先取 prepareWorkspace 模型/思考选项里当前值的展示名,
-  /// 回退会话 config 的裸值;点击展开模型/模式面板。
+  /// 模型 pill:`模型名 | 强度档名`(U2:模式选择移到输入框左侧,
+  /// 顶栏只做模型设置)。显示名优先取 prepareWorkspace 模型/思考选项
+  /// 里当前值的展示名,回退会话 config 的裸值;点击展开模型面板。
   Widget _modelPill(BuildContext context, ConversationState? state) {
     final colors = EmberColors.of(context);
     final model = _pillModelLabel(state);
     final thought = _pillThoughtLabel(state);
-    final mode = state?.currentMode ?? _draftConfig['mode'] ?? 'build';
-    final badge = modeBadge(mode);
-    final badgeColor = modeBadgeColor(mode, colors);
     return InkWell(
       borderRadius: BorderRadius.circular(EmberRadius.control),
       onTap: _showModelSheet,
@@ -1071,23 +1189,6 @@ class _ChatPageState extends State<ChatPage> {
                   style: TextStyle(
                       fontSize: EmberType.body,
                       color: colors.textMuted)),
-            ],
-            if (badge != null) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: badgeColor.withValues(alpha: 0.15),
-                  borderRadius:
-                      BorderRadius.circular(EmberRadius.avatar),
-                ),
-                child: Text(badge,
-                    style: TextStyle(
-                        fontSize: EmberType.caption,
-                        fontWeight: FontWeight.w600,
-                        color: badgeColor)),
-              ),
             ],
           ],
         ),
@@ -1331,7 +1432,9 @@ class _ChatPageState extends State<ChatPage> {
             sending: _sending,
             onSend: _send,
             onAttach: _pickFiles,
-            onSkills: _openSkillsPicker,
+            onPlusMenu: _openPlusSheet,
+            modeLabel: _currentModeLabel,
+            onPickMode: _showModeMenu,
           ),
         ],
       );
@@ -4594,7 +4697,7 @@ class _QuestionItem extends StatelessWidget {
 
 // ---------------------------------------------------------------- sheets
 
-class _ModelModeSheet extends StatelessWidget {
+class _ModelModeSheet extends StatefulWidget {
   final ConversationState? state;
   final ConversationTransport transport;
   final WorkspacePrep? prep;
@@ -4611,13 +4714,28 @@ class _ModelModeSheet extends StatelessWidget {
     this.onDraftChange,
   });
 
-  bool get _isDraft => sessionId == null || sessionId!.isEmpty;
+  @override
+  State<_ModelModeSheet> createState() => _ModelModeSheetState();
+}
+
+/// Stateful 的原因:面板内点选必须立即反映(此前 StatelessWidget 只在
+/// 重开面板时才看到新值);草稿选择镜像在 [_draft],会话态变化经
+/// AnimatedBuilder 跟进。
+class _ModelModeSheetState extends State<_ModelModeSheet> {
+  late final Map<String, String> _draft = Map.of(widget.draftConfig ?? const {});
+
+  bool get _isDraft => widget.sessionId == null || widget.sessionId!.isEmpty;
+
+  void _setDraft(String key, String value) {
+    setState(() => _draft[key] = value);
+    widget.onDraftChange?.call(key, value);
+  }
 
   /// Config options beyond the model/mode/thought selects (e.g. max output
   /// length, search enhancement) surfaced read-only from prepareWorkspace.
   List<ConfigOption> get _otherOptions {
     const known = {'model', 'mode', 'thought_level'};
-    final options = prep?.configOptions;
+    final options = widget.prep?.configOptions;
     if (options == null) return const [];
     return options.where((o) => !known.contains(o.id)).toList();
   }
@@ -4631,11 +4749,21 @@ class _ModelModeSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sid = sessionId ?? '';
-    final config = state?.config ?? const {};
-    final modelOption = prep?.option('model');
-    final modeOption = prep?.option('mode');
-    final thoughtOption = prep?.option('thought_level');
+    // 会话态驱动(乐观补丁/宿主确认)时整面板跟随重建;draft 态由
+    // _setDraft 的 setState 驱动。
+    final state = widget.state;
+    if (state != null) {
+      return AnimatedBuilder(
+          animation: state, builder: (context, _) => _content(context));
+    }
+    return _content(context);
+  }
+
+  Widget _content(BuildContext context) {
+    final sid = widget.sessionId ?? '';
+    final config = widget.state?.config ?? const {};
+    final modelOption = widget.prep?.option('model');
+    final thoughtOption = widget.prep?.option('thought_level');
     final followup = '${config['followupMode'] ?? 'queue'}';
 
     // Current selection: prefer the LIVE session config (updates after a
@@ -4644,19 +4772,15 @@ class _ModelModeSheet extends StatelessWidget {
         '${config['provider'] ?? ''}/${config['model'] ?? ''}';
     final currentModelValue =
         _isDraft || config['model'] == null || '${config['model']}'.isEmpty
-            ? (draftConfig?['model'] ??
+            ? (_draft['model'] ??
                 '${modelOption?.currentValue ?? ''}')
             : liveModelValue;
     final currentThoughtValue = _isDraft
-        ? (draftConfig?['thought'] ??
+        ? (_draft['thought'] ??
             '${thoughtOption?.currentValue ?? ''}')
-        : (state?.currentThought.isNotEmpty == true
-            ? state!.currentThought
+        : (widget.state?.currentThought.isNotEmpty == true
+            ? widget.state!.currentThought
             : '${thoughtOption?.currentValue ?? ''}');
-    final currentModeValue = _isDraft
-        ? (draftConfig?['mode'] ?? 'build')
-        : state?.currentMode ?? 'build';
-
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -4664,74 +4788,10 @@ class _ModelModeSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_isDraft ? '新会话 · 模型与模式' : '模型与模式',
+            Text(_isDraft ? '新会话 · 模型' : '模型',
                 style: const TextStyle(
                     fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
-            // 分区顺序按 spec §7.1:模式 → 思考强度 → 模型。
-            const Text('协作模式', style: TextStyle(fontSize: 13)),
-            const SizedBox(height: 8),
-            if (modeOption != null && modeOption.options.isNotEmpty)
-              for (final v in modeOption.options)
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    currentModeValue == v.value
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
-                    size: 18,
-                    color: currentModeValue == v.value
-                        ? EmberColors.of(context).primary
-                        : EmberColors.of(context).textFaint,
-                  ),
-                  title: Text(v.name,
-                      style: const TextStyle(fontSize: 13)),
-                  subtitle: v.description != null
-                      ? Text(v.description!,
-                          style: TextStyle(
-                              fontSize: 11, color: EmberColors.of(context).textFaint))
-                      : null,
-                  onTap: () {
-                    if (_isDraft) {
-                      onDraftChange?.call('mode', v.value);
-                    } else {
-                      _apply(
-                        context,
-                        () => transport.switchCollaborationMode(
-                            sid, v.value),
-                        onAccepted: () => state?.optimisticPatch({
-                          'config': {
-                            ...?state!.config,
-                            'mode': v.value,
-                          },
-                        }),
-                      );
-                    }
-                  },
-                )
-            else
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final m in const ['build', 'edit', 'plan', 'yolo'])
-                    ChoiceChip(
-                      label: Text(m),
-                      selected: currentModeValue == m,
-                      onSelected: (_) {
-                        if (_isDraft) {
-                          onDraftChange?.call('mode', m);
-                        } else {
-                          _apply(
-                            context,
-                            () => transport.switchCollaborationMode(
-                                sid, m),
-                          );
-                        }
-                      },
-                    ),
-                ],
-              ),
             const SizedBox(height: 12),
             if (thoughtOption != null &&
                 thoughtOption.options.isNotEmpty) ...[
@@ -4745,10 +4805,10 @@ class _ModelModeSheet extends StatelessWidget {
                     ChoiceChip(
                       label: Text(v.name),
                       selected: currentThoughtValue == v.value ||
-                          state?.currentThought == v.value,
+                          widget.state?.currentThought == v.value,
                       onSelected: (_) {
                         if (_isDraft) {
-                          onDraftChange?.call('thought', v.value);
+                          _setDraft('thought', v.value);
                         } else {
                           final modelValue = currentModelValue;
                           final (provider, model) =
@@ -4760,15 +4820,15 @@ class _ModelModeSheet extends StatelessWidget {
                                     );
                           _apply(
                             context,
-                            () => transport.switchModelConfig(
+                            () => widget.transport.switchModelConfig(
                               sid,
                               provider: provider,
                               model: model,
                               thought: v.value,
                             ),
-                            onAccepted: () => state?.optimisticPatch({
+                            onAccepted: () => widget.state?.optimisticPatch({
                               'config': {
-                                ...?state!.config,
+                                ...?widget.state!.config,
                                 'thought': v.value,
                               },
                             }),
@@ -4778,19 +4838,19 @@ class _ModelModeSheet extends StatelessWidget {
                     ),
                 ],
               ),
-            ] else if ((state?.thoughtLevels ?? const []).isNotEmpty) ...[
+            ] else if ((widget.state?.thoughtLevels ?? const []).isNotEmpty) ...[
               const Text('思考等级', style: TextStyle(fontSize: 13)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 children: [
-                  for (final level in state!.thoughtLevels)
+                  for (final level in widget.state!.thoughtLevels)
                     ChoiceChip(
                       label: Text(level),
-                      selected: state?.currentThought == level,
+                      selected: widget.state?.currentThought == level,
                       onSelected: (_) => _apply(
                         context,
-                        () => transport.switchModelConfig(
+                        () => widget.transport.switchModelConfig(
                           sid,
                           provider: '${config['provider'] ?? ''}',
                           model: '${config['model'] ?? ''}',
@@ -4828,7 +4888,7 @@ class _ModelModeSheet extends StatelessWidget {
                       : null,
                   onTap: () {
                     if (_isDraft) {
-                      onDraftChange?.call('model', v.value);
+                      _setDraft('model', v.value);
                     } else {
                       final (provider, model) =
                           _splitModelValue(v.value);
@@ -4836,8 +4896,8 @@ class _ModelModeSheet extends StatelessWidget {
                       // keep current if supported, else fall back to the
                       // thought option's currentValue (Turbo: enabled/off)
                       final currentThought =
-                          state?.currentThought ?? '';
-                      final thoughtOpt = prep?.option('thought_level');
+                          widget.state?.currentThought ?? '';
+                      final thoughtOpt = widget.prep?.option('thought_level');
                       final thought = currentThought.isNotEmpty &&
                               (thoughtOpt?.options.any(
                                       (o) => o.value == currentThought) ??
@@ -4846,15 +4906,15 @@ class _ModelModeSheet extends StatelessWidget {
                           : '${thoughtOpt?.currentValue ?? (currentThought.isNotEmpty ? currentThought : 'enabled')}';
                       _apply(
                         context,
-                        () => transport.switchModelConfig(
+                        () => widget.transport.switchModelConfig(
                           sid,
                           provider: provider,
                           model: model,
                           thought: thought,
                         ),
-                        onAccepted: () => state?.optimisticPatch({
+                        onAccepted: () => widget.state?.optimisticPatch({
                           'config': {
-                            ...?state!.config,
+                            ...?widget.state!.config,
                             'provider': provider,
                             'model': model,
                             'thought': thought,
@@ -4865,7 +4925,7 @@ class _ModelModeSheet extends StatelessWidget {
                   },
                 ),
             ] else
-              Text('当前模型: ${state?.currentModel ?? ''}',
+              Text('当前模型: ${widget.state?.currentModel ?? ''}',
                   style: TextStyle(
                       fontSize: 12, color: EmberColors.of(context).textMuted)),
             if (!_isDraft) ...[
@@ -4881,10 +4941,10 @@ class _ModelModeSheet extends StatelessWidget {
                     selected: followup == f,
                     onSelected: (_) => _apply(
                       context,
-                      () => transport.setFollowupMode(sid, f),
-                      onAccepted: () => state?.optimisticPatch({
+                      () => widget.transport.setFollowupMode(sid, f),
+                      onAccepted: () => widget.state?.optimisticPatch({
                         'config': {
-                          ...?state!.config,
+                          ...?widget.state!.config,
                           'followupMode': f,
                         },
                       }),
@@ -5184,86 +5244,152 @@ class _SlashCommandBar extends StatelessWidget {
   }
 }
 
-class _SkillsPickerSheet extends StatelessWidget {
-  final List<SkillEntry> skills;
+/// 输入框左侧的协作模式按钮(U2):紧凑胶囊,展示当前模式名,
+/// 点击弹出模式菜单。modeLabel 为空时不渲染。
+class _ModeButton extends StatelessWidget {
+  final String? label;
+  final VoidCallback? onTap;
+
+  const _ModeButton({this.label, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    if (label == null || label!.isEmpty) return const SizedBox.shrink();
+    final colors = EmberColors.of(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(EmberRadius.control),
+      onTap: onTap,
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          border: Border.all(color: colors.hairline),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.bolt, size: 15, color: colors.primary),
+          const SizedBox(width: 3),
+          Text(label!,
+              style: TextStyle(
+                  fontSize: EmberType.caption,
+                  fontWeight: FontWeight.w600,
+                  color: colors.textMuted)),
+        ]),
+      ),
+    );
+  }
+}
+
+/// "+"面板(U2):斜杠命令 / Skills / 附件 三段合一。
+class _PlusSheet extends StatelessWidget {
+  final List<_SlashItem> slashItems;
   final bool loading;
-  final void Function(SkillEntry skill) onSelect;
+  final void Function(String insert) onSelect;
+  final VoidCallback onAttach;
   final Future<void> Function() onRefresh;
 
-  const _SkillsPickerSheet({
-    required this.skills,
+  const _PlusSheet({
+    required this.slashItems,
     required this.loading,
     required this.onSelect,
+    required this.onAttach,
     required this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
-    final list = skills.where((s) => s.enabled).toList();
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final colors = EmberColors.of(context);
+    final commands =
+        slashItems.where((i) => !i.isSkill).toList(growable: false);
+    final skills =
+        slashItems.where((i) => i.isSkill).toList(growable: false);
+    Widget section(String title, List<_SlashItem> items) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Text('选择 Skills',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w600)),
-                const Spacer(),
-                IconButton(
-                  icon: Icon(Icons.refresh,
-                      size: 18, color: EmberColors.of(context).textMuted),
-                  tooltip: '刷新',
-                  onPressed: onRefresh,
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+              child: Text(title,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textMuted)),
             ),
-            const SizedBox(height: 8),
-            if (loading)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child:
-                    Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            else if (list.isEmpty)
+            if (items.isEmpty)
               Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('没有可用的 Skills',
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                child: Text('无',
                     style: TextStyle(
-                        fontSize: 13, color: EmberColors.of(context).textMuted)),
+                        fontSize: 12, color: colors.textFaint)),
               )
             else
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final s in list)
-                      ListTile(
-                        dense: true,
-                        leading: Icon(Icons.auto_awesome_outlined,
-                            size: 18, color: EmberColors.of(context).warn),
-                        title: Text('\$${s.name}',
-                            style: const TextStyle(
-                                fontSize: 14, fontFamily: 'monospace')),
-                        subtitle: s.description != null
-                            ? Text(s.description!,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: EmberColors.of(context).textFaint),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis)
-                            : null,
-                        onTap: () => onSelect(s),
-                      ),
-                  ],
+              for (final item in items)
+                ListTile(
+                  dense: true,
+                  leading: Text(item.isSkill ? r'$' : '/',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: EmberFonts.term,
+                          color: colors.primary)),
+                  title: Text(item.name,
+                      style: const TextStyle(fontSize: 13)),
+                  subtitle: item.description.isNotEmpty
+                      ? Text(item.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 11, color: colors.textFaint))
+                      : null,
+                  onTap: () => onSelect(item.insert),
                 ),
-              ),
           ],
+        );
+
+    return SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Row(children: [
+              const Text('插入',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              IconButton(
+                icon: Icon(Icons.refresh,
+                    size: 18, color: colors.textMuted),
+                tooltip: '刷新',
+                onPressed: onRefresh,
+              ),
+            ]),
+          ),
         ),
-      ),
+        if (loading)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          )
+        else ...[
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    section('斜杠命令', commands),
+                    section('Skills', skills),
+                  ]),
+            ),
+          ),
+          ListTile(
+            leading: Icon(Icons.attach_file, size: 20, color: colors.textMuted),
+            title: const Text('附件',
+                style: TextStyle(fontSize: 13)),
+            onTap: onAttach,
+          ),
+          const SizedBox(height: 8),
+        ],
+      ]),
     );
   }
 }
@@ -5273,14 +5399,20 @@ class _InputBar extends StatefulWidget {
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback onAttach;
-  final VoidCallback onSkills;
+  final VoidCallback onPlusMenu;
+
+  /// 当前协作模式展示名(空则不渲染模式按钮)与菜单回调(U2)。
+  final String? modeLabel;
+  final VoidCallback? onPickMode;
 
   const _InputBar({
     required this.controller,
     required this.sending,
     required this.onSend,
     required this.onAttach,
-    required this.onSkills,
+    this.modeLabel,
+    this.onPickMode,
+    required this.onPlusMenu,
   });
 
   @override
@@ -5296,17 +5428,15 @@ class _InputBarState extends State<_InputBar> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            IconButton(
-              icon: Icon(Icons.attach_file,
-                  size: 20, color: EmberColors.of(context).textMuted),
-              tooltip: '添加附件',
-              onPressed: widget.sending ? null : widget.onAttach,
+            _ModeButton(
+              label: widget.modeLabel,
+              onTap: widget.sending ? null : widget.onPickMode,
             ),
             IconButton(
-              icon: Icon(Icons.auto_awesome_outlined,
-                  size: 20, color: EmberColors.of(context).textMuted),
-              tooltip: '选择 Skills',
-              onPressed: widget.sending ? null : widget.onSkills,
+              icon: Icon(Icons.add_circle_outline,
+                  size: 22, color: EmberColors.of(context).textMuted),
+              tooltip: 'Skills / 命令 / 附件',
+              onPressed: widget.sending ? null : widget.onPlusMenu,
             ),
             Expanded(
               child: TextField(
