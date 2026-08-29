@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zemote/protocol/conversation.dart';
-import 'package:zemote/ui/conversation_list_page.dart';
+import 'package:zemote/ui/session_drawer.dart';
 import 'package:zemote/ui/theme.dart';
 
 SessionEntry _e(String id, String phase, int at, {String? title}) =>
@@ -43,22 +43,36 @@ void main() {
     });
   });
   group('groupSessions', () {
-    test('按 今天/更早 两档分组,键序即展示序', () {
-      // now = 2026-08-28 12:00;今天 08:00 / 昨天 23:00 → 更早。
-      final now = DateTime(2026, 8, 28, 12);
+    // 相对 now 构造,避免依赖固定日期(today/older 分界用 DateTime.now)。
+    final now = DateTime.now();
+    final todayMs = now.millisecondsSinceEpoch;
+    final oldMs =
+        now.subtract(const Duration(days: 2)).millisecondsSinceEpoch;
+
+    test('置顶组最前且保持 sorted 顺序,其余按 今天/更早 两档', () {
+      // sorted 输入按最近活动降序;pinned 命中项原序进入置顶组。
       final groups = groupSessions([
-        _e('old', 'idle', DateTime(2026, 8, 27, 23).millisecondsSinceEpoch),
-        _e('today', 'idle', DateTime(2026, 8, 28, 8).millisecondsSinceEpoch),
-      ], now: now);
-      expect(groups.keys, ['今天', '更早']);
-      expect(groups['今天']!.map((e) => e.sessionId), ['today']);
-      expect(groups['更早']!.map((e) => e.sessionId), ['old']);
+        _e('pin-today', 'idle', todayMs),
+        _e('today', 'idle', todayMs - 1),
+        _e('old', 'idle', oldMs),
+        _e('pin-old', 'idle', oldMs - 1),
+      ], {'pin-old', 'pin-today'});
+      expect(groups.keys, ['pinned', 'today', 'older']);
+      expect(groups['pinned']!.map((e) => e.sessionId),
+          ['pin-today', 'pin-old']);
+      expect(groups['today']!.map((e) => e.sessionId), ['today']);
+      expect(groups['older']!.map((e) => e.sessionId), ['old']);
+    });
+    test('空置顶集退化为 今天/更早 两档,键序即展示序', () {
+      final groups = groupSessions(
+          [_e('today', 'idle', todayMs), _e('old', 'idle', oldMs)], {});
+      expect(groups.keys, ['today', 'older']);
+      expect(groups['today']!.map((e) => e.sessionId), ['today']);
+      expect(groups['older']!.map((e) => e.sessionId), ['old']);
     });
     test('空列表返回空分组;lastActivityAt=0 落入更早', () {
-      final now = DateTime(2026, 8, 28, 12);
-      expect(groupSessions([], now: now), isEmpty);
-      final groups = groupSessions([_e('zero', 'idle', 0)], now: now);
-      expect(groups.keys, ['更早']);
+      expect(groupSessions([], {}), isEmpty);
+      expect(groupSessions([_e('zero', 'idle', 0)], {}).keys, ['older']);
     });
   });
 }

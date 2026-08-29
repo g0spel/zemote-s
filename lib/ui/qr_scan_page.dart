@@ -121,7 +121,7 @@ class _QrScanPageState extends State<QrScanPage> {
             padding: const EdgeInsets.all(16),
             child: Text(
               '对准桌面端 ZCode 远程控制二维码，或从相册选择二维码截图',
-              style: TextStyle(color: ZInk.muted(context), fontSize: 12),
+              style: TextStyle(color: EmberColors.of(context).textMuted, fontSize: 12),
               textAlign: TextAlign.center,
             ),
           ),

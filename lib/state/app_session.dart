@@ -52,6 +52,15 @@ String describeConnectFailure(Object e) {
 class AppSession extends ChangeNotifier {
   final Map<String, ZemoteClient> _connections = {};
   final Set<String> _connecting = {};
+
+  /// 在途 connect 的 future(按账号):同账号重复 connect 复用同一个,
+  /// 防止二次建连覆盖 `_connections[id]` 后旧 socket 泄漏。
+  final Map<String, Future<ZemoteClient>> _inFlight = {};
+
+  /// 连接意图(按账号):connect 发起时登记,disconnect/disconnectAll
+  /// 撤销。connect 完成时意图已不在 → 该账号在连接期间被断开/移除,
+  /// 连接作废(不入池、不激活)。
+  final Set<String> _connectIntents = {};
   final Map<String, String> _errors = {};
   String? _activeId;
   Account? _activeAccount;
@@ -88,21 +97,41 @@ class AppSession extends ChangeNotifier {
   bool get connectingAny => _connecting.isNotEmpty;
 
   /// Ensure [account] is connected and make it active. Reuses an existing
-  /// live connection; otherwise establishes a new one. If the user switched
-  /// to another device while this connect was in flight, the device is added
-  /// to the pool silently (stays connected) without stealing activation.
+  /// live connection, then an in-flight connect for the same account;
+  /// otherwise establishes a new one. If the user switched to another
+  /// device while this connect was in flight, the device is added to the
+  /// pool silently (stays connected) without stealing activation. If the
+  /// account was disconnected (or removed) mid-flight, the connection is
+  /// discarded — a device the user just cut off never comes back through
+  /// a stale connect.
   Future<ZemoteClient> connect(Account account) async {
     final existing = _connections[account.id];
     if (existing != null) {
       _activate(account);
       return existing;
     }
+    final inFlight = _inFlight[account.id];
+    if (inFlight != null) return inFlight;
+    final future = _connect(account);
+    _inFlight[account.id] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_inFlight[account.id], future)) {
+        _inFlight.remove(account.id);
+      }
+    }
+  }
+
+  Future<ZemoteClient> _connect(Account account) async {
+    _connectIntents.add(account.id);
     _connecting.add(account.id);
     _errors.remove(account.id);
     notifyListeners();
     final epoch = ++_activationEpoch;
     final params = account.params;
     if (params == null) {
+      _connectIntents.remove(account.id);
       _connecting.remove(account.id);
       _errors[account.id] = '无法解析连接 URL（需为 https 且包含 sid/hash/t 参数）';
       notifyListeners();
@@ -115,17 +144,8 @@ class AppSession extends ChangeNotifier {
     try {
       await c.connect();
       await c.waitPaired(timeout: const Duration(seconds: 90));
-      _connections[account.id] = c;
-      if (epoch == _activationEpoch) {
-        _activate(account);
-      } else {
-        // A newer connect/switchTo superseded this one; still connected in
-        // the background, just not active.
-        _connecting.remove(account.id);
-        notifyListeners();
-      }
-      return c;
     } catch (e, st) {
+      _connectIntents.remove(account.id);
       _connecting.remove(account.id);
       _errors[account.id] = describeConnectFailure(e);
       notifyListeners();
@@ -133,6 +153,24 @@ class AppSession extends ChangeNotifier {
       await c.dispose();
       Error.throwWithStackTrace(StateError(describeConnectFailure(e)), st);
     }
+    if (!_connectIntents.contains(account.id)) {
+      // 连接期间被 disconnect/disconnectAll:意图已撤销,作废在途连接。
+      _connecting.remove(account.id);
+      notifyListeners();
+      await c.dispose();
+      throw StateError('连接已取消：设备在连接完成前已断开或移除');
+    }
+    _connectIntents.remove(account.id);
+    _connections[account.id] = c;
+    if (epoch == _activationEpoch) {
+      _activate(account);
+    } else {
+      // A newer connect/switchTo superseded this one; still connected in
+      // the background, just not active.
+      _connecting.remove(account.id);
+      notifyListeners();
+    }
+    return c;
   }
 
   /// Switch the active device without reconnecting. Connects first if needed.
@@ -154,9 +192,12 @@ class AppSession extends ChangeNotifier {
   }
 
   /// Disconnect a single device. Bumps the activation epoch so an in-flight
-  /// connect for this device cannot re-activate it after the disconnect.
+  /// connect for this device cannot re-activate it after the disconnect,
+  /// and revokes the connect intent so the in-flight connect is discarded
+  /// at completion instead of entering the pool.
   Future<void> disconnect(String accountId) async {
     _activationEpoch++;
+    _connectIntents.remove(accountId);
     final conn = _connections.remove(accountId);
     _connecting.remove(accountId);
     _errors.remove(accountId);
@@ -171,6 +212,7 @@ class AppSession extends ChangeNotifier {
   /// Disconnect everything.
   Future<void> disconnectAll() async {
     _activationEpoch++;
+    _connectIntents.clear();
     final all = _connections.values.toList();
     _connections.clear();
     _connecting.clear();

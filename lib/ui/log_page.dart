@@ -109,6 +109,7 @@ class _LogPageState extends State<LogPage> {
             return Center(
                 child: Text(diag ? '暂无诊断条目' : '暂无日志'));
           }
+          final colors = EmberColors.of(context);
           return ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -127,21 +128,21 @@ class _LogPageState extends State<LogPage> {
                       ':${e.time.second.toString().padLeft(2, '0')}'
                       '.${e.time.millisecond.toString().padLeft(3, '0')}',
                       style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 9,
-                        color: ZInk.faint(context),
+                        fontFamily: EmberFonts.term,
+                        fontSize: EmberType.caption,
+                        color: colors.textFaint,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       e.message,
                       style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 10.5,
+                        fontFamily: EmberFonts.term,
+                        fontSize: EmberType.caption,
                         height: 1.4,
                         color: e.isDiagnostic
-                            ? ZColors.danger
-                            : ZInk.solid(context),
+                            ? colors.err
+                            : colors.textSolid,
                         fontWeight:
                             e.isDiagnostic ? FontWeight.w600 : FontWeight.w400,
                       ),

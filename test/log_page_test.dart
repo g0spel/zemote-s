@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:zemote/state/account_store.dart';
+import 'package:zemote/state/app_session.dart';
 import 'package:zemote/state/log_store.dart';
 import 'package:zemote/ui/log_page.dart';
+import 'package:zemote/ui/settings_page.dart';
+
+import 'fake_credential_storage.dart';
 
 void main() {
   // LogStore.instance is app-wide; keep tests self-contained by clearing.
@@ -47,5 +52,34 @@ void main() {
     LogStore.instance.add('[诊断] 未知关闭码 4908');
     await pump(tester, const LogPage(diagnosticsOnly: true));
     expect(find.byIcon(Icons.delete_outline), findsNothing);
+  });
+
+  testWidgets('诊断入口页计数徽随 LogStore 实时刷新(A8)', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsPage(
+        store: AccountStore(storage: FakeCredentialStorage()),
+        session: AppSession(),
+        onDisconnect: () {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // 进页时无诊断条目:只有行尾箭头,无计数徽。
+    await tester.tap(find.text('诊断与日志'));
+    await tester.pumpAndSettle();
+    expect(find.text('1'), findsNothing);
+
+    // 进页后新增诊断条目 → 250ms 合并刷新窗口后计数徽出现(实时)。
+    LogStore.instance.add('[诊断] 测试新增条目');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('1'), findsOneWidget);
+
+    // 再加一条 → 计数变 2。
+    LogStore.instance.add('[诊断] 又一条');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('2'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 300));
   });
 }

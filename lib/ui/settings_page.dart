@@ -7,6 +7,7 @@ import '../protocol/zemote_client.dart';
 import '../state/account_store.dart';
 import '../state/app_session.dart';
 import '../state/crash_report.dart';
+import '../state/log_store.dart';
 import '../update/app_version.dart';
 import '../update/update_checker.dart';
 import '../update/update_dialog.dart';
@@ -26,6 +27,9 @@ Map<String, dynamic> _scopeOf(BridgeSession session) => {
       if (session.bridge['workspaceIdentity'] != null)
         'workspaceIdentity': session.bridge['workspaceIdentity'],
     };
+
+/// 行组内统一的行导航箭头(与 leading 图标同为 20 档)。
+const _chevron = Icon(Icons.chevron_right, size: 20);
 
 /// 设置页(spec §7.3):外观 / 设备与连接 / 模型 / 关于 四组行组,
 /// 控制区规范:card 底 + hairline + 小圆角,分组小标题间距字。
@@ -83,21 +87,24 @@ class SettingsPage extends StatelessWidget {
                               icon: const Icon(Icons.dark_mode_outlined,
                                   size: 16),
                               label: Text(tr(context, 'settings.theme.dark'),
-                                  style: const TextStyle(fontSize: 12))),
+                                  style: const TextStyle(
+                                      fontSize: EmberType.secondary))),
                           ButtonSegment(
                               value: ThemeMode.light,
                               icon: const Icon(Icons.light_mode_outlined,
                                   size: 16),
                               label: Text(tr(context, 'settings.theme.light'),
-                                  style: const TextStyle(fontSize: 12))),
+                                  style: const TextStyle(
+                                      fontSize: EmberType.secondary))),
                           ButtonSegment(
                               value: ThemeMode.system,
                               icon: const Icon(Icons.settings_suggest_outlined,
                                   size: 16),
                               label:
                                   Text(tr(context, 'settings.theme.system'),
-                                      style:
-                                          const TextStyle(fontSize: 12))),
+                                      style: const TextStyle(
+                                          fontSize:
+                                              EmberType.secondary))),
                         ],
                         selected: {controller.mode},
                         onSelectionChanged: (modes) =>
@@ -105,7 +112,7 @@ class SettingsPage extends StatelessWidget {
                         style: const ButtonStyle(
                           visualDensity: VisualDensity.compact,
                           textStyle: WidgetStatePropertyAll(
-                              TextStyle(fontSize: 12)),
+                              TextStyle(fontSize: EmberType.secondary)),
                           iconSize: WidgetStatePropertyAll(16),
                         ),
                       ),
@@ -125,18 +132,20 @@ class SettingsPage extends StatelessWidget {
                             ButtonSegment(
                                 value: 'zh-CN',
                                 label: Text('中文',
-                                    style: TextStyle(fontSize: 12))),
+                                    style: TextStyle(
+                                        fontSize: EmberType.secondary))),
                             ButtonSegment(
                                 value: 'en-US',
                                 label: Text('English',
-                                    style: TextStyle(fontSize: 12))),
+                                    style: TextStyle(
+                                        fontSize: EmberType.secondary))),
                           ],
                           selected: {ui.locale},
                           onSelectionChanged: (v) => ui.setLocale(v.first),
                           style: const ButtonStyle(
                             visualDensity: VisualDensity.compact,
                             textStyle: WidgetStatePropertyAll(
-                                TextStyle(fontSize: 12)),
+                                TextStyle(fontSize: EmberType.secondary)),
                           ),
                         ),
                       ),
@@ -185,9 +194,8 @@ class SettingsPage extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.devices_other, size: 20),
               title: const Text('设备管理'),
-              subtitle: Text('${store.accounts.length} 台设备 · 扫码/导入添加',
-                  style: const TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right),
+              subtitle: Text('${store.accounts.length} 台设备 · 扫码/导入添加'),
+              trailing: _chevron,
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => DeviceManagementPage(
@@ -207,9 +215,8 @@ class SettingsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.model_training, size: 20),
                 title: const Text('模型供应商'),
-                subtitle: const Text('添加 / 启停 / 删除模型供应商',
-                    style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
+                subtitle: const Text('添加 / 启停 / 删除模型供应商'),
+                trailing: _chevron,
                 onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                         builder: (_) =>
@@ -219,9 +226,8 @@ class SettingsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.query_stats, size: 20),
                 title: const Text('用量'),
-                subtitle: const Text('额度 / 配额限制 / 订阅详情',
-                    style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
+                subtitle: const Text('额度 / 配额限制 / 订阅详情'),
+                trailing: _chevron,
                 onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                         builder: (_) => UsagePage(session: bridge!))),
@@ -230,9 +236,8 @@ class SettingsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.extension_outlined, size: 20),
                 title: const Text('服务管理'),
-                subtitle: const Text('插件 / 技能 / 命令',
-                    style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
+                subtitle: const Text('插件 / 技能 / 命令'),
+                trailing: _chevron,
                 onTap: () => Navigator.of(context)
                     .push(MaterialPageRoute(
                         builder: (_) => ServicesPage(
@@ -250,18 +255,16 @@ class SettingsPage extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.system_update_alt, size: 20),
               title: const Text('检查更新'),
-              subtitle: Text('当前版本 v$appVersion · 检测 GitHub 最新发布',
-                  style: const TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right),
+              subtitle: const Text('当前版本 v$appVersion · 检测 GitHub 最新发布'),
+              trailing: _chevron,
               onTap: () => _checkUpdates(context),
             ),
             const Divider(indent: 52),
             ListTile(
               leading: const Icon(Icons.monitor_heart_outlined, size: 20),
               title: const Text('诊断与日志'),
-              subtitle: const Text('诊断日志 / 协议日志 / 调试器',
-                  style: TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right),
+              subtitle: const Text('诊断日志 / 协议日志 / 调试器'),
+              trailing: _chevron,
               onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                       builder: (_) =>
@@ -271,9 +274,8 @@ class SettingsPage extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline, size: 20),
               title: const Text('关于'),
-              subtitle: Text('ZemoteS v$appVersion · 协议复刻版',
-                  style: const TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right),
+              subtitle: const Text('ZemoteS v$appVersion · 协议复刻版'),
+              trailing: _chevron,
               onTap: () => _showAbout(context),
             ),
           ],
@@ -282,10 +284,12 @@ class SettingsPage extends StatelessWidget {
         _GroupCard(
           children: [
             ListTile(
-              leading:
-                  const Icon(Icons.link_off, color: ZColors.danger, size: 20),
-              title: const Text('断开当前设备',
-                  style: TextStyle(color: ZColors.danger)),
+              leading: Icon(Icons.link_off,
+                  color: EmberColors.of(context).err, size: 20),
+              title: Text('断开当前设备',
+                  style: TextStyle(
+                      fontSize: EmberType.emphasis,
+                      color: EmberColors.of(context).err)),
               onTap: onDisconnect,
             ),
           ],
@@ -380,6 +384,8 @@ class SettingsPage extends StatelessWidget {
 }
 
 /// 控制区行组容器:card 底 + hairline + 小圆角(spec §4/§7.3)。
+/// 行组字阶一处定义:title=emphasis 15、subtitle=secondary 12 muted,
+/// 行内不再逐个写样式。
 class _GroupCard extends StatelessWidget {
   final List<Widget> children;
 
@@ -399,7 +405,13 @@ class _GroupCard extends StatelessWidget {
       // decorated Container would hide the splash (framework assertion).
       child: Material(
         type: MaterialType.transparency,
-        child: Column(children: children),
+        child: ListTileTheme.merge(
+          titleTextStyle: TextStyle(
+              fontSize: EmberType.emphasis, color: colors.textSolid),
+          subtitleTextStyle: TextStyle(
+              fontSize: EmberType.secondary, color: colors.textMuted),
+          child: Column(children: children),
+        ),
       ),
     );
   }
@@ -423,8 +435,7 @@ class _VerboseFramesTileState extends State<_VerboseFramesTile> {
     return SwitchListTile(
       secondary: const Icon(Icons.article_outlined, size: 20),
       title: const Text('协议帧日志（详细）'),
-      subtitle: const Text('逐帧记录收发原文；流式期间有性能开销，排查协议时开启',
-          style: TextStyle(fontSize: 12)),
+      subtitle: const Text('逐帧记录收发原文；流式期间有性能开销，排查协议时开启'),
       value: _value,
       onChanged: (v) async {
         setState(() => _value = v);
@@ -446,6 +457,36 @@ class _DiagnosticsPage extends StatelessWidget {
 
   const _DiagnosticsPage({this.client, this.bridge});
 
+  /// 诊断计数前置(spec §7.4):有 [诊断] 条目时在行尾显示计数徽。
+  /// AnimatedBuilder 挂 LogStore:进页后新增条目实时刷新(A8)。
+  Widget _diagCountTrailing(BuildContext context) {
+    return AnimatedBuilder(
+      animation: LogStore.instance,
+      builder: (context, _) {
+        final count = LogStore.instance.entries
+            .where((e) => e.isDiagnostic)
+            .length;
+        return Row(mainAxisSize: MainAxisSize.min, children: [
+          if (count > 0) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: EmberColors.of(context).warn.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text('$count',
+                  style: TextStyle(
+                      fontSize: EmberType.caption,
+                      color: EmberColors.of(context).warn)),
+            ),
+            const SizedBox(width: EmberSpacing.gapS),
+          ],
+          _chevron,
+        ]);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -460,9 +501,8 @@ class _DiagnosticsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.bug_report_outlined, size: 20),
                 title: const Text('诊断日志'),
-                subtitle: const Text('故障原因与协议失配提示',
-                    style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
+                subtitle: const Text('故障原因与协议失配提示'),
+                trailing: _diagCountTrailing(context),
                 onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                         builder: (_) =>
@@ -472,9 +512,8 @@ class _DiagnosticsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.terminal, size: 20),
                 title: const Text('协议日志'),
-                subtitle: const Text('查看 relay / IPC / V4 帧日志',
-                    style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
+                subtitle: const Text('查看 relay / IPC / V4 帧日志'),
+                trailing: _chevron,
                 onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const LogPage())),
               ),
@@ -483,9 +522,8 @@ class _DiagnosticsPage extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.bug_report_outlined, size: 20),
                   title: const Text('RPC 调试器'),
-                  subtitle: const Text('发送原始 relay payload',
-                      style: TextStyle(fontSize: 12)),
-                  trailing: const Icon(Icons.chevron_right),
+                  subtitle: const Text('发送原始 relay payload'),
+                  trailing: _chevron,
                   onTap: () => Navigator.of(context)
                       .push(MaterialPageRoute(
                           builder: (_) =>
@@ -498,9 +536,8 @@ class _DiagnosticsPage extends StatelessWidget {
                   leading: const Icon(Icons.hub_outlined, size: 20),
                   title: const Text('信道浏览器'),
                   subtitle: const Text(
-                      '调用任意 channel 方法（zcode-task / skills / mcp …）',
-                      style: TextStyle(fontSize: 12)),
-                  trailing: const Icon(Icons.chevron_right),
+                      '调用任意 channel 方法（zcode-task / skills / mcp …）'),
+                  trailing: _chevron,
                   onTap: () => Navigator.of(context)
                       .push(MaterialPageRoute(
                           builder: (_) =>
@@ -551,7 +588,8 @@ class _LastCrashCardState extends State<_LastCrashCard> {
           child: SingleChildScrollView(
             child: SelectableText(
               text,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 10.5),
+              style: TextStyle(
+                  fontFamily: EmberFonts.term, fontSize: 10.5),
             ),
           ),
         ),
@@ -594,11 +632,10 @@ class _LastCrashCardState extends State<_LastCrashCard> {
           title: const Text('上次崩溃'),
           subtitle: Text(
             '${c.time} · ${c.error.split('\n').first}',
-            style: const TextStyle(fontSize: 12),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: _chevron,
           onTap: _showDetails,
         ),
       ],

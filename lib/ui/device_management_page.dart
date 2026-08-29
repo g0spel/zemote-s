@@ -17,10 +17,15 @@ class DeviceManagementPage extends StatefulWidget {
   final AccountStore store;
   final AppSession session;
 
+  /// 当前活跃设备已打开的工作区标题(壳层取自 activeWorkspace 传入)。
+  /// null/空 = 无已知工作区,设备卡不显示该行。
+  final String? activeWorkspaceTitle;
+
   const DeviceManagementPage({
     super.key,
     required this.store,
     required this.session,
+    this.activeWorkspaceTitle,
   });
 
   @override
@@ -338,6 +343,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
                   account: accounts[i],
                   isCurrent: session.current?.id == accounts[i].id,
                   session: session,
+                  activeWorkspaceTitle: widget.activeWorkspaceTitle,
                   stateText: _stateText,
                   onRename: () => _rename(accounts[i]),
                   onDelete: () => _delete(accounts[i]),
@@ -353,11 +359,13 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
   }
 }
 
-/// 单台设备卡:头像 + 名称 + 在线态;操作仅重命名/删除(连接自动化,无连接手势)。
+/// 单台设备卡:头像 + 名称 + 在线态 + 当前工作区(仅活跃设备有本地已知
+/// 数据,其余设备不显示该行);操作仅重命名/删除(连接自动化,无连接手势)。
 class _DeviceCard extends StatelessWidget {
   final Account account;
   final bool isCurrent;
   final AppSession session;
+  final String? activeWorkspaceTitle;
   final String Function(RelayState) stateText;
   final VoidCallback onRename;
   final VoidCallback onDelete;
@@ -366,6 +374,7 @@ class _DeviceCard extends StatelessWidget {
     required this.account,
     required this.isCurrent,
     required this.session,
+    required this.activeWorkspaceTitle,
     required this.stateText,
     required this.onRename,
     required this.onDelete,
@@ -421,6 +430,16 @@ class _DeviceCard extends StatelessWidget {
                     style: TextStyle(
                         fontSize: EmberType.caption,
                         color: colors.textFaint)),
+                if (isCurrent &&
+                    (activeWorkspaceTitle ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text('当前工作区:$activeWorkspaceTitle',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: EmberType.caption,
+                          color: colors.textMuted)),
+                ],
                 if (client != null)
                   ValueListenableBuilder<RelayState>(
                     valueListenable: client.relay.stateListenable,

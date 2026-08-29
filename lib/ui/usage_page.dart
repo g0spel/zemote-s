@@ -43,6 +43,19 @@ int? tokensRemainingPercent(Map<String, dynamic> limit) {
   return (100 - used).round().clamp(0, 100);
 }
 
+/// 五小时/每周双窗口格的额度行(spec §7.4);其余额度行走通用 [limitWindowLabel]。
+bool isQuotaWindowLimit(Map<String, dynamic> limit) =>
+    limit['type'] == 'TOKENS_LIMIT' &&
+    (limit['unit'] == 3 || limit['unit'] == 6);
+
+/// 阈值色沿用(spec §7.4):剩余 ≤10% 红、≤20% 黄,其余主色。
+Color quotaColor(int? remainingPercent, EmberColors c) {
+  if (remainingPercent == null) return c.primary;
+  if (remainingPercent <= 10) return c.err;
+  if (remainingPercent <= 20) return c.warn;
+  return c.primary;
+}
+
 /// Subscription times are ISO strings, not millis.
 String fmtIsoTime(Object? v) {
   if (v is! String || v.trim().isEmpty) return '-';
@@ -131,6 +144,7 @@ class _UsagePageState extends State<UsagePage> {
   }
 
   Widget _buildBody() {
+    final colors = EmberColors.of(context);
     final data = _data ?? const {};
     final context_ = data['context'];
     final provider = data['provider'];
@@ -141,83 +155,94 @@ class _UsagePageState extends State<UsagePage> {
         ? quota['limits'] as List
         : const [];
     final mcpTotal = mcpQuotaTotal(limits);
+    final windows = limits
+        .whereType<Map>()
+        .where((l) => isQuotaWindowLimit(l.cast<String, dynamic>()))
+        .toList();
+    final otherLimits = limits
+        .whereType<Map>()
+        .where((l) =>
+            !isMcpQuotaLimit(l.cast<String, dynamic>()) &&
+            !isQuotaWindowLimit(l.cast<String, dynamic>()))
+        .toList();
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(EmberSpacing.page),
         children: [
+          // 主额度大卡(spec §7.4):套餐身份 + 剩余/总量 + 进度 + 重置时间。
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
+              padding: const EdgeInsets.all(EmberSpacing.page),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: ZColors.primary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.bolt,
-                        color: ZColors.primary),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          context_ is Map
-                              ? '${context_['displayName'] ?? '-'}'
-                              : '-',
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600),
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: colors.primary.withValues(alpha: 0.15),
+                          borderRadius:
+                              BorderRadius.circular(EmberRadius.avatar),
                         ),
-                        Text(
-                          [
-                            if (provider is Map)
-                              '${provider['name'] ?? ''}',
-                            if (quota is Map && quota['level'] != null)
-                              '${quota['level']}',
-                          ].join(' · '),
-                          style: TextStyle(
-                              fontSize: 12, color: ZInk.faint(context)),
+                        child:
+                            Icon(Icons.bolt, color: colors.primary, size: 22),
+                      ),
+                      const SizedBox(width: EmberSpacing.gapM),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              context_ is Map
+                                  ? '${context_['displayName'] ?? '-'}'
+                                  : '-',
+                              style: TextStyle(
+                                  fontSize: EmberType.emphasis,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.textSolid),
+                            ),
+                            Text(
+                              [
+                                if (provider is Map)
+                                  '${provider['name'] ?? ''}',
+                                if (quota is Map && quota['level'] != null)
+                                  '${quota['level']}',
+                              ].join(' · '),
+                              style: TextStyle(
+                                  fontSize: EmberType.caption,
+                                  color: colors.textFaint),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          if (remaining is Map && remaining['isShow'] == true)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                  if (remaining is Map && remaining['isShow'] == true) ...[
+                    const SizedBox(height: EmberSpacing.gapM),
                     Row(
-                      mainAxisAlignment:
-                          MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        const Text('剩余 MCP 额度',
-                            style: TextStyle(fontSize: 14)),
+                        Text('剩余 MCP 额度',
+                            style: TextStyle(
+                                fontSize: EmberType.body,
+                                color: colors.textMuted)),
                         Text(
                           mcpTotal == null
                               ? '${remaining['count'] ?? '-'}'
                               : '${remaining['count'] ?? '-'} / $mcpTotal',
-                          style: const TextStyle(
-                              fontSize: 20,
+                          style: TextStyle(
+                              fontSize: EmberType.title,
                               fontWeight: FontWeight.w700,
-                              color: ZColors.primary),
+                              color: colors.primary),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: EmberSpacing.gapS),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
@@ -227,10 +252,9 @@ class _UsagePageState extends State<UsagePage> {
                                 .toDouble()
                                 .clamp(0.0, 1.0),
                         minHeight: 6,
-                        backgroundColor:
-                            Colors.white.withValues(alpha: 0.08),
-                        valueColor: const AlwaysStoppedAnimation(
-                            ZColors.primary),
+                        backgroundColor: colors.raise,
+                        valueColor:
+                            AlwaysStoppedAnimation(colors.primary),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -238,32 +262,47 @@ class _UsagePageState extends State<UsagePage> {
                       '剩余 ${((((remaining['percentage'] as num?) ?? 0) * 100)).round()}% · '
                       '重置时间 ${_fmtTime(remaining['nextResetTime'])}',
                       style: TextStyle(
-                          fontSize: 11, color: ZInk.faint(context)),
+                          fontSize: EmberType.caption,
+                          color: colors.textFaint),
                     ),
                   ],
-                ),
+                ],
               ),
             ),
-          if (limits.isNotEmpty) ...[
+          ),
+          // 五小时/每周双窗口格(spec §7.4)。
+          if (windows.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final (i, w) in windows.indexed) ...[
+                  if (i > 0) const SizedBox(width: EmberSpacing.gapS),
+                  _QuotaWindowTile(
+                      limit: w.cast<String, dynamic>(), fmtTime: _fmtTime),
+                ],
+              ],
+            ),
+          ],
+          // 双窗口格之外的额度(边角情况)保持通用行。
+          if (otherLimits.isNotEmpty) ...[
             const SizedBox(height: 10),
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(EmberSpacing.page),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('配额限制',
+                    Text('配额限制',
                         style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    // The MCP quota row is covered by the top card.
-                    for (final limit in limits)
-                      if (limit is Map &&
-                          !isMcpQuotaLimit(limit.cast<String, dynamic>()))
-                        _LimitRow(
-                            limit: limit.cast<String, dynamic>(),
-                            fmtTime: _fmtTime),
+                            fontSize: EmberType.emphasis,
+                            fontWeight: FontWeight.w600,
+                            color: colors.textSolid)),
+                    const SizedBox(height: EmberSpacing.gapS),
+                    for (final limit in otherLimits)
+                      _LimitRow(
+                          limit: limit.cast<String, dynamic>(),
+                          fmtTime: _fmtTime),
                   ],
                 ),
               ),
@@ -275,15 +314,16 @@ class _UsagePageState extends State<UsagePage> {
             const SizedBox(height: 10),
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(EmberSpacing.page),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('订阅',
+                    Text('订阅',
                         style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
+                            fontSize: EmberType.emphasis,
+                            fontWeight: FontWeight.w600,
+                            color: colors.textSolid)),
+                    const SizedBox(height: EmberSpacing.gapS),
                     for (final d in subscription['details'] as List)
                       if (d is Map) ...[
                         _kv('产品', '${d['productName'] ?? '-'}'),
@@ -309,13 +349,71 @@ class _UsagePageState extends State<UsagePage> {
         children: [
           Text(label,
               style: TextStyle(
-                  fontSize: 12, color: ZInk.muted(context))),
+                  fontSize: EmberType.secondary,
+                  color: EmberColors.of(context).textMuted)),
           Flexible(
             child: Text(value,
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: EmberType.secondary),
                 textAlign: TextAlign.end),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 五小时/每周窗口格(spec §7.4):标签 + 剩余百分比(阈值色)+ 进度 + 重置。
+class _QuotaWindowTile extends StatelessWidget {
+  final Map<String, dynamic> limit;
+  final String Function(Object?) fmtTime;
+
+  const _QuotaWindowTile({required this.limit, required this.fmtTime});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    // TOKENS percentage = used%; remaining = 100 − used.
+    final remaining = tokensRemainingPercent(limit);
+    final color = quotaColor(remaining, colors);
+    return Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(EmberSpacing.cardPad),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(limitWindowLabel(limit),
+                  style: TextStyle(
+                      fontSize: EmberType.secondary,
+                      color: colors.textMuted)),
+              const SizedBox(height: 4),
+              Text(
+                remaining == null ? '-' : '剩余 $remaining%',
+                style: TextStyle(
+                    fontSize: EmberType.emphasis,
+                    fontWeight: FontWeight.w600,
+                    color: color),
+              ),
+              const SizedBox(height: EmberSpacing.gapS),
+              if (remaining != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: (remaining / 100).clamp(0.0, 1.0),
+                    minHeight: 4,
+                    backgroundColor: colors.raise,
+                    valueColor: AlwaysStoppedAnimation(color),
+                  ),
+                ),
+              const SizedBox(height: 4),
+              Text(
+                '重置 ${fmtTime(limit['nextResetTime'])}',
+                style: TextStyle(
+                    fontSize: EmberType.caption, color: colors.textFaint),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -329,18 +427,13 @@ class _LimitRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
     final label = limitWindowLabel(limit);
     // TOKENS percentage = used%; remaining = 100 − used.
     final remaining = tokensRemainingPercent(limit);
     final percentage = (limit['percentage'] as num?)?.toDouble();
     final usageDetails = limit['usageDetails'];
-    final color = remaining == null
-        ? ZColors.primary
-        : remaining <= 10
-            ? ZColors.danger
-            : remaining <= 20
-                ? ZColors.warning
-                : ZColors.primary;
+    final color = quotaColor(remaining, colors);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -349,14 +442,18 @@ class _LimitRow extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(label, style: const TextStyle(fontSize: 12)),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: EmberType.secondary,
+                      color: colors.textSolid)),
               Text(
                 [
                   if (remaining != null) '剩余 $remaining%',
                   if (percentage != null) '已用 ${percentage.round()}%',
                 ].join(' · '),
                 style: TextStyle(
-                    fontSize: 11, color: ZInk.muted(context)),
+                    fontSize: EmberType.caption,
+                    color: colors.textMuted),
               ),
             ],
           ),
@@ -368,8 +465,7 @@ class _LimitRow extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: (remaining / 100).clamp(0.0, 1.0),
                   minHeight: 4,
-                  backgroundColor:
-                      Colors.white.withValues(alpha: 0.08),
+                  backgroundColor: colors.raise,
                   valueColor: AlwaysStoppedAnimation(color),
                 ),
               ),
@@ -383,13 +479,14 @@ class _LimitRow extends StatelessWidget {
                     .map((u) => '${u['modelCode']}: ${u['usage']}')
                     .join('  '),
                 style: TextStyle(
-                    fontSize: 10, color: ZInk.faint(context)),
+                    fontSize: EmberType.caption,
+                    color: colors.textFaint),
               ),
             ),
           Text(
             '重置 ${fmtTime(limit['nextResetTime'])}',
-            style:
-                TextStyle(fontSize: 10, color: ZInk.ghost(context)),
+            style: TextStyle(
+                fontSize: EmberType.caption, color: colors.textFaint),
           ),
         ],
       ),

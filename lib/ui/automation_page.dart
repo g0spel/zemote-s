@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/zemote_client.dart';
+import 'ember_pressable.dart';
 import 'theme.dart';
 
 /// Typed wrapper over the `zcode-agent` automation RPCs (arg shapes
@@ -54,6 +55,13 @@ String? lifecycleLabel(String status) => switch (status) {
       'failed' => '失败',
       'paused' => '已暂停',
       _ => null,
+    };
+
+/// 生命周期徽色(spec §7.2:完成绿 / 失败红 / 其余灰)。
+Color lifecycleColor(String status, EmberColors c) => switch (status) {
+      'completed' => c.ok,
+      'failed' => c.err,
+      _ => c.textFaint,
     };
 
 class AutomationApi {
@@ -144,6 +152,9 @@ String _fmtMs(num? v) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
 }
+
+/// KV 格空值占位(spec §7.2)。
+String _orDash(String v) => v.isEmpty ? '—' : v;
 
 class AutomationPage extends StatefulWidget {
   final BridgeSession bridge;
@@ -303,118 +314,175 @@ class _AutomationPageState extends State<AutomationPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(EmberRadius.sheet)),
+      ),
       builder: (context) => DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.6,
-        builder: (context, scrollController) => ListView(
-          controller: scrollController,
-          padding: const EdgeInsets.all(16),
-          children: [
-            Row(
-              children: [
-                Expanded(
+        builder: (context, scrollController) {
+          final c = EmberColors.of(context);
+          return ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.all(EmberSpacing.page),
+            children: [
+              Row(
+                children: [
+                  Expanded(
                     child: Text('${a['title']}',
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600))),
-                IconButton(
-                  icon: const Icon(Icons.play_arrow, size: 22),
-                  tooltip: '立即运行',
-                  onPressed: () => _runNow(a),
-                ),
-                if (lifecycle != null)
-                  IconButton(
-                    icon: const Icon(Icons.restart_alt, size: 20),
-                    tooltip: '重新启动排程',
-                    onPressed: () => _restart(a),
+                        style: TextStyle(
+                            fontSize: EmberType.emphasis,
+                            fontWeight: FontWeight.w600,
+                            color: c.textSolid)),
                   ),
-                IconButton(
-                  icon: const Icon(Icons.edit_outlined, size: 20),
-                  tooltip: '编辑',
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _showEditor(existing: a);
-                  },
-                ),
-                IconButton(
-                  icon: Icon(Icons.delete_outline,
-                      size: 20, color: ZColors.danger),
-                  tooltip: '删除',
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _delete(a);
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${scheduleLabel(a)} · 模式 ${a['mode'] ?? '-'} · '
-              '${a['provider'] ?? '-'} · ${a['model'] ?? '-'}'
-              '${lifecycle != null ? ' · $lifecycle' : ''}',
-              style: TextStyle(fontSize: 11, color: ZInk.faint(context)),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '已运行 ${a['runCount'] ?? 0} 次 · '
-              '下次 ${_fmtMs(a['nextRunAt'] as num?)} · '
-              '上次 ${_fmtMs(a['lastRunAt'] as num?)}',
-              style: TextStyle(fontSize: 11, color: ZInk.faint(context)),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: ZInk.tile(context),
-                borderRadius: BorderRadius.circular(10),
+                  if (lifecycle != null) _LifecycleBadge(a),
+                ],
               ),
-              child: SelectableText(
-                '${a['prompt'] ?? ''}',
-                style: const TextStyle(fontSize: 11.5, height: 1.5),
+              const SizedBox(height: EmberSpacing.gapM),
+              // 操作按钮三型(spec §5):主=primary 填充,次=raise 底,
+              // 幽灵=无底文字(重启 primary / 删除 err)。
+              // 主/次按钮带按压缩放(spec §5 动效);ListTile 自带
+              // 水波,设置行不叠加。
+              Wrap(
+                spacing: EmberSpacing.gapS,
+                runSpacing: EmberSpacing.gapS,
+                children: [
+                  EmberPressable(
+                    child: FilledButton.icon(
+                      onPressed: () => _runNow(a),
+                      icon: const Icon(Icons.play_arrow, size: 18),
+                      label: const Text('立即运行'),
+                    ),
+                  ),
+                  if (lifecycle != null)
+                    EmberPressable(
+                      child: TextButton.icon(
+                        onPressed: () => _restart(a),
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        label: const Text('重启排程'),
+                      ),
+                    ),
+                  EmberPressable(
+                    child: FilledButton.tonalIcon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showEditor(existing: a);
+                      },
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('编辑'),
+                    ),
+                  ),
+                  EmberPressable(
+                    child: TextButton(
+                      style: TextButton.styleFrom(foregroundColor: c.err),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _delete(a);
+                      },
+                      child: const Text('删除'),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 14),
-            const Text('执行历史',
-                style:
-                    TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            if (runs.isEmpty)
-              Text('暂无执行记录',
-                  style: TextStyle(fontSize: 11.5, color: ZInk.faint(context)))
-            else
-              for (final r in runs)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  leading: Icon(
-                    '${r['outcome']}' == 'succeeded'
-                        ? Icons.check_circle
-                        : Icons.error_outline,
-                    size: 16,
-                    color: '${r['outcome']}' == 'succeeded'
-                        ? ZColors.success
-                        : ZColors.danger,
-                  ),
-                  title: Text(
-                    '${r['outcome'] ?? r['dispatchStatus'] ?? ''}'
-                    ' · ${r['trigger'] ?? ''}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  subtitle: Text(
-                    _fmtMs(r['scheduledAt'] as num?),
-                    style: TextStyle(fontSize: 10.5, color: ZInk.faint(context)),
-                  ),
-                  trailing: r['sessionId'] is String
-                      ? const Icon(Icons.chevron_right, size: 18)
-                      : null,
-                  onTap: () {
-                    final sid = r['sessionId'];
-                    if (sid is! String) return;
-                    Navigator.pop(context);
-                    widget.onOpenTask(sid, '${a['title']}');
-                  },
+              const SizedBox(height: EmberSpacing.gapM),
+              Container(
+                padding: const EdgeInsets.all(EmberSpacing.cardPad),
+                decoration: BoxDecoration(
+                  color: Color.lerp(c.bg, c.card, 0.5),
+                  borderRadius:
+                      BorderRadius.circular(EmberRadius.control),
                 ),
-          ],
-        ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _KvRow('调度', scheduleLabel(a)),
+                    _KvRow('模式', '${a['mode'] ?? '-'}'),
+                    _KvRow('提供商', '${a['provider'] ?? '-'}'),
+                    _KvRow('模型', '${a['model'] ?? '-'}'),
+                    if (lifecycle != null) _KvRow('生命周期', lifecycle),
+                    _KvRow('已运行', '${a['runCount'] ?? 0} 次'),
+                    _KvRow('下次',
+                        _orDash(_fmtMs(a['nextRunAt'] as num?))),
+                    _KvRow('上次',
+                        _orDash(_fmtMs(a['lastRunAt'] as num?))),
+                  ],
+                ),
+              ),
+              const SizedBox(height: EmberSpacing.gapM),
+              Text('提示词',
+                  style: TextStyle(
+                      fontSize: EmberType.body,
+                      fontWeight: FontWeight.w600,
+                      color: c.textSolid)),
+              const SizedBox(height: EmberSpacing.gapS),
+              Container(
+                padding: const EdgeInsets.all(EmberSpacing.cardPad),
+                decoration: BoxDecoration(
+                  color: Color.lerp(c.bg, c.card, 0.5),
+                  borderRadius:
+                      BorderRadius.circular(EmberRadius.control),
+                ),
+                child: SelectableText(
+                  '${a['prompt'] ?? ''}',
+                  style: TextStyle(
+                      fontSize: EmberType.caption,
+                      height: EmberType.lineHeight,
+                      color: c.textSolid),
+                ),
+              ),
+              const SizedBox(height: EmberSpacing.gapM),
+              Text('执行历史',
+                  style: TextStyle(
+                      fontSize: EmberType.body,
+                      fontWeight: FontWeight.w600,
+                      color: c.textSolid)),
+              const SizedBox(height: EmberSpacing.gapS),
+              if (runs.isEmpty)
+                Text('暂无执行记录',
+                    style: TextStyle(
+                        fontSize: EmberType.caption,
+                        color: c.textFaint))
+              else
+                for (final r in runs)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Icon(
+                      '${r['outcome']}' == 'succeeded'
+                          ? Icons.check_circle
+                          : Icons.error_outline,
+                      size: 16,
+                      color: '${r['outcome']}' == 'succeeded'
+                          ? c.ok
+                          : c.err,
+                    ),
+                    title: Text(
+                      '${r['outcome'] ?? r['dispatchStatus'] ?? ''}'
+                      ' · ${r['trigger'] ?? ''}',
+                      style: TextStyle(
+                          fontSize: EmberType.secondary,
+                          color: c.textSolid),
+                    ),
+                    subtitle: Text(
+                      _orDash(_fmtMs(r['scheduledAt'] as num?)),
+                      style: TextStyle(
+                          fontSize: EmberType.caption,
+                          color: c.textFaint),
+                    ),
+                    trailing: r['sessionId'] is String
+                        ? const Icon(Icons.chevron_right, size: 18)
+                        : null,
+                    onTap: () {
+                      final sid = r['sessionId'];
+                      if (sid is! String) return;
+                      Navigator.pop(context);
+                      widget.onOpenTask(sid, '${a['title']}');
+                    },
+                  ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -430,13 +498,16 @@ class _AutomationPageState extends State<AutomationPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('加载失败: $_error',
-                style: TextStyle(color: ZColors.danger, fontSize: 12)),
-            const SizedBox(height: 8),
+                style: TextStyle(
+                    color: EmberColors.of(context).err,
+                    fontSize: EmberType.secondary)),
+            const SizedBox(height: EmberSpacing.gapS),
             FilledButton(onPressed: _load, child: const Text('重试')),
           ],
         ),
       );
     }
+    final c = EmberColors.of(context);
     return Column(
       children: [
         Padding(
@@ -444,19 +515,21 @@ class _AutomationPageState extends State<AutomationPage> {
           child: Row(
             children: [
               Text('自动化',
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.w700)),
-              const SizedBox(width: 8),
+                  style: TextStyle(
+                      fontSize: EmberType.title,
+                      fontWeight: FontWeight.w700,
+                      color: c.textSolid)),
+              const SizedBox(width: EmberSpacing.gapS),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(
-                  color: ZColors.primary.withValues(alpha: 0.12),
+                  color: c.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text('Beta',
                     style: TextStyle(
-                        fontSize: 10, color: ZColors.primary)),
+                        fontSize: EmberType.caption, color: c.primary)),
               ),
               const Spacer(),
               IconButton(
@@ -476,25 +549,50 @@ class _AutomationPageState extends State<AutomationPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             children: [
-              if (_automations.isEmpty && _queue.isEmpty)
+              // A5:空态与统计卡只看 automations 本身 —— 闲时队列非空但无
+              // 自动化时不再渲染 0/0/0 统计卡,空态提示与队列同屏不冲突。
+              if (_automations.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 40),
                   child: Center(
                     child: Text('暂无自动化，点右上角 + 新建',
                         style: TextStyle(
-                            fontSize: 12, color: ZInk.faint(context))),
+                            fontSize: EmberType.secondary,
+                            color: c.textFaint)),
                   ),
+                )
+              else ...[
+                // 统计卡行(spec §7.2:全部/活跃/失败,lifecycleStatus 聚合)。
+                Row(
+                  children: [
+                    _statCard(context, '全部', _automations.length),
+                    const SizedBox(width: EmberSpacing.gapS),
+                    _statCard(
+                        context, '活跃',
+                        _automations
+                            .where((a) => '${a['lifecycleStatus']}' == 'active')
+                            .length,
+                        countColor: c.ok),
+                    const SizedBox(width: EmberSpacing.gapS),
+                    _statCard(
+                        context, '失败',
+                        _automations
+                            .where((a) => '${a['lifecycleStatus']}' == 'failed')
+                            .length,
+                        countColor: c.err),
+                  ],
                 ),
-              for (final a in _automations)
-                _automationTile(context, a),
+                const SizedBox(height: EmberSpacing.gapS),
+                for (final a in _automations) _automationTile(context, a),
+              ],
               if (_queue.isNotEmpty) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 16, bottom: 6),
                   child: Text('闲时任务队列',
                       style: TextStyle(
-                          fontSize: 12,
+                          fontSize: EmberType.secondary,
                           fontWeight: FontWeight.w600,
-                          color: ZInk.faint(context))),
+                          color: c.textFaint)),
                 ),
                 for (final q in _queue)
                   ListTile(
@@ -502,12 +600,14 @@ class _AutomationPageState extends State<AutomationPage> {
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.schedule, size: 18),
                     title: Text('${q['title'] ?? q['offPeakTaskId'] ?? '闲时任务'}',
-                        style: const TextStyle(fontSize: 12)),
+                        style: TextStyle(
+                            fontSize: EmberType.secondary,
+                            color: c.textSolid)),
                     subtitle: Text(
                       '${q['status'] ?? ''}'
                       '${q['queuePosition'] != null ? ' · 队列位置 ${q['queuePosition']}' : ''}',
-                      style:
-                          TextStyle(fontSize: 10.5, color: ZInk.faint(context)),
+                      style: TextStyle(
+                          fontSize: EmberType.caption, color: c.textFaint),
                     ),
                   ),
               ],
@@ -518,68 +618,151 @@ class _AutomationPageState extends State<AutomationPage> {
     );
   }
 
+  /// 统计卡:card 底 + hairline 边 + control 圆角,数值 section 17、
+  /// 标签 caption 11 muted(spec §7.2)。
+  Widget _statCard(BuildContext context, String label, int count,
+      {Color? countColor}) {
+    final c = EmberColors.of(context);
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: EmberSpacing.cardPad),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          border: Border.all(color: c.hairline),
+        ),
+        child: Column(
+          children: [
+            Text('$count',
+                style: TextStyle(
+                    fontSize: EmberType.section,
+                    fontWeight: FontWeight.w600,
+                    color: countColor ?? c.textSolid)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: TextStyle(
+                    fontSize: EmberType.caption, color: c.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _automationTile(BuildContext context, Map<String, dynamic> a) {
     final id = '${a['automationId']}';
     final enabled = a['enabled'] == true;
     final runs = _runs[id] ?? const [];
     final lastOutcome = runs.isEmpty ? null : '${runs.first['outcome']}';
-    final lifecycle = lifecycleLabel('${a['lifecycleStatus'] ?? ''}');
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: ZInk.tile(context),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        onTap: () => _showDetail(a),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text('${a['title']}',
-                  style:
-                      const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-            ),
-            if (lifecycle != null) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: ('${a['lifecycleStatus']}' == 'failed'
-                          ? ZColors.danger
-                          : ZInk.faint(context))
-                      .withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(5),
+    final c = EmberColors.of(context);
+    // 任务卡按压缩放(spec §5 动效);ListTile 水波保留。
+    return EmberPressable(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: EmberSpacing.gapS),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          border: Border.all(color: c.hairline),
+        ),
+        clipBehavior: Clip.antiAlias,
+        // ListTile paints ink on the nearest Material; without this the
+        // decorated Container would hide the splash (framework assertion).
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            onTap: () => _showDetail(a),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text('${a['title']}',
+                      style: TextStyle(
+                          fontSize: EmberType.body,
+                          fontWeight: FontWeight.w600,
+                          color: c.textSolid),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                 ),
-                child: Text(lifecycle,
-                    style: TextStyle(
-                        fontSize: 9.5,
-                        color: '${a['lifecycleStatus']}' == 'failed'
-                            ? ZColors.danger
-                            : ZInk.faint(context))),
-              ),
-            ],
-          ],
+                if (lifecycleLabel('${a['lifecycleStatus'] ?? ''}') !=
+                    null) ...[
+                  const SizedBox(width: EmberSpacing.gapS),
+                  _LifecycleBadge(a),
+                ],
+              ],
+            ),
+            subtitle: Text(
+              [
+                scheduleLabel(a),
+                '下次 ${_fmtMs(a['nextRunAt'] as num?)}',
+                '已运行 ${a['runCount'] ?? 0} 次',
+                if (lastOutcome != null)
+                  lastOutcome == 'succeeded' ? '上次成功' : '上次失败',
+                if (!enabled) '已停用',
+              ].join(' · '),
+              style:
+                  TextStyle(fontSize: EmberType.caption, color: c.textFaint),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Switch(
+              value: enabled,
+              onChanged: (v) => _toggle(id, v),
+            ),
+          ),
         ),
-        subtitle: Text(
-          [
-            scheduleLabel(a),
-            '下次 ${_fmtMs(a['nextRunAt'] as num?)}',
-            '已运行 ${a['runCount'] ?? 0} 次',
-            if (lastOutcome != null)
-              lastOutcome == 'succeeded' ? '上次成功' : '上次失败',
-            if (!enabled) '已停用',
-          ].join(' · '),
-          style: TextStyle(fontSize: 10.5, color: ZInk.faint(context)),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Switch(
-          value: enabled,
-          onChanged: (v) => _toggle(id, v),
-        ),
+      ),
+    );
+  }
+}
+
+/// 生命周期徽:底色同色 14% alpha、文字 ok/err/textFaint(spec §7.2)。
+class _LifecycleBadge extends StatelessWidget {
+  final Map<String, dynamic> automation;
+
+  const _LifecycleBadge(this.automation);
+
+  @override
+  Widget build(BuildContext context) {
+    final status = '${automation['lifecycleStatus']}';
+    final color = lifecycleColor(status, EmberColors.of(context));
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(lifecycleLabel(status)!,
+          style:
+              TextStyle(fontSize: EmberType.caption, color: color)),
+    );
+  }
+}
+
+/// KV 信息行:label 辅助小字 + value 正文(spec §7.2 KV 格)。
+class _KvRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _KvRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    final c = EmberColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 64,
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: EmberType.caption, color: c.textFaint)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: EmberType.body, color: c.textSolid)),
+          ),
+        ],
       ),
     );
   }
@@ -671,6 +854,11 @@ class _AutomationEditorState extends State<_AutomationEditor> {
   @override
   Widget build(BuildContext context) {
     final editing = widget.existing != null;
+    // 输入框 raise 底:dialog 是 card 面,输入一档更亮以示可编辑
+    // (spec §5 次面语义)。
+    final fieldColor = EmberColors.of(context).raise;
+    InputDecoration field(InputDecoration base) =>
+        base.copyWith(fillColor: fieldColor);
     return AlertDialog(
       title: Text(editing ? '编辑自动化' : '新建自动化'),
       content: SizedBox(
@@ -686,7 +874,9 @@ class _AutomationEditorState extends State<_AutomationEditor> {
                   children: [
                     for (final t in _templates)
                       ActionChip(
-                        label: Text(t.label, style: const TextStyle(fontSize: 11)),
+                        label: Text(t.label,
+                            style: const TextStyle(
+                                fontSize: EmberType.caption)),
                         onPressed: () {
                           _cron.text = t.cron;
                           _prompt.text = t.prompt;
@@ -698,27 +888,27 @@ class _AutomationEditorState extends State<_AutomationEditor> {
               if (!editing) const SizedBox(height: 10),
               TextField(
                 controller: _title,
-                decoration: const InputDecoration(
-                    labelText: '标题', isDense: true),
+                decoration: field(const InputDecoration(
+                    labelText: '标题', isDense: true)),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: _cron,
-                decoration: const InputDecoration(
+                decoration: field(const InputDecoration(
                   labelText: 'Cron 表达式',
                   hintText: '0 9 * * *（每天 9 点）',
                   isDense: true,
-                ),
+                )),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: _prompt,
                 maxLines: 6,
-                decoration: const InputDecoration(
+                decoration: field(const InputDecoration(
                   labelText: '提示词（每次运行发给智能体的任务）',
                   alignLabelWithHint: true,
                   isDense: true,
-                ),
+                )),
               ),
             ],
           ),

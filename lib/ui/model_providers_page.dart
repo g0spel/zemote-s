@@ -31,6 +31,12 @@ String providerDisabledReasonText(String raw) => switch (raw) {
       _ => raw,
     };
 
+/// 主供应商判别(spec §7.4:主供应商默认展开模型明细,其余折叠)。
+/// 依据是 wire 协议里可验证的 `source` 字段:服务端下发的内置供应商
+/// 不带 `source: 'custom'`(见 providerStatusOf 的对齐注释),仅用户
+/// 自建项在本页保存时固定写入 `source: 'custom'`,故非 custom 即主。
+bool isPrimaryProvider(Map<String, dynamic> p) => p['source'] != 'custom';
+
 /// Model providers management (model-provider channel: getAll/save/delete).
 class ModelProvidersPage extends StatefulWidget {
   final BridgeSession session;
@@ -110,7 +116,8 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
               onPressed: () => Navigator.pop(context, false),
               child: const Text('取消')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: ZColors.danger),
+            style: FilledButton.styleFrom(
+                backgroundColor: EmberColors.of(context).err),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
           ),
@@ -163,6 +170,7 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('模型供应商'),
@@ -198,16 +206,21 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                           p['models'] is List ? p['models'] as List : [];
                       final disabledReason =
                           p['systemDisabledReason'] as String?;
+                      // 状态徽三色(spec §7.4):已启用绿 / 未配置黄 / 已停用灰。
                       final (statusLabel, statusColor) = switch (status) {
-                        ProviderStatus.enabled => ('已启用', ZColors.success),
+                        ProviderStatus.enabled => ('已启用', colors.ok),
                         ProviderStatus.unconfigured => (
                             '未配置',
-                            ZColors.warning
+                            colors.warn
                           ),
-                        ProviderStatus.disabled => ('已停用', ZColors.warning),
+                        ProviderStatus.disabled =>
+                          ('已停用', colors.textFaint),
                       };
+                      // 主供应商(spec §7.4)——判别依据见 [isPrimaryProvider]。
+                      final isMain = isPrimaryProvider(p);
                       return Card(
                         child: ExpansionTile(
+                          initiallyExpanded: isMain,
                           tilePadding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 4),
                           title: Row(
@@ -215,21 +228,23 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                               Expanded(
                                 child: Text(
                                   '${p['name'] ?? p['id']}',
-                                  style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600),
+                                  style: TextStyle(
+                                      fontSize: EmberType.emphasis,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.textSolid),
                                 ),
                               ),
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
+                                    horizontal: 6, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: statusColor.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(6),
+                                  color: statusColor.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(5),
                                 ),
                                 child: Text(statusLabel,
                                     style: TextStyle(
-                                        fontSize: 10, color: statusColor)),
+                                        fontSize: EmberType.caption,
+                                        color: statusColor)),
                               ),
                             ],
                           ),
@@ -245,16 +260,19 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                                 .where((s) => s.isNotEmpty)
                                 .join(' · '),
                             style: TextStyle(
-                                fontSize: 11, color: ZInk.faint(context)),
+                                fontSize: EmberType.caption,
+                                color: colors.textFaint),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                           children: [
                             if (models.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.all(12),
+                              Padding(
+                                padding: const EdgeInsets.all(12),
                                 child: Text('（无模型）',
-                                    style: TextStyle(fontSize: 11)),
+                                    style: TextStyle(
+                                        fontSize: EmberType.caption,
+                                        color: colors.textFaint)),
                               )
                             else
                               Padding(
@@ -283,7 +301,7 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                                   IconButton(
                                     icon: Icon(Icons.delete_outline,
                                         size: 18,
-                                        color: ZInk.faint(context)),
+                                        color: colors.textFaint),
                                     onPressed: () => _delete(p),
                                   ),
                                 ],
@@ -458,7 +476,9 @@ Widget _modelLine(BuildContext context, Map<dynamic, dynamic> m) {
         if (maxOut != null) '输出 ${k(maxOut)}',
         if (levelNames.isNotEmpty) '推理 $levelNames',
       ].join(' · '),
-      style: TextStyle(fontSize: 11, color: ZInk.soft(context)),
+      style: TextStyle(
+          fontSize: EmberType.caption,
+          color: EmberColors.of(context).textSoft),
     ),
   );
 }
