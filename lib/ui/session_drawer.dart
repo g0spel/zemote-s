@@ -173,6 +173,12 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// zcode-task.listPinnedTasks 拉取,失败容错为空集(仅置顶组不显示)。
   Set<String> _pinnedIds = const {};
 
+  /// 归档任务(zcode-task `listArchivedTasks`,旧版 task_home 同源):
+  /// V4 索引的存量种子会漏归档条目,这里既是归档组的数据源,也提供
+  /// _archivedIds 供活跃列表剔除(双向纠偏)。
+  List<SessionEntry> _archived = const [];
+  Set<String> _archivedIds = const {};
+
   /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照;write 完成才标记)。
   SessionsIndexSubscription? _cacheSyncedSub;
 
@@ -187,6 +193,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
     _subscribe();
     _seedFromCache();
     _loadPinned();
+    _loadTasks();
   }
 
   @override
@@ -277,6 +284,40 @@ class _SessionDrawerState extends State<SessionDrawer> {
     });
   }
 
+  /// zcode-task 任务列表(活跃 + 归档):活跃集用于把 V4 索引漏出的
+  /// 归档条目从今天/更早剔除;归档集填「归档」组。失败静默(索引仍在)。
+  Future<void> _loadTasks() async {
+    Future<(bool, dynamic)> call(String method) => widget.bridge.channels
+        .call(Channels.zcodeTask, method, [widget.scope])
+        .then((r) => (true, r))
+        .catchError((Object _) => (false, const <dynamic>[]));
+    final _ = await call('listTasks');
+    final (_, archivedData) = await call('listArchivedTasks');
+    if (!mounted) return;
+    final archivedList = archivedData is List ? archivedData : const [];
+    final archived = <SessionEntry>[
+      for (final t in archivedList)
+        if (t is Map)
+          SessionEntry({
+            'sessionId': '${t['taskId']}',
+            'title': '${t['title'] ?? ''}',
+            'phase': '${t['displayStatus'] ?? t['status'] ?? ''}',
+            'lastActivityAt':
+                (t['updatedAt'] as num?)?.toInt() ??
+                    (t['createdAt'] as num?)?.toInt() ??
+                    0,
+            'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
+            'hasBackgroundWork': t['hasBackgroundWork'] == true,
+            'archived': 1,
+          }),
+    ];
+    log('[v4] 任务列表:归档 ${archived.length} 条');
+    setState(() {
+      _archived = archived;
+      _archivedIds = {for (final e in archived) e.sessionId};
+    });
+  }
+
   /// 订阅 ready 后 write(2c):把当前列表落盘,供下次打开时秒开。
   /// 空列表不写(失败/清空不覆盖好数据,与旧实现一致)。write 完成后才
   /// 标记 _cacheSyncedSub:失败或被中断时标记未锁定,下个快照可重试。
@@ -287,7 +328,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
         .whenComplete(() => _cacheSyncedSub = sub));
   }
 
-  List<SessionEntry> get _filtered => filterSessions(_entries, _query);
+  List<SessionEntry> get _filtered =>
+      filterSessions(_entries, _query)
+          .where((e) => !_archivedIds.contains(e.sessionId))
+          .toList();
 
   // ------------------------------------------------------- manage actions
 
@@ -326,8 +370,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$errorPrefix: $failed 项失败')));
     }
-    // 操作(置顶/归档/删除)可能改变置顶集 → 重拉刷新分组展示。
+    // 操作(置顶/归档/删除)改变置顶集与归档集 → 重拉刷新分组。
     unawaited(_loadPinned());
+    unawaited(_loadTasks());
   }
 
   Future<void> _deleteSelection() async {
@@ -654,7 +699,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
       padding: const EdgeInsets.symmetric(
           horizontal: EmberSpacing.page, vertical: EmberSpacing.gapS),
       children: [
-        for (final group in groupSessions(entries, _pinnedIds).entries) ...[
+        for (final group in groupSessions(
+            [...entries, ...filterSessions(_archived, _query)], _pinnedIds)
+            .entries) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 EmberSpacing.cardPad, EmberSpacing.gapS, 0, 4),
