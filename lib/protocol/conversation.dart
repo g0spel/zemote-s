@@ -1318,6 +1318,7 @@ class SessionsIndexState extends ChangeNotifier {
         }
       }
       seq = toSeq;
+
     } else if (payload['kind'] == 'deltas') {
       final fromSeq = (frame['fromSeq'] as num?)?.toInt() ?? seq;
       if (fromSeq != seq) {

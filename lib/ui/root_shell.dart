@@ -292,9 +292,13 @@ class _RootShellState extends State<RootShell> {
       // 正确下发);等首个快照(上限 4s)取最近未归档条目。listSessions
       // 是桌面端本地 API,不在 zcode-agent 的 relay 白名单里,不可用。
       try {
-        final sub = await session
-            .conversation(_scopeOf(workspace))
-            .subscribeSessionsIndex();
+        // 时序:openBridge 返回后宿主侧桥仍在初始化,立即订阅会拿不到
+        // 快照;先 handshake(helloConversationV4/initialize 已建链),再
+        // 订阅,快照到达(ready)即取——无定时等待。
+        final transport = session.conversation(_scopeOf(workspace));
+        await transport.handshake();
+        if (!_isCurrentChain(gen)) return;
+        final sub = await transport.subscribeSessionsIndex();
         SessionEntry? recent;
         for (var i = 0; i < 80; i++) {
           if (!_isCurrentChain(gen)) break;
@@ -322,7 +326,6 @@ class _RootShellState extends State<RootShell> {
         }
       } catch (e) {
         log('[诊断] 最近会话打开失败: $e');
-        debugPrint('[zflow] recent-session FAILED: $e');
       }
     } catch (e) {
       if (!mounted || !_isCurrentChain(gen)) return;
