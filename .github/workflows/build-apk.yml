@@ -85,7 +85,7 @@ jobs:
             build/app/outputs/flutter-apk/Zflow-v$VERSION-arm64.apk.sha256
           name: ${{ github.ref_name }}
           body: |
-            Zemote ${{ github.ref_name }}
+            Zflow ${{ github.ref_name }}
 
             > APK built automatically by GitHub Actions from tag `${{ github.ref_name }}`.
           draft: false
