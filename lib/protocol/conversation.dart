@@ -242,8 +242,8 @@ class ConversationTransport {
   /// command `createSession` with a null envelope sessionId. Returns the
   /// new sessionId on `accepted`.
   ///
-  /// 宿主 schema(.strict())只收 sessionId/workspace/parentSessionId/
-  /// mode/model/thoughtLevel/mcpServers…——早期猜测的 `firstInput` 与
+  /// 宿主校验层要求顶层 workspaceId 字符串;mode/model/thoughtLevel
+  /// 为顶层字段——早期猜测的 `firstInput` 与
   /// 嵌套 `config` 字段会被静默剥离:首条文本从未送达,草稿的模型/
   /// 思考档也不生效(真机表现即"新会话第一条消息收不到回复")。文本
   /// 一律在订阅建立后走 sendText;初始模型/思考档走顶层 model/thought。
@@ -258,7 +258,10 @@ class ConversationTransport {
       null,
       'createSession',
       {
-        'workspace': {'workspacePath': workspaceId},
+        // zcode-agent 通道校验层要求顶层 workspaceId 字符串(真机
+        // Invalid input 实证;relay 桥的 workspace 对象在更内层由宿主
+        // 自行从 workspaceId 解析)。
+        'workspaceId': workspaceId,
         if (config != null) ...{
           if (config['model'] != null)
             'model': {

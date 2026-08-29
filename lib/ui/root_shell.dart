@@ -1123,14 +1123,17 @@ class _DrawerHostState extends State<_DrawerHost>
       return Stack(
         children: [
           Positioned.fill(child: widget.child),
-          // 左缘把手:仅在关闭时挂载,避免与抽屉内手势竞争。translucent:
-          // 把手只认拖拽,点按穿透到下层内容(A13)。
-          if (!widget.open)
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: 24,
+          // 左缘把手:仅在关闭时可交互;widget 恒在(带 IgnorePointer),
+          // Stack children 形状恒定——此前"开关时 handle/遮罩/面板条件
+          // 挂载"导致 Element 位错,SessionDrawer 被反复重挂重建(列表
+          // 每次开关都重排的根因)。translucent:把手只认拖拽。
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 24,
+            child: IgnorePointer(
+              ignoring: widget.open || _shown,
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onHorizontalDragStart: (_) => _edgeDx = 0,
@@ -1143,8 +1146,10 @@ class _DrawerHostState extends State<_DrawerHost>
                 },
               ),
             ),
+          ),
+          // 遮罩+面板:首开后常驻(_shown 恒真),关闭=滑出+禁交互。
+          // children 形状恒定 → SessionDrawer State 严格保活。
           if (_shown) ...[
-            // 遮罩:点击收抽屉;收起动画期间不拦截指针。
             Positioned.fill(
               child: IgnorePointer(
                 ignoring: !widget.open,
@@ -1160,7 +1165,6 @@ class _DrawerHostState extends State<_DrawerHost>
                 ),
               ),
             ),
-            // 关闭态常驻但不可交互(Slide 已在屏外,双保险)。
             Positioned(
               left: 0,
               top: 0,

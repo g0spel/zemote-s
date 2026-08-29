@@ -190,6 +190,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[zflow] SessionDrawer initState #$hashCode');
     _transport = widget.bridge.conversation(widget.scope, onLog: log);
     _subscribe();
     _seedFromCache();
@@ -250,6 +251,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
     final sub = _sub;
     if (sub == null || !mounted) return;
     final list = sortSessions(sub.state.list);
+    debugPrint('[zflow] _onState ready=${sub.state.ready} n=${list.length}');
     if (list.isEmpty && _lastNonEmpty.isNotEmpty && sub.state.ready) {
       // 重放瞬间:沿用上次列表,等重放后的真实快照(非空或确认清空)。
       return;
@@ -285,6 +287,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 缓存里的 running/waiting 可能早已过期。
   Future<void> _seedFromCache() async {
     final raw = await _cache.read(widget.scope);
+    debugPrint('[zflow] seed: ${raw.length} entries');
     if (!mounted || raw.isEmpty) return;
     setState(() {
       _seed = [for (final m in raw) SessionEntry({...m, 'phase': ''})];
@@ -319,6 +322,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
           }),
     ];
     log('[v4] 任务列表:归档 ${archived.length} 条');
+    debugPrint('[zflow] _loadTasks archived=${archived.length}');
     setState(() {
       _archived = archived;
       _archivedIds = {for (final e in archived) e.sessionId};
