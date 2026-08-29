@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.11.0] - 2026-08-29
+
+### Changed
+- **应用与仓库更名 Zflow**，全端统一：显示名、GitHub 仓库（`g0spel/zflow`）、Android 桌面标签、Web 标题、CI 产物名（`Zflow-v<版本>-arm64.apk`）、更新包本地文件名、字体资产与内部标识同步更新；应用内更新源随仓库地址切换。
+- **安装身份变更**：Android applicationId 改为 `dev.g0spel.zflow`——已安装的旧版本无法覆盖升级，需卸载后重新安装并重新扫码添加设备。
+
 ## [0.10.0] - 2026-08-29
 
 **Ember UI 大改**——应用全面重构为统一设计语言("暖炭"体系:内容区安静、控制区紧凑),历经设计打磨、高保真设计图与逐任务审查三阶段落地。
