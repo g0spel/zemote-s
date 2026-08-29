@@ -39,26 +39,31 @@ List<SessionEntry> filterSessions(List<SessionEntry> entries, String query) {
       .toList(growable: false);
 }
 
-/// 按 今天/更早 两档分组(spec §7.1;键序即展示序)。
-/// TODO(置顶组): channel 置顶数据源接入后,在最前增加「置顶」分组
-/// (列表数据本身仍以 sessions-index 为准,置顶仅是展示分组)。
-/// 返回 Map 按插入序迭代(今天在前)。
+/// 三档分组(spec §7.1:置顶/今天/更早;键序即展示序)。[sorted] 需为
+/// sortSessions 的降序输出:sessionId ∈ [pinnedIds] 的条目进 pinned 组
+/// (保持 sorted 顺序),其余按 今天/更早 两档。空组剔除,展示文案由
+/// 调用方按键映射。
 Map<String, List<SessionEntry>> groupSessions(
-  List<SessionEntry> entries, {
-  DateTime? now,
-}) {
-  final at = now ?? DateTime.now();
-  final today = DateTime(at.year, at.month, at.day);
+  List<SessionEntry> sorted,
+  Set<String> pinnedIds,
+) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final pinned = <SessionEntry>[];
   final todayList = <SessionEntry>[];
   final earlier = <SessionEntry>[];
-  for (final e in entries) {
+  for (final e in sorted) {
+    if (pinnedIds.contains(e.sessionId)) {
+      pinned.add(e);
+      continue;
+    }
     final t = DateTime.fromMillisecondsSinceEpoch(e.lastActivityAt);
     (DateTime(t.year, t.month, t.day).isAtSameMomentAs(today)
             ? todayList
             : earlier)
         .add(e);
   }
-  return {'今天': todayList, '更早': earlier}
+  return {'pinned': pinned, 'today': todayList, 'older': earlier}
     ..removeWhere((_, v) => v.isEmpty);
 }
 
@@ -83,9 +88,10 @@ String _relativeDayLabel(int millis) {
 }
 
 /// 会话抽屉面板(spec §7.1):工作区条 / 搜索 / ＋新会话 / 分组会话列表
-/// (运行中蓝点、等待黄点)/「管理」多选(置顶/归档/删除,走 zcode-task
-/// RPC)/ 底部设备状态条。宿主(root_shell 的 _DrawerHost)约束 76% 宽、
-/// 滑出动画与遮罩。onPick(null) = 新会话;列表条目点击 = 打开该会话。
+/// (置顶/今天/更早三档,置顶集来自 listPinnedTasks;运行中蓝点、等待
+/// 黄点)/「管理」多选(置顶/归档/删除,走 zcode-task RPC)/ 底部设备
+/// 状态条。宿主(root_shell 的 _DrawerHost)约束 76% 宽、滑出动画与遮罩。
+/// onPick(null) = 新会话;列表条目点击 = 打开该会话。
 class SessionDrawer extends StatefulWidget {
   final BridgeSession bridge;
 
@@ -157,6 +163,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 离线种子(2c):打开抽屉先展示上次缓存,实时数据到达即覆盖。
   List<SessionEntry> _seed = const [];
 
+  /// 置顶会话 id 集(spec §7.1 置顶组):抽屉打开时与列表订阅并行经
+  /// zcode-task.listPinnedTasks 拉取,失败容错为空集(仅置顶组不显示)。
+  Set<String> _pinnedIds = const {};
+
   /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照;write 完成才标记)。
   SessionsIndexSubscription? _cacheSyncedSub;
 
@@ -170,6 +180,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
     _transport = widget.bridge.conversation(widget.scope, onLog: log);
     _subscribe();
     _seedFromCache();
+    _loadPinned();
   }
 
   @override
@@ -199,6 +210,25 @@ class _SessionDrawerState extends State<SessionDrawer> {
       _onState();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
+    }
+  }
+
+  /// 拉取置顶 id 集(对照桌面端 task_home_page 的 listPinnedTasks:任务
+  /// 列表元素带 taskId)。失败容错为空集 —— 置顶组退化为不显示,列表
+  /// 其余功能不受影响。
+  Future<void> _loadPinned() async {
+    try {
+      final tasks = await widget.bridge.channels
+          .call(Channels.zcodeTask, 'listPinnedTasks', [widget.scope]);
+      if (!mounted) return;
+      setState(() {
+        _pinnedIds = {
+          for (final t in (tasks is List ? tasks : const <dynamic>[]))
+            if (t is Map && t['taskId'] != null) '${t['taskId']}',
+        };
+      });
+    } catch (_) {
+      if (mounted) setState(() => _pinnedIds = const {});
     }
   }
 
@@ -290,6 +320,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$errorPrefix: $failed 项失败')));
     }
+    // 操作(置顶/归档/删除)都可能改变置顶集 → 重拉刷新分组展示。
+    unawaited(_loadPinned());
   }
 
   Future<void> _deleteSelection() async {
@@ -602,18 +634,20 @@ class _SessionDrawerState extends State<SessionDrawer> {
     );
   }
 
-  /// 分组会话列表(spec §7.1:今天/更早),实时列表与离线种子共用。
+  /// 分组会话列表(spec §7.1:置顶/今天/更早),实时列表与离线种子共用。
+  static const _groupLabels = {'pinned': '置顶', 'today': '今天', 'older': '更早'};
+
   Widget _buildSessionList(List<SessionEntry> entries) {
     final colors = EmberColors.of(context);
     return ListView(
       padding: const EdgeInsets.symmetric(
           horizontal: EmberSpacing.page, vertical: EmberSpacing.gapS),
       children: [
-        for (final group in groupSessions(entries).entries) ...[
+        for (final group in groupSessions(entries, _pinnedIds).entries) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 EmberSpacing.cardPad, EmberSpacing.gapS, 0, 4),
-            child: Text(group.key,
+            child: Text(_groupLabels[group.key] ?? group.key,
                 style: TextStyle(
                     fontSize: EmberType.caption,
                     fontWeight: FontWeight.w600,

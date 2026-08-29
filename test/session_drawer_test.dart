@@ -12,9 +12,12 @@ import 'package:zemote/state/session_list_cache.dart';
 import 'package:zemote/ui/session_drawer.dart';
 
 /// 真实协议驱动的抽屉测试。裸 SessionDrawer 在全新 detached bridge 上的
-/// channel 取号是确定性的(FIFO):id0 hello、id1 initialize、id2 索引帧
-/// 监听器(同步取号)、id3 subscribeSessionsIndexV4;之后的管理操作依次
-/// id4 setTaskPinned / id5 archiveTask / id6 deleteTask。
+/// channel 取号是确定性的(FIFO):id0 hello、id1 listPinnedTasks(与
+/// 订阅并行拉取)、id2 initialize、id3 索引帧监听器(同步取号)、id4
+/// subscribeSessionsIndexV4;之后的管理操作与其后的置顶集刷新依次为
+/// id5 setTaskPinned、id6 listPinnedTasks、id7 archiveTask、id8 刷新、
+/// id9 deleteTask、id10 刷新。sessions-index 事件帧经 id3(帧监听器)
+/// 注入。
 ///
 /// incoming 帧经 `channels.handleMessage` 注入;outgoing 请求由 recorder
 /// 的 sendBody 捕获,解码断言真实 wire 的 channel/method/args。
@@ -63,6 +66,11 @@ void main() {
     },
   ];
 
+  /// 按 wire id 找已发出的请求并解码。
+  (Object?, Object?) requestById(int id) => sent
+      .map(_decodeRequest)
+      .firstWhere((r) => (r.$1 as List)[1] == id);
+
   SessionDrawer buildDrawer(String workspacePath, {String? currentSessionId}) =>
       SessionDrawer(
         bridge: bridge,
@@ -78,7 +86,12 @@ void main() {
         deviceOnline: true,
       );
 
-  Future<void> pumpDrawer(WidgetTester tester) async {
+  /// 应答 id1 的 listPinnedTasks([pinned] 为服务端任务列表,元素带 taskId)。
+  void respondPinned(List<Object?> pinned) =>
+      _respond(channels, 1, pinned);
+
+  Future<void> pumpDrawer(WidgetTester tester,
+      {List<Object?> pinned = const []}) async {
     channels = ChannelClient(sendBody: (body) => sent.add(body));
     bridge = BridgeSession.detached(
       {'workspaceKey': '/ws-t'},
@@ -90,18 +103,19 @@ void main() {
 
     // channel 初始化 + 按确定性顺序应答,随后推索引快照让列表渲染。
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
-    await tester.pump(); // id0 hello
+    await tester.pump(); // id0 hello + id1 listPinnedTasks
     _respond(channels, 0, <String, dynamic>{});
-    await tester.pump(); // id1 initialize
-    _respond(channels, 1, <String, dynamic>{});
-    await tester.pump(); // id2 帧监听器 + id3 subscribeIndex
-    _respond(channels, 3, {
+    await tester.pump(); // id2 initialize
+    respondPinned(pinned); // id1 应答
+    _respond(channels, 2, <String, dynamic>{});
+    await tester.pump(); // id3 帧监听器 + id4 subscribeIndex
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
     // wire 帧{kind,topic,subscriptionId,frame};内层逻辑帧同样携带
     // subscriptionId(_acceptLogicalFrame 以它过滤)。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -149,11 +163,13 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '置顶'));
     await tester.pump();
     final (pinHeader, pinArgs) = _decodeRequest(sent.last);
-    expect(pinHeader, [ChannelClient.reqPromise, 4, 'zcode-task', 'setTaskPinned']);
+    expect(pinHeader, [ChannelClient.reqPromise, 5, 'zcode-task', 'setTaskPinned']);
     expect(pinArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t', 'pinned': true},
     ]);
-    _respond(channels, 4, <String, dynamic>{});
+    _respond(channels, 5, <String, dynamic>{});
+    await tester.pump(); // 完成后退出多选 + id6 置顶集刷新
+    respondPinned(const []); // 刷新应答:置顶集清空
     await tester.pump();
     expect(find.text('已选 1 项'), findsNothing); // 完成后退出多选
 
@@ -162,11 +178,13 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '归档'));
     await tester.pump();
     final (archHeader, archArgs) = _decodeRequest(sent.last);
-    expect(archHeader, [ChannelClient.reqPromise, 5, 'zcode-task', 'archiveTask']);
+    expect(archHeader, [ChannelClient.reqPromise, 7, 'zcode-task', 'archiveTask']);
     expect(archArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t'},
     ]);
-    _respond(channels, 5, <String, dynamic>{});
+    _respond(channels, 7, <String, dynamic>{});
+    await tester.pump(); // id8 刷新
+    respondPinned(const []);
     await tester.pump();
     expect(find.text('已选 1 项'), findsNothing);
 
@@ -179,11 +197,13 @@ void main() {
         of: find.byType(AlertDialog), matching: find.text('删除')));
     await tester.pump();
     final (delHeader, delArgs) = _decodeRequest(sent.last);
-    expect(delHeader, [ChannelClient.reqPromise, 6, 'zcode-task', 'deleteTask']);
+    expect(delHeader, [ChannelClient.reqPromise, 9, 'zcode-task', 'deleteTask']);
     expect(delArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t'},
     ]);
-    _respond(channels, 6, <String, dynamic>{});
+    _respond(channels, 9, <String, dynamic>{});
+    await tester.pump(); // id10 刷新
+    respondPinned(const []);
     await tester.pump();
     expect(find.text('已选 1 项'), findsNothing);
 
@@ -223,12 +243,13 @@ void main() {
 
     // channel 初始化应答,但不推实时快照 —— 抽屉停留在「实时未到达」态。
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
-    await tester.pump();
+    await tester.pump(); // id0 hello + id1 listPinnedTasks
     _respond(channels, 0, <String, dynamic>{});
-    await tester.pump();
-    _respond(channels, 1, <String, dynamic>{});
-    await tester.pump();
-    _respond(channels, 3, {
+    await tester.pump(); // id2 initialize
+    respondPinned(const []);
+    _respond(channels, 2, <String, dynamic>{});
+    await tester.pump(); // id3 帧监听器 + id4 subscribeIndex
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -239,7 +260,7 @@ void main() {
     expect(statusDotFinder, findsNothing);
 
     // 实时快照到达 → 覆盖种子;running 条目恢复状态点。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -288,11 +309,12 @@ void main() {
       ),
     ));
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
-    await tester.pump();
+    await tester.pump(); // id0 hello + id1 listPinnedTasks
     _respond(channels, 0, <String, dynamic>{});
-    await tester.pump();
-    _respond(channels, 1, <String, dynamic>{});
-    await tester.pump();
+    await tester.pump(); // id2 initialize
+    respondPinned(const []);
+    _respond(channels, 2, <String, dynamic>{});
+    await tester.pump(); // id3 帧监听器 + id4 subscribe 发出,由调用方应答
   }
 
   /// 握手 + 订阅 ack,但不推实时快照 —— 抽屉停留在「实时未到达」态(种子可见)。
@@ -306,7 +328,7 @@ void main() {
       workspacePath,
       currentSessionId: currentSessionId,
     );
-    _respond(channels, 3, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -314,7 +336,7 @@ void main() {
 
   /// 推一张 sessions-index 快照(逐帧走真实 wire 路径)。
   void pushSnapshot(List<Object?> sessions) {
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -343,9 +365,9 @@ void main() {
           ]),
     });
     await pumpDrawerHandshake(tester, '/ws-t');
-    // 订阅请求(id3)应答错误 → _error 态。
+    // 订阅请求(id4)应答错误 → _error 态。
     channels.handleMessage(_inFrame(
-        [ChannelClient.resPromiseError, 3], {'message': 'sub exploded'}));
+        [ChannelClient.resPromiseError, 4], {'message': 'sub exploded'}));
     await tester.pump();
     // 订阅失败路径含订阅对象回收(异步多跳),两次 pump 保证错误上屏。
     await tester.pump();
@@ -359,7 +381,7 @@ void main() {
     // 重试成功 → 错误横幅消失,回到「实时未到达」种子态。
     await tester.tap(find.text('重试'));
     await tester.pump();
-    _respond(channels, 5, {
+    _respond(channels, 6, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -375,7 +397,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await pumpDrawerHandshake(tester, '/ws-t');
     channels.handleMessage(_inFrame(
-        [ChannelClient.resPromiseError, 3], {'message': 'sub exploded'}));
+        [ChannelClient.resPromiseError, 4], {'message': 'sub exploded'}));
     await tester.pump();
 
     expect(find.textContaining('会话列表加载失败'), findsOneWidget);
@@ -423,7 +445,7 @@ void main() {
     switchCounts.clear();
     vanishedCalls.clear();
     await pumpDrawerHandshake(tester, '/ws-t', currentSessionId: 's1');
-    _respond(channels, 3, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -435,7 +457,7 @@ void main() {
     expect(switchCounts, isEmpty);
 
     // s1 被删除/归档:增量推送把它从索引移除 → 回调宿主一次。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -463,7 +485,7 @@ void main() {
     switchCounts.clear();
     vanishedCalls.clear();
     await pumpDrawerHandshake(tester, '/ws-t', currentSessionId: 's-new');
-    _respond(channels, 3, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -487,6 +509,98 @@ void main() {
     await tester.tap(find.text('WS')); // 工作区条
     await tester.pump();
     expect(switchCounts, [2]); // 实时列表两条
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('抽屉打开并行拉取 listPinnedTasks,命中会话渲染进置顶组',
+      (tester) async {
+    await pumpDrawer(tester, pinned: [
+      {'taskId': 's2'}, // s2 原属「更早」,置顶后进置顶组
+    ]);
+
+    // wire 断言:listPinnedTasks 以会话 scope 为参,与订阅并行发出。
+    final (header, args) = requestById(1);
+    expect(
+        header, [ChannelClient.reqPromise, 1, 'zcode-task', 'listPinnedTasks']);
+    expect(args, [
+      {'workspacePath': '/ws-t'},
+    ]);
+
+    // 三档分组:s2 进置顶组,更早组因空被剔除。
+    expect(find.text('置顶'), findsOneWidget);
+    expect(find.text('今天'), findsOneWidget);
+    expect(find.text('更早'), findsNothing);
+    expect(find.text('重构 API'), findsOneWidget);
+
+    // 组序与行序:置顶 → s2 → 今天 → s1。
+    double dy(Finder f) => tester.getTopLeft(f).dy;
+    expect(dy(find.text('置顶')), lessThan(dy(find.text('重构 API'))));
+    expect(dy(find.text('重构 API')), lessThan(dy(find.text('今天'))));
+    expect(dy(find.text('今天')), lessThan(dy(find.text('修复登录'))));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('listPinnedTasks 失败容错为空集:列表照常 今天/更早 两档',
+      (tester) async {
+    await pumpDrawerHandshake(tester, '/ws-t');
+    channels.handleMessage(_inFrame(
+        [ChannelClient.resPromiseError, 1], {'message': 'pinned exploded'}));
+    _respond(channels, 4, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+    pushSnapshot(entries);
+    await tester.pump();
+
+    expect(find.text('置顶'), findsNothing);
+    expect(find.text('今天'), findsOneWidget);
+    expect(find.text('更早'), findsOneWidget);
+    expect(find.text('修复登录'), findsOneWidget);
+    expect(find.text('重构 API'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('置顶操作完成后重拉置顶集,条目随即进置顶组', (tester) async {
+    await pumpDrawer(tester); // 初始置顶集为空
+    expect(find.text('置顶'), findsNothing);
+
+    await selectRow(tester); // 选中 s1
+    await tester.tap(find.widgetWithText(OutlinedButton, '置顶'));
+    await tester.pump();
+    final (pinHeader, _) = _decodeRequest(sent.last);
+    expect(
+        pinHeader, [ChannelClient.reqPromise, 5, 'zcode-task', 'setTaskPinned']);
+    _respond(channels, 5, <String, dynamic>{});
+    await tester.pump(); // 退出多选 + id6 置顶集刷新请求发出
+
+    // 刷新是紧随操作的新一次 listPinnedTasks。
+    final (refreshHeader, refreshArgs) = requestById(6);
+    expect(refreshHeader,
+        [ChannelClient.reqPromise, 6, 'zcode-task', 'listPinnedTasks']);
+    expect(refreshArgs, [
+      {'workspacePath': '/ws-t'},
+    ]);
+
+    _respond(channels, 6, [
+      {'taskId': 's1'},
+    ]);
+    await tester.pump();
+
+    expect(find.text('已选 1 项'), findsNothing); // 已退出多选
+    expect(find.text('置顶'), findsOneWidget);
+    double dy(Finder f) => tester.getTopLeft(f).dy;
+    expect(dy(find.text('置顶')), lessThan(dy(find.text('修复登录'))));
+    expect(find.text('今天'), findsNothing); // s1 移入置顶,今天组空
+    expect(find.text('更早'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();
