@@ -60,4 +60,14 @@ void main() {
       expect(parts.parts[0].kind, 'row');
     });
   });
+
+  group('formatTokenCount', () {
+    test('小值原样,≥1 万换算成 x.x 万', () {
+      expect(formatTokenCount(0), '0');
+      expect(formatTokenCount(999), '999');
+      expect(formatTokenCount(10000), '1.0 万');
+      expect(formatTokenCount(553000), '55.3 万');
+      expect(formatTokenCount(6800000), '680.0 万');
+    });
+  });
 }

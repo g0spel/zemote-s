@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
@@ -52,6 +54,12 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
   bool _loading = true;
   String? _error;
 
+  /// 实时可用模型集(provider 注册表 id → 模型 id 集),取自
+  /// prepareWorkspace 的 model 选项(宿主按当前订阅/注册表实时下发)。
+  /// getAll 的 models 是配置存量,已下线模型仍会留在里面——用它对照
+  /// 标注。拿不到(自建供应商/调用失败)时保持静态展示。
+  Map<String, Set<String>> _liveModelsByProvider = const {};
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +92,45 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
           _loading = false;
         });
       }
+    }
+    unawaited(_loadLiveModels());
+  }
+
+  /// 实时可用模型:与聊天模型选择面板同源(prepareWorkspace 的 model
+  /// 选项,含 modelProviderId)。按 provider 归组,供卡片对照标注。
+  Future<void> _loadLiveModels() async {
+    try {
+      final bridge = widget.session.bridge;
+      final ws = '${bridge['workspacePath'] ?? ''}';
+      if (ws.isEmpty) return;
+      final res = await widget.session.channels.call(
+          Channels.zcodeTask, 'prepareWorkspace', [
+        {'workspacePath': ws},
+      ]);
+      final options = res is Map ? res['configOptions'] : null;
+      final sets = <String, Set<String>>{};
+      if (options is List) {
+        for (final o in options) {
+          if (o is! Map || o['id'] != 'model') continue;
+          final values = o['options'];
+          if (values is! List) continue;
+          for (final v in values) {
+            if (v is! Map) continue;
+            final pid = '${v['modelProviderId'] ?? ''}';
+            final value = '${v['value'] ?? ''}';
+            final modelId = value.contains('/')
+                ? value.substring(value.lastIndexOf('/') + 1)
+                : value;
+            if (pid.isEmpty || modelId.isEmpty) continue;
+            sets.putIfAbsent(pid, () => {}).add(modelId);
+          }
+        }
+      }
+      if (mounted && sets.isNotEmpty) {
+        setState(() => _liveModelsByProvider = sets);
+      }
+    } catch (_) {
+      // 实时集不可得(如自建供应商场景):保持静态展示,不打扰。
     }
   }
 
@@ -251,7 +298,16 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                           subtitle: Text(
                             [
                               '${p['apiFormat'] ?? ''}',
-                              if (models.isNotEmpty) '${models.length} 个模型',
+                              if (models.isNotEmpty) ...[
+                                if (_liveModelsByProvider['${p['id']}']
+                                        case final live?)
+                                  '${live.intersection(models
+                                          .map((m) => '${m is Map ? (m['id'] ?? m['name'] ?? '') : ''}')
+                                          .where((s) => s.isNotEmpty)
+                                          .toSet())} / ${models.length} 个模型可用'
+                                else
+                                  '${models.length} 个模型',
+                              ],
                               if (baseUrl.isNotEmpty) baseUrl,
                               if (status == ProviderStatus.disabled &&
                                   disabledReason != null)
@@ -284,7 +340,9 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                                   children: [
                                     for (final m
                                         in models.whereType<Map>())
-                                      _modelLine(context, m),
+                                      _modelLine(context, m,
+                                          live: _liveModelsByProvider[
+                                              '${p['id']}']),
                                   ],
                                 ),
                               ),
@@ -459,8 +517,12 @@ class _AddProviderSheetState extends State<_AddProviderSheet> {
 
 /// One model line inside a provider's expansion: id · context window ·
 /// max output · reasoning levels.
-Widget _modelLine(BuildContext context, Map<dynamic, dynamic> m) {
+/// [live] 为 null 表示没有该供应商的实时数据(自建供应商),原样展示;
+/// 非 null 时模型不在集合内 = 已下线,弱化并标注。
+Widget _modelLine(BuildContext context, Map<dynamic, dynamic> m,
+    {Set<String>? live}) {
   final id = '${m['id'] ?? m['name'] ?? '?'}';
+  final offline = live != null && !live.contains(id);
   final ctx = (m['contextWindow'] as num?)?.toInt();
   final maxOut = (m['maxOutputTokens'] as num?)?.toInt();
   final reasoning = m['reasoning'];
@@ -472,13 +534,17 @@ Widget _modelLine(BuildContext context, Map<dynamic, dynamic> m) {
     child: Text(
       [
         id,
-        if (ctx != null) '上下文 ${k(ctx)}',
-        if (maxOut != null) '输出 ${k(maxOut)}',
-        if (levelNames.isNotEmpty) '推理 $levelNames',
+        if (offline) '已下线',
+        if (!offline && ctx != null) '上下文 ${k(ctx)}',
+        if (!offline && maxOut != null) '输出 ${k(maxOut)}',
+        if (!offline && levelNames.isNotEmpty) '推理 $levelNames',
       ].join(' · '),
       style: TextStyle(
           fontSize: EmberType.caption,
-          color: EmberColors.of(context).textSoft),
+          color: offline
+              ? EmberColors.of(context).textFaint
+              : EmberColors.of(context).textSoft,
+          decoration: offline ? TextDecoration.lineThrough : null),
     ),
   );
 }

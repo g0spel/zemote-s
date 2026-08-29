@@ -1000,6 +1000,8 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// 会话的结构化执行计划(Plan 工具产出的计划记录,conversationPlansV4
+  /// 原始 JSON 视图)。
   Future<void> _showPlansSheet() async {
     final sessionId = _sessionId;
     if (sessionId == null) return;
@@ -1008,10 +1010,10 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       showModalBottomSheet(
         context: context,
-        builder: (context) => _JsonSheet(title: '计划', data: plans),
+        builder: (context) => _JsonSheet(title: '执行计划', data: plans),
       );
     } catch (e) {
-      _toast('获取计划失败: $e');
+      _toast('获取执行计划失败: $e');
     }
   }
 
@@ -1104,7 +1106,7 @@ class _ChatPageState extends State<ChatPage> {
               PopupMenuItem(
                   value: 'plans',
                   enabled: _sessionId != null,
-                  child: Text('计划')),
+                  child: Text('执行计划')),
             ],
           ),
         ],
@@ -1124,15 +1126,26 @@ class _ChatPageState extends State<ChatPage> {
       padding: const EdgeInsets.fromLTRB(EmberSpacing.page, EmberSpacing.gapS,
           EmberSpacing.page, EmberSpacing.gapS),
       child: Column(children: [
-        // 第一行:设备胶囊 | 会话标题 + 所属工作区。
+        // 第一行:设备胶囊 | 会话标题 + 所属工作区 | 会话列表(☰ 靠
+        // 第一行最右,第二行留整行给状态与模型)。
         Row(
           children: [
             if (widget.headerLeading != null) widget.headerLeading!,
             const SizedBox(width: EmberSpacing.gapM),
             Expanded(child: _embeddedTitle(context)),
+            if (widget.onOpenDrawer != null)
+              IconButton(
+                icon: const Icon(Icons.menu, size: 22),
+                tooltip: '会话列表',
+                onPressed: widget.onOpenDrawer,
+              ),
           ],
         ),
-        // 第二行:状态胶囊(左)| 模型 pill + 溢出 + 会话列表(右)。
+        // 第二行:状态胶囊(左)| 模型 pill + 溢出(顺移到行尾,原 ☰
+        // 的位置)。操作簇放 Expanded+Align:占满剩余宽度、按自然宽度
+        // 右对齐——pill 平时完整显示,只在放不下时才经内部省略收缩
+        // (此前 Spacer+Flexible 对半分剩余空间,长模型名把 pill 挤成
+        // 省略号,真机表现为「模型名彻底丢了」)。
         Row(
           children: [
             // 胶囊随订阅实时跟进:phase 帧只在 state 上通知,页面
@@ -1144,17 +1157,12 @@ class _ChatPageState extends State<ChatPage> {
                 animation: state,
                 builder: (context, _) => _sessionStatusChip(context, state),
               ),
-            const Spacer(),
-            // 右侧操作簇用 Flexible 包住:长模型名(claude-sonnet-4-5-
-            // 20250929 之类)会把 pill 撑到超宽,把会话列表按钮挤出屏
-            // (真机 RenderFlex 溢出)。约束传到 pill 内部做省略。
-            Flexible(child: _headerActions(context, state, colors)),
-            if (widget.onOpenDrawer != null)
-              IconButton(
-                icon: const Icon(Icons.menu, size: 22),
-                tooltip: '会话列表',
-                onPressed: widget.onOpenDrawer,
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _headerActions(context, state, colors),
               ),
+            ),
           ],
         ),
       ]),
@@ -1249,7 +1257,7 @@ class _ChatPageState extends State<ChatPage> {
           // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
           // 右侧会话列表入口挤出屏幕。
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_horiz, size: 20, color: colors.textMuted),
+            icon: Icon(Icons.more_vert, size: 20, color: colors.textMuted),
             tooltip: '更多',
             onSelected: _sessionId == null
                 ? null
@@ -1282,7 +1290,7 @@ class _ChatPageState extends State<ChatPage> {
               PopupMenuItem(
                   value: 'plans',
                   enabled: _sessionId != null,
-                  child: Text('计划')),
+                  child: Text('执行计划')),
             ],
           ),
         ],
@@ -3639,7 +3647,12 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final planItems = (parsedPlanItems == null || parsedPlanItems.isEmpty)
         ? null
         : parsedPlanItems;
-    final todoSteps = steps ?? const <PlanStep>[];
+    // 会话里有结构化执行计划时只显示计划:宿主侧计划与 TodoWrite 由
+    // 同一代理流程驱动,内容一致——此前两段并列显示,用户看到两份
+    // 一模一样的清单。无计划时退回 TodoWrite 待办。
+    final todoSteps = planItems != null
+        ? const <PlanStep>[]
+        : (steps ?? const <PlanStep>[]);
     final Widget body;
     if (todoSteps.isEmpty && planItems == null) {
       body = Padding(
@@ -3760,7 +3773,10 @@ class _InsightsSheetState extends State<InsightsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelHeader(context, '待办（最新 TodoWrite）', () {}),
+        _panelHeader(
+            context,
+            planItems != null ? '执行计划（Plan 工具）' : '待办（最新 TodoWrite）',
+            () {}),
         Flexible(child: body),
       ],
     );
@@ -5189,6 +5205,11 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
   }
 }
 
+/// 用量数字的「万 tokens」单位显示:≥1 万以 x.x 万呈现,小值原样。
+/// (553000 → 55.3 万)
+String formatTokenCount(num v) =>
+    v >= 10000 ? '${(v / 10000).toStringAsFixed(1)} 万' : '$v';
+
 class _UsageSheet extends StatelessWidget {
   final ConversationState state;
   final BridgeSession session;
@@ -5207,6 +5228,14 @@ class _UsageSheet extends StatelessWidget {
     final usage = state.usage ?? const {};
     final cumulative = usage['cumulative'];
     final contextWindow = usage['contextWindow'];
+    // 缓存命中率 = 命中读取 / (命中读取 + 未命中净输入):输入侧有多大
+    // 比例直接走了缓存。无输入时不显示(除零无意义)。
+    final cacheRead = (cumulative?['cacheReadTokens'] as num?) ?? 0;
+    final netInput = (cumulative?['inputTokens'] as num?) ?? 0;
+    final cacheDenom = cacheRead + netInput;
+    final cacheHitRate = cacheDenom > 0
+        ? '${(cacheRead / cacheDenom * 100).toStringAsFixed(1)}%'
+        : null;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -5219,16 +5248,23 @@ class _UsageSheet extends StatelessWidget {
                     TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
             if (contextWindow is Map) ...[
-              _UsageRow('上下文',
-                  '${contextWindow['usedTokens'] ?? '-'} / ${contextWindow['maxTokens'] ?? '-'} tokens'),
+              _UsageRow(
+                  '上下文',
+                  '${formatTokenCount((contextWindow['usedTokens'] as num?) ?? 0)}'
+                  ' / ${formatTokenCount((contextWindow['maxTokens'] as num?) ?? 0)} tokens'),
             ],
             if (cumulative is Map) ...[
-              _UsageRow('累计输入', '${cumulative['inputTokens'] ?? 0}'),
-              _UsageRow('累计输出', '${cumulative['outputTokens'] ?? 0}'),
+              _UsageRow('累计输入',
+                  '${formatTokenCount(netInput)} tokens'),
               _UsageRow(
-                  '缓存读取', '${cumulative['cacheReadTokens'] ?? 0}'),
+                  '累计输出',
+                  '${formatTokenCount((cumulative['outputTokens'] as num?) ?? 0)} tokens'),
+              _UsageRow('缓存读取', '${formatTokenCount(cacheRead)} tokens'),
               _UsageRow(
-                  '缓存写入', '${cumulative['cacheWriteTokens'] ?? 0}'),
+                  '缓存写入',
+                  '${formatTokenCount((cumulative['cacheWriteTokens'] as num?) ?? 0)} tokens'),
+              if (cacheHitRate != null)
+                _UsageRow('缓存命中率', cacheHitRate),
             ],
             const SizedBox(height: 12),
             SizedBox(

@@ -416,6 +416,11 @@ void main() {
     expect(rect.right, lessThanOrEqualTo(360), // 1080/3 逻辑宽
         reason: '会话列表按钮被长模型名挤出屏幕(真机三杠出界形态)');
     expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+    // 模型名不能被挤压成不可见(此前 Spacer+Flexible 对半分空间的形态:
+    // pill 只剩省略号,用户侧表现为「模型名彻底丢了」)。
+    final pillText = find.textContaining('claude-sonnet');
+    expect(pillText, findsOneWidget);
+    expect(tester.getRect(pillText).width, greaterThan(30));
 
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();
