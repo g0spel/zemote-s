@@ -1488,14 +1488,21 @@ class _ChatPageState extends State<ChatPage> {
                 sessionId: _sessionId!,
               ),
             ),
-          _InputBar(
-            controller: _inputController,
-            sending: _sending,
-            onSend: _send,
-            onAttach: _pickFiles,
-            onPlusMenu: _openPlusSheet,
-            modeLabel: _currentModeLabel,
-            onPickMode: _showModeMenu,
+          // 模式按钮随会话 state 跟进(optimisticPatch/宿主确认都要
+          // 重建输入栏;此前 InputBar 不在 state 监听内,远端已切、
+          // 本地按钮不变)。
+          AnimatedBuilder(
+            animation: Listenable.merge(
+                [if (state != null) state]),
+            builder: (context, _) => _InputBar(
+              controller: _inputController,
+              sending: _sending,
+              onSend: _send,
+              onAttach: _pickFiles,
+              onPlusMenu: _openPlusSheet,
+              modeLabel: _currentModeLabel,
+              onPickMode: _showModeMenu,
+            ),
           ),
         ],
       );

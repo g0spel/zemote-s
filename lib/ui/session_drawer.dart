@@ -327,28 +327,34 @@ class _SessionDrawerState extends State<SessionDrawer> {
       if (!mounted) return;
       final list = tasksOk && tasksData is List ? tasksData : const [];
       final archList = archOk && archData is List ? archData : const [];
-      final archIds = {
-        for (final t in archList)
-          if (t is Map && t['taskId'] != null) '${t['taskId']}',
-      };
+      SessionEntry entryOf(Map t, {bool archived = false}) => SessionEntry({
+        'sessionId': '${t['taskId']}',
+        'title': '${t['title'] ?? ''}',
+        'phase': '${t['displayStatus'] ?? ''}',
+        'lastActivityAt': (t['updatedAt'] as num?)?.toInt() ??
+            (t['createdAt'] as num?)?.toInt() ??
+            0,
+        'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
+        'hasBackgroundWork': t['hasBackgroundWork'] == true,
+        if (archived) 'archived': 1,
+      });
       final active = <SessionEntry>[];
-      final archived = <SessionEntry>[];
+      final archived = <SessionEntry>[
+        // 归档组主体:listArchivedTasks 的条目本身(listTasks 不下发
+        // 归档任务,此前误把 archIds 当标记、归档组因此恒空)。
+        for (final t in archList)
+          if (t is Map && t['taskId'] != null) entryOf(t.cast<String, dynamic>(), archived: true),
+      ];
+      final seenArchived = <String>{for (final e in archived) e.sessionId};
       for (final t in list) {
         if (t is! Map) continue;
-        final id = '${t['taskId']}';
-        final e = SessionEntry({
-          'sessionId': id,
-          'title': '${t['title'] ?? ''}',
-          'phase': '${t['displayStatus'] ?? ''}',
-          'lastActivityAt':
-              (t['updatedAt'] as num?)?.toInt() ??
-                  (t['createdAt'] as num?)?.toInt() ??
-                  0,
-          'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
-          'hasBackgroundWork': t['hasBackgroundWork'] == true,
-          if (t['archived'] == true || archIds.contains(id)) 'archived': 1,
-        });
-        (e.isArchived ? archived : active).add(e);
+        final e = entryOf(t.cast<String, dynamic>(),
+            archived: t['archived'] == true);
+        if (e.isArchived) {
+          if (!seenArchived.contains(e.sessionId)) archived.add(e);
+        } else {
+          active.add(e);
+        }
       }
       debugPrint('[zflow] _loadTasks total=${list.length} '
           'active=${active.length} archived=${archived.length} '
