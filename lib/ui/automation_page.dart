@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/zemote_client.dart';
+import 'ember_pressable.dart';
 import 'theme.dart';
 
 /// Typed wrapper over the `zcode-agent` automation RPCs (arg shapes
@@ -341,36 +342,46 @@ class _AutomationPageState extends State<AutomationPage> {
               const SizedBox(height: EmberSpacing.gapM),
               // 操作按钮三型(spec §5):主=primary 填充,次=raise 底,
               // 幽灵=无底文字(重启 primary / 删除 err)。
+              // 主/次按钮带按压缩放(spec §5 动效);ListTile 自带
+              // 水波,设置行不叠加。
               Wrap(
                 spacing: EmberSpacing.gapS,
                 runSpacing: EmberSpacing.gapS,
                 children: [
-                  FilledButton.icon(
-                    onPressed: () => _runNow(a),
-                    icon: const Icon(Icons.play_arrow, size: 18),
-                    label: const Text('立即运行'),
+                  EmberPressable(
+                    child: FilledButton.icon(
+                      onPressed: () => _runNow(a),
+                      icon: const Icon(Icons.play_arrow, size: 18),
+                      label: const Text('立即运行'),
+                    ),
                   ),
                   if (lifecycle != null)
-                    TextButton.icon(
-                      onPressed: () => _restart(a),
-                      icon: const Icon(Icons.restart_alt, size: 18),
-                      label: const Text('重启排程'),
+                    EmberPressable(
+                      child: TextButton.icon(
+                        onPressed: () => _restart(a),
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        label: const Text('重启排程'),
+                      ),
                     ),
-                  FilledButton.tonalIcon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _showEditor(existing: a);
-                    },
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    label: const Text('编辑'),
+                  EmberPressable(
+                    child: FilledButton.tonalIcon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showEditor(existing: a);
+                      },
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('编辑'),
+                    ),
                   ),
-                  TextButton(
-                    style: TextButton.styleFrom(foregroundColor: c.err),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _delete(a);
-                    },
-                    child: const Text('删除'),
+                  EmberPressable(
+                    child: TextButton(
+                      style: TextButton.styleFrom(foregroundColor: c.err),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _delete(a);
+                      },
+                      child: const Text('删除'),
+                    ),
                   ),
                 ],
               ),
@@ -643,55 +654,58 @@ class _AutomationPageState extends State<AutomationPage> {
     final runs = _runs[id] ?? const [];
     final lastOutcome = runs.isEmpty ? null : '${runs.first['outcome']}';
     final c = EmberColors.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: EmberSpacing.gapS),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(EmberRadius.control),
-        border: Border.all(color: c.hairline),
-      ),
-      clipBehavior: Clip.antiAlias,
-      // ListTile paints ink on the nearest Material; without this the
-      // decorated Container would hide the splash (framework assertion).
-      child: Material(
-        type: MaterialType.transparency,
-        child: ListTile(
-          onTap: () => _showDetail(a),
-          title: Row(
-            children: [
-              Flexible(
-                child: Text('${a['title']}',
-                    style: TextStyle(
-                        fontSize: EmberType.body,
-                        fontWeight: FontWeight.w600,
-                        color: c.textSolid),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-              ),
-              if (lifecycleLabel('${a['lifecycleStatus'] ?? ''}') !=
-                  null) ...[
-                const SizedBox(width: EmberSpacing.gapS),
-                _LifecycleBadge(a),
+    // 任务卡按压缩放(spec §5 动效);ListTile 水波保留。
+    return EmberPressable(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: EmberSpacing.gapS),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          border: Border.all(color: c.hairline),
+        ),
+        clipBehavior: Clip.antiAlias,
+        // ListTile paints ink on the nearest Material; without this the
+        // decorated Container would hide the splash (framework assertion).
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            onTap: () => _showDetail(a),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text('${a['title']}',
+                      style: TextStyle(
+                          fontSize: EmberType.body,
+                          fontWeight: FontWeight.w600,
+                          color: c.textSolid),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+                if (lifecycleLabel('${a['lifecycleStatus'] ?? ''}') !=
+                    null) ...[
+                  const SizedBox(width: EmberSpacing.gapS),
+                  _LifecycleBadge(a),
+                ],
               ],
-            ],
-          ),
-          subtitle: Text(
-            [
-              scheduleLabel(a),
-              '下次 ${_fmtMs(a['nextRunAt'] as num?)}',
-              '已运行 ${a['runCount'] ?? 0} 次',
-              if (lastOutcome != null)
-                lastOutcome == 'succeeded' ? '上次成功' : '上次失败',
-              if (!enabled) '已停用',
-            ].join(' · '),
-            style:
-                TextStyle(fontSize: EmberType.caption, color: c.textFaint),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: Switch(
-            value: enabled,
-            onChanged: (v) => _toggle(id, v),
+            ),
+            subtitle: Text(
+              [
+                scheduleLabel(a),
+                '下次 ${_fmtMs(a['nextRunAt'] as num?)}',
+                '已运行 ${a['runCount'] ?? 0} 次',
+                if (lastOutcome != null)
+                  lastOutcome == 'succeeded' ? '上次成功' : '上次失败',
+                if (!enabled) '已停用',
+              ].join(' · '),
+              style:
+                  TextStyle(fontSize: EmberType.caption, color: c.textFaint),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Switch(
+              value: enabled,
+              onChanged: (v) => _toggle(id, v),
+            ),
           ),
         ),
       ),

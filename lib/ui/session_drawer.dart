@@ -7,6 +7,7 @@ import '../protocol/conversation.dart';
 import '../protocol/zemote_client.dart';
 import '../state/log_store.dart';
 import '../state/session_list_cache.dart';
+import 'ember_pressable.dart';
 import 'theme.dart';
 
 /// Conversation list primitives shared by the session drawer (Ember shell):
@@ -629,7 +630,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
     final dot = statusDotColor(entry.phase);
     final selected = _selected.contains(entry.sessionId);
     final isCurrent = entry.sessionId == widget.currentSessionId;
-    return InkWell(
+    // 行按压缩放(spec §5 动效);InkWell 水波保留。
+    return EmberPressable(
+      child: InkWell(
       onTap: () {
         if (_managing) {
           setState(() => selected
@@ -717,6 +720,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
           ],
         ),
       ),
+    ),
     );
   }
 
