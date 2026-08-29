@@ -869,7 +869,7 @@ class _ChatPageState extends State<ChatPage> {
                     if (state.currentThought.isNotEmpty)
                       state.currentThought,
                   ].where((s) => s.isNotEmpty).join(' · '),
-                  style: TextStyle(fontSize: 11, color: ZInk.faint(context)),
+                  style: TextStyle(fontSize: 11, color: EmberColors.of(context).textFaint),
                 ),
               ),
           ],
@@ -1167,7 +1167,7 @@ class _ChatPageState extends State<ChatPage> {
                 ? Center(
                     child: _sessionId == null
                         ? Text('输入消息开始新会话',
-                            style: TextStyle(color: ZInk.faint(context)))
+                            style: TextStyle(color: EmberColors.of(context).textFaint))
                         : const CircularProgressIndicator(),
                   )
                 : !state.ready
@@ -1188,7 +1188,7 @@ class _ChatPageState extends State<ChatPage> {
                             return Center(
                                 child: Text('暂无消息',
                                     style:
-                                        TextStyle(color: ZInk.faint(context))));
+                                        TextStyle(color: EmberColors.of(context).textFaint)));
                           }
                           // Reverse list: index 0 renders at the bottom, so
                           // offset 0 IS the newest message — a freshly
@@ -1306,7 +1306,7 @@ class _ChatPageState extends State<ChatPage> {
                   const SizedBox(width: 8),
                   Text(_progress!,
                       style: TextStyle(
-                          fontSize: 11, color: ZInk.muted(context))),
+                          fontSize: 11, color: EmberColors.of(context).textMuted)),
                 ],
               ),
             ),
@@ -1412,7 +1412,7 @@ class _ReconnectBanner extends StatelessWidget {
                 Expanded(
                   child: Text('连接已断开，正在自动重连…',
                       style: TextStyle(
-                          fontSize: 12, color: ZInk.soft(context))),
+                          fontSize: 12, color: EmberColors.of(context).textSoft)),
                 ),
               ],
             ),
@@ -1570,7 +1570,7 @@ class _TurnGroupWidget extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 2),
       child: Text(text,
-          style: TextStyle(fontSize: 10, color: ZInk.faint(context))),
+          style: TextStyle(fontSize: 10, color: EmberColors.of(context).textFaint)),
     );
   }
 
@@ -1884,17 +1884,17 @@ class _MsgBadge extends StatelessWidget {
     switch (status) {
       case 'sending':
         content = Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.schedule, size: 11, color: ZInk.faint(context)),
+          Icon(Icons.schedule, size: 11, color: EmberColors.of(context).textFaint),
           const SizedBox(width: 3),
           Text('发送中',
-              style: TextStyle(fontSize: 9.5, color: ZInk.faint(context))),
+              style: TextStyle(fontSize: 9.5, color: EmberColors.of(context).textFaint)),
         ]);
       case 'sent':
         content = Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.check, size: 11, color: ZInk.faint(context)),
+          Icon(Icons.check, size: 11, color: EmberColors.of(context).textFaint),
           const SizedBox(width: 3),
           Text('已发送',
-              style: TextStyle(fontSize: 9.5, color: ZInk.faint(context))),
+              style: TextStyle(fontSize: 9.5, color: EmberColors.of(context).textFaint)),
         ]);
       case 'processing':
         content = Row(mainAxisSize: MainAxisSize.min, children: [
@@ -2045,7 +2045,7 @@ class _AttachmentViewState extends State<_AttachmentView> {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: ZInk.tile(context),
+          color: EmberColors.of(context).raise,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
@@ -2064,7 +2064,7 @@ class _AttachmentViewState extends State<_AttachmentView> {
     }
     if (_failed) {
       return Text('[图片加载失败] $fileName',
-          style: TextStyle(fontSize: 11, color: ZInk.faint(context)));
+          style: TextStyle(fontSize: 11, color: EmberColors.of(context).textFaint));
     }
     if (_imageBytes == null) {
       return const Padding(
@@ -2193,7 +2193,7 @@ class _FeedbackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       icon: Icon(icon,
-          size: 15, color: active ? EmberColors.of(context).primary : ZInk.ghost(context)),
+          size: 15, color: active ? EmberColors.of(context).primary : EmberColors.of(context).textFaint),
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
     );
@@ -2420,13 +2420,13 @@ class _ToolCallTileState extends State<_ToolCallTile> {
         children: [
           Text(label,
               style: TextStyle(
-                  fontSize: 10.5, color: ZInk.faint(context))),
+                  fontSize: 10.5, color: EmberColors.of(context).textFaint)),
           const SizedBox(height: 2),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: ZInk.codeBlockBg(context),
+              color: EmberColors.of(context).codeBlockBg,
               borderRadius: BorderRadius.circular(8),
             ),
             child: SelectableText(
@@ -2435,7 +2435,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                   : display,
               style: TextStyle(
                   fontFamily: 'monospace', fontSize: 11,
-                  color: ZInk.solid(context)),
+                  color: EmberColors.of(context).textSolid),
             ),
           ),
         ],
@@ -2470,7 +2470,7 @@ class _ProgressRow extends StatelessWidget {
                 '${(bytes / 1024).toStringAsFixed(1)} KB',
               ].join(' · '),
               style: TextStyle(
-                  fontSize: 11, color: ZInk.faint(context)),
+                  fontSize: 11, color: EmberColors.of(context).textFaint),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -2591,7 +2591,7 @@ class _TurnHeaderState extends State<_TurnHeader> {
       'running' => ZColors.running,
       'failed' => ZColors.danger,
       'completedInterrupted' => ZColors.warning,
-      _ => ZInk.faint(context),
+      _ => EmberColors.of(context).textFaint,
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -2639,12 +2639,12 @@ class _TimelineMarkerWidget extends StatelessWidget {
       'forkNotice' => (
           Icons.fork_right,
           '从会话分叉而来',
-          ZInk.faint(context)
+          EmberColors.of(context).textFaint
         ),
       'forkCreated' => (
           Icons.fork_right,
           '已创建分叉会话',
-          ZInk.faint(context)
+          EmberColors.of(context).textFaint
         ),
       'modelChange' => (
           Icons.swap_horiz,
@@ -2669,9 +2669,9 @@ class _TimelineMarkerWidget extends StatelessWidget {
       'checkpointRestored' => (
           Icons.restore,
           '已恢复检查点',
-          ZInk.faint(context)
+          EmberColors.of(context).textFaint
         ),
-      _ => (Icons.info_outline, type, ZInk.faint(context)),
+      _ => (Icons.info_outline, type, EmberColors.of(context).textFaint),
     };
 
     return Center(
@@ -2731,7 +2731,7 @@ class _SubagentTile extends StatelessWidget {
                 Text(
                     '${row['status'] ?? ''}  ${row['summaryText'] ?? ''}',
                     style: TextStyle(
-                        fontSize: 11, color: ZInk.faint(context)),
+                        fontSize: 11, color: EmberColors.of(context).textFaint),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis),
               ],
@@ -2775,7 +2775,7 @@ class _ContextUsageBar extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: ratio,
                 minHeight: 4,
-                backgroundColor: ZInk.tile(context),
+                backgroundColor: EmberColors.of(context).raise,
                 valueColor: AlwaysStoppedAnimation(color),
               ),
             ),
@@ -3226,7 +3226,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: ZInk.tile(context),
+                  color: EmberColors.of(context).card,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: switch (_tab) {
@@ -3253,7 +3253,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
           decoration: BoxDecoration(
             color: selected
                 ? EmberColors.of(context).primary.withValues(alpha: 0.14)
-                : ZInk.tile(context),
+                : EmberColors.of(context).card,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -3261,13 +3261,13 @@ class _InsightsSheetState extends State<InsightsSheet> {
             children: [
               Icon(icon,
                   size: 14,
-                  color: selected ? EmberColors.of(context).primary : ZInk.soft(context)),
+                  color: selected ? EmberColors.of(context).primary : EmberColors.of(context).textSoft),
               const SizedBox(width: 4),
               Text(
                 count != null ? '$label $count' : label,
                 style: TextStyle(
                   fontSize: 11.5,
-                  color: selected ? EmberColors.of(context).primary : ZInk.soft(context),
+                  color: selected ? EmberColors.of(context).primary : EmberColors.of(context).textSoft,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
@@ -3294,7 +3294,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
           GestureDetector(
             onTap: onRefresh,
             child: Icon(Icons.refresh,
-                size: 15, color: ZInk.faint(context)),
+                size: 15, color: EmberColors.of(context).textFaint),
           ),
       ],
     );
@@ -3345,7 +3345,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       body = Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text('暂无待办',
-            style: TextStyle(fontSize: 11.5, color: ZInk.faint(context))),
+            style: TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
       );
     } else {
       body = ListView.builder(
@@ -3375,7 +3375,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                       ? ZColors.success
                       : s.inProgress
                           ? EmberColors.of(context).primary
-                          : ZInk.faint(context),
+                          : EmberColors.of(context).textFaint,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -3384,8 +3384,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
                     style: TextStyle(
                       fontSize: 11.5,
                       color: s.completed
-                          ? ZInk.faint(context)
-                          : ZInk.solid(context),
+                          ? EmberColors.of(context).textFaint
+                          : EmberColors.of(context).textSolid,
                       decoration: s.completed ? TextDecoration.lineThrough : null,
                     ),
                   ),
@@ -3408,7 +3408,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   const SizedBox(width: 5),
                   Text('计划进度 · $done / ${planItems.length}',
                       style: TextStyle(
-                          fontSize: 10.5, color: ZInk.faint(context))),
+                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
                 ],
               ),
             );
@@ -3434,7 +3434,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                       ? ZColors.success
                       : inProgress
                           ? EmberColors.of(context).primary
-                          : ZInk.faint(context),
+                          : EmberColors.of(context).textFaint,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -3443,8 +3443,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
                     style: TextStyle(
                       fontSize: 11.5,
                       color: completed
-                          ? ZInk.faint(context)
-                          : ZInk.solid(context),
+                          ? EmberColors.of(context).textFaint
+                          : EmberColors.of(context).textSolid,
                       decoration:
                           completed ? TextDecoration.lineThrough : null,
                     ),
@@ -3509,7 +3509,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   return '+${fc['additions'] ?? 0} −${fc['deletions'] ?? 0} · ${fc['files']} 文件';
                 }).join('；')}',
                 style:
-                    TextStyle(fontSize: 10.5, color: ZInk.faint(context)),
+                    TextStyle(fontSize: 10.5, color: EmberColors.of(context).textFaint),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -3519,7 +3519,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text('暂无文件变更数据',
                   style:
-                      TextStyle(fontSize: 11.5, color: ZInk.faint(context))),
+                      TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
             )
           else if (entries == null)
             Flexible(child: _jsonFallback(_fileChanges))
@@ -3528,7 +3528,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text('本回合无文件变更',
                   style:
-                      TextStyle(fontSize: 11.5, color: ZInk.faint(context))),
+                      TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
             )
           else
             Flexible(
@@ -3654,8 +3654,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
             if (adds != null && dels != null)
               Text('+${adds.toInt()} −${dels.toInt()}',
                   style: TextStyle(
-                      fontSize: 10.5, color: ZInk.faint(context))),
-            Icon(Icons.chevron_right, size: 14, color: ZInk.faint(context)),
+                      fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+            Icon(Icons.chevron_right, size: 14, color: EmberColors.of(context).textFaint),
           ],
         ),
       ),
@@ -3688,7 +3688,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       suffix = ' · 已取消';
     } else {
       leading = Icon(Icons.hourglass_bottom,
-          size: 13, color: ZInk.faint(context));
+          size: 13, color: EmberColors.of(context).textFaint);
       suffix = ' · 待取结果';
     }
     final kindIcon = w['kind'] == 'bash' ? Icons.terminal : Icons.smart_toy_outlined;
@@ -3703,7 +3703,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Icon(kindIcon, size: 13, color: ZInk.faint(context)),
+          Icon(kindIcon, size: 13, color: EmberColors.of(context).textFaint),
           const SizedBox(width: 5),
           leading,
           const SizedBox(width: 6),
@@ -3733,7 +3733,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       leading = const Icon(Icons.lock_outline, size: 13, color: ZColors.warning);
     } else {
       leading = Icon(Icons.hourglass_bottom,
-          size: 13, color: ZInk.faint(context)); // waiting
+          size: 13, color: EmberColors.of(context).textFaint); // waiting
     }
     final summary = '${s['summary'] ?? ''}';
     return Padding(
@@ -3749,7 +3749,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
               '${status == 'waiting' ? ' · 等待中' : status == 'blocked' ? ' · 被阻塞' : ''}'
               '${s['startedAt'] != null ? ' · ${_fmtMs(s['startedAt'] as num?)} 开始' : ''}'
               '${summary.trim().isNotEmpty ? '\n$summary' : ''}',
-              style: TextStyle(fontSize: 11, color: ZInk.soft(context)),
+              style: TextStyle(fontSize: 11, color: EmberColors.of(context).textSoft),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
@@ -3806,7 +3806,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
             child: Text(
               '${summary.isEmpty ? '子代理 · ${r['subagentType'] ?? ''}' : summary}'
               '$suffix$time',
-              style: TextStyle(fontSize: 11, color: ZInk.soft(context)),
+              style: TextStyle(fontSize: 11, color: EmberColors.of(context).textSoft),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -3848,7 +3848,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text('暂无后台任务',
                 style:
-                    TextStyle(fontSize: 11.5, color: ZInk.faint(context))),
+                    TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
           ),
         ],
       );
@@ -3869,7 +3869,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   padding: const EdgeInsets.only(top: 4, bottom: 2),
                   child: Text('运行中的子代理',
                       style: TextStyle(
-                          fontSize: 10.5, color: ZInk.faint(context))),
+                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
                 ),
                 if (runningSubs != null)
                   for (final s in runningSubs) _subagentTile(context, s),
@@ -3881,7 +3881,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   padding: const EdgeInsets.only(top: 4, bottom: 2),
                   child: Text('已结束的子代理',
                       style: TextStyle(
-                          fontSize: 10.5, color: ZInk.faint(context))),
+                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
                 ),
                 for (final r in endedRows) _subagentRowTile(context, r),
                 // Rows outside the loaded window aren't available — the
@@ -3891,14 +3891,14 @@ class _InsightsSheetState extends State<InsightsSheet> {
                     padding: const EdgeInsets.only(top: 2),
                     child: Text('以及更早的 ${endedTotal - endedRows.length} 个子代理',
                         style: TextStyle(
-                            fontSize: 10.5, color: ZInk.faint(context))),
+                            fontSize: 10.5, color: EmberColors.of(context).textFaint)),
                   ),
               ] else if (endedTotal > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text('已结束 $endedTotal 个子代理',
                       style: TextStyle(
-                          fontSize: 10.5, color: ZInk.faint(context))),
+                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
                 ),
             ],
           ),
@@ -3938,7 +3938,7 @@ class _GoalBanner extends StatelessWidget {
             child: Text(
               objective,
               style:
-                  TextStyle(fontSize: 12, color: ZInk.soft(context)),
+                  TextStyle(fontSize: 12, color: EmberColors.of(context).textSoft),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -3984,7 +3984,7 @@ class _BackgroundWorksBar extends StatelessWidget {
               '后台任务 ${works.length} 个运行中: '
               '${works.map((w) => w['title'] ?? w['kind']).join('、')}',
               style:
-                  TextStyle(fontSize: 11.5, color: ZInk.soft(context)),
+                  TextStyle(fontSize: 11.5, color: EmberColors.of(context).textSoft),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -4039,7 +4039,7 @@ class _QueueBar extends StatelessWidget {
                 child: Text(
                   state.autoDrain ? '自动发送: 开' : '自动发送: 关',
                   style: TextStyle(
-                      fontSize: 11, color: ZInk.muted(context)),
+                      fontSize: 11, color: EmberColors.of(context).textMuted),
                 ),
               ),
             ],
@@ -4054,7 +4054,7 @@ class _QueueBar extends StatelessWidget {
                     child: Text(
                       '${item['text'] ?? ''}',
                       style: TextStyle(
-                          fontSize: 12, color: ZInk.soft(context)),
+                          fontSize: 12, color: EmberColors.of(context).textSoft),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -4173,7 +4173,7 @@ class _QueueAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      icon: Icon(icon, size: 16, color: ZInk.muted(context)),
+      icon: Icon(icon, size: 16, color: EmberColors.of(context).textMuted),
       tooltip: tooltip,
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
@@ -4198,7 +4198,7 @@ class _PendingFilesBar extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(14, 4, 14, 0),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: ZInk.tile(context),
+        color: EmberColors.of(context).card,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -4353,14 +4353,14 @@ class _InteractionCardState extends State<_InteractionCard> {
               padding: const EdgeInsets.only(top: 6),
               child: Text('${payload['prompt']}',
                   style: TextStyle(
-                      fontSize: 12, color: ZInk.soft(context))),
+                      fontSize: 12, color: EmberColors.of(context).textSoft)),
             ),
           if (kind == 'permission' && payload['summary'] != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text('${payload['summary']}',
                   style: TextStyle(
-                      fontSize: 12, color: ZInk.soft(context))),
+                      fontSize: 12, color: EmberColors.of(context).textSoft)),
             ),
           const SizedBox(height: 8),
           if (options is List && options.isNotEmpty)
@@ -4540,7 +4540,7 @@ class _QuestionItem extends StatelessWidget {
               padding: const EdgeInsets.only(top: 2),
               child: Text('${q['description']}',
                   style: TextStyle(
-                      fontSize: 11, color: ZInk.faint(context))),
+                      fontSize: 11, color: EmberColors.of(context).textFaint)),
             ),
           if (options is List && options.isNotEmpty)
             Padding(
@@ -4671,14 +4671,14 @@ class _ModelModeSheet extends StatelessWidget {
                     size: 18,
                     color: currentModeValue == v.value
                         ? EmberColors.of(context).primary
-                        : ZInk.ghost(context),
+                        : EmberColors.of(context).textFaint,
                   ),
                   title: Text(v.name,
                       style: const TextStyle(fontSize: 13)),
                   subtitle: v.description != null
                       ? Text(v.description!,
                           style: TextStyle(
-                              fontSize: 11, color: ZInk.faint(context)))
+                              fontSize: 11, color: EmberColors.of(context).textFaint))
                       : null,
                   onTap: () {
                     if (_isDraft) {
@@ -4805,14 +4805,14 @@ class _ModelModeSheet extends StatelessWidget {
                     size: 18,
                     color: currentModelValue == v.value
                         ? EmberColors.of(context).primary
-                        : ZInk.ghost(context),
+                        : EmberColors.of(context).textFaint,
                   ),
                   title: Text(v.name,
                       style: const TextStyle(fontSize: 13)),
                   subtitle: v.modelProviderName != null
                       ? Text(v.modelProviderName!,
                           style: TextStyle(
-                              fontSize: 11, color: ZInk.faint(context)))
+                              fontSize: 11, color: EmberColors.of(context).textFaint))
                       : null,
                   onTap: () {
                     if (_isDraft) {
@@ -4855,7 +4855,7 @@ class _ModelModeSheet extends StatelessWidget {
             ] else
               Text('当前模型: ${state?.currentModel ?? ''}',
                   style: TextStyle(
-                      fontSize: 12, color: ZInk.muted(context))),
+                      fontSize: 12, color: EmberColors.of(context).textMuted)),
             if (!_isDraft) ...[
               const SizedBox(height: 16),
               const Text('后续消息', style: TextStyle(fontSize: 13)),
@@ -4898,7 +4898,7 @@ class _ModelModeSheet extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text('${o.currentValue}',
                           style: TextStyle(
-                              fontSize: 12, color: ZInk.muted(context))),
+                              fontSize: 12, color: EmberColors.of(context).textMuted)),
                     ],
                   ),
                 ),
@@ -5031,7 +5031,7 @@ class _UsageRow extends StatelessWidget {
         children: [
           Text(label,
               style:
-                  TextStyle(fontSize: 13, color: ZInk.muted(context))),
+                  TextStyle(fontSize: 13, color: EmberColors.of(context).textMuted)),
           Text(value,
               style: const TextStyle(
                   fontSize: 13, fontFamily: 'monospace')),
@@ -5124,7 +5124,7 @@ class _SlashCommandBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text('没有匹配的命令',
-            style: TextStyle(fontSize: 12, color: ZInk.faint(context))),
+            style: TextStyle(fontSize: 12, color: EmberColors.of(context).textFaint)),
       );
     }
     return Container(
@@ -5160,7 +5160,7 @@ class _SlashCommandBar extends StatelessWidget {
               subtitle: Text(
                 command.description,
                 style: TextStyle(
-                    fontSize: 11, color: ZInk.faint(context)),
+                    fontSize: 11, color: EmberColors.of(context).textFaint),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -5203,7 +5203,7 @@ class _SkillsPickerSheet extends StatelessWidget {
                 const Spacer(),
                 IconButton(
                   icon: Icon(Icons.refresh,
-                      size: 18, color: ZInk.muted(context)),
+                      size: 18, color: EmberColors.of(context).textMuted),
                   tooltip: '刷新',
                   onPressed: onRefresh,
                 ),
@@ -5221,7 +5221,7 @@ class _SkillsPickerSheet extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 child: Text('没有可用的 Skills',
                     style: TextStyle(
-                        fontSize: 13, color: ZInk.muted(context))),
+                        fontSize: 13, color: EmberColors.of(context).textMuted)),
               )
             else
               Flexible(
@@ -5240,7 +5240,7 @@ class _SkillsPickerSheet extends StatelessWidget {
                             ? Text(s.description!,
                                 style: TextStyle(
                                     fontSize: 12,
-                                    color: ZInk.faint(context)),
+                                    color: EmberColors.of(context).textFaint),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis)
                             : null,
@@ -5286,13 +5286,13 @@ class _InputBarState extends State<_InputBar> {
           children: [
             IconButton(
               icon: Icon(Icons.attach_file,
-                  size: 20, color: ZInk.muted(context)),
+                  size: 20, color: EmberColors.of(context).textMuted),
               tooltip: '添加附件',
               onPressed: widget.sending ? null : widget.onAttach,
             ),
             IconButton(
               icon: Icon(Icons.auto_awesome_outlined,
-                  size: 20, color: ZInk.muted(context)),
+                  size: 20, color: EmberColors.of(context).textMuted),
               tooltip: '选择 Skills',
               onPressed: widget.sending ? null : widget.onSkills,
             ),

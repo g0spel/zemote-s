@@ -40,12 +40,12 @@ class ZemoteMarkdown extends StatelessWidget {
       code: TextStyle(
         fontFamily: EmberFonts.term,
         fontSize: codeFont,
-        backgroundColor: ZInk.codeInlineBg(context),
-        color: ZInk.codeText(context),
+        backgroundColor: EmberColors.of(context).codeInlineBg,
+        color: EmberColors.of(context).codeText,
       ),
       codeblockDecoration: const BoxDecoration(),
       blockquote: TextStyle(
-          fontSize: fontSize, color: ZInk.soft(context), height: 1.6),
+          fontSize: fontSize, color: EmberColors.of(context).textSoft, height: 1.6),
       blockquoteDecoration: BoxDecoration(
         border: Border(
           left: BorderSide(
@@ -61,13 +61,13 @@ class ZemoteMarkdown extends StatelessWidget {
       tableHead: TextStyle(
           fontSize: fontSize - 1, fontWeight: FontWeight.w600),
       tableBorder: TableBorder.all(
-          color: ZInk.hairline(context), width: 1),
+          color: EmberColors.of(context).hairline, width: 1),
       tableCellsPadding: const EdgeInsets.symmetric(
           horizontal: 8, vertical: 4),
       horizontalRuleDecoration: BoxDecoration(
         border: Border(
             top: BorderSide(
-                color: ZInk.hairline(context))),
+                color: EmberColors.of(context).hairline)),
       ),
       a: TextStyle(
           color: EmberColors.of(context).primary,
@@ -126,9 +126,9 @@ class _CodeBlock extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: ZInk.codeBlockBg(context),
+        color: EmberColors.of(context).codeBlockBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: ZInk.tileBorder(context)),
+        border: Border.all(color: EmberColors.of(context).hairline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -137,7 +137,7 @@ class _CodeBlock extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: ZInk.tile(context),
+              color: EmberColors.of(context).raise,
               borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(10)),
             ),
@@ -147,7 +147,7 @@ class _CodeBlock extends StatelessWidget {
                   language.isEmpty ? 'code' : language,
                   style: TextStyle(
                       fontSize: 10.5,
-                      color: ZInk.faint(context),
+                      color: EmberColors.of(context).textFaint,
                       fontFamily: EmberFonts.term),
                 ),
                 const Spacer(),
@@ -164,7 +164,7 @@ class _CodeBlock extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(2),
                     child: Icon(Icons.copy_outlined,
-                        size: 13, color: ZInk.faint(context)),
+                        size: 13, color: EmberColors.of(context).textFaint),
                   ),
                 ),
               ],
@@ -181,7 +181,7 @@ class _CodeBlock extends StatelessWidget {
                 fontFamily: EmberFonts.term,
                 fontSize: fontSize - 1.5,
                 height: 1.5,
-                color: ZInk.codeText(context),
+                color: EmberColors.of(context).codeText,
               ),
             ),
           ),

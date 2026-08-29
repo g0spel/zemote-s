@@ -43,102 +43,6 @@ class ZColors {
   static const running = Color(0xFF38BDF8);
 }
 
-/// Theme-aware ink colors. Replaces hardcoded `Colors.white*` (dark-theme
-/// ink) which become illegible on the light surfaces. The dark theme keeps
-/// the existing white ramp; the light theme maps it onto a slate ramp so
-/// text/icons stay readable on white backgrounds.
-class ZInk {
-  static bool _isLight(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.light;
-
-  static const _slate = Color(0xFF0F172A);
-  static const _slate700 = Color(0xFF334155);
-  static const _slate600 = Color(0xFF475569);
-  static const _slate500 = Color(0xFF64748B);
-  static const _slate400 = Color(0xFF94A3B8);
-  static const _slate300 = Color(0xFFCBD5E1);
-
-  /// Primary text/ink (dark: `Colors.white`, light: slate-900).
-  static Color solid(BuildContext context) =>
-      _isLight(context) ? _slate : Colors.white;
-
-  /// Secondary ink (dark: `Colors.white70`, light: slate-700).
-  static Color soft(BuildContext context) =>
-      _isLight(context) ? _slate700 : Colors.white70;
-
-  /// Muted ink (dark: `Colors.white54`, light: slate-600).
-  static Color muted(BuildContext context) =>
-      _isLight(context) ? _slate600 : Colors.white54;
-
-  /// Faint ink (dark: `Colors.white38`, light: slate-500).
-  static Color faint(BuildContext context) =>
-      _isLight(context) ? _slate500 : Colors.white38;
-
-  /// Ghost ink (dark: `Colors.white24`, light: slate-400).
-  static Color ghost(BuildContext context) =>
-      _isLight(context) ? _slate400 : Colors.white24;
-
-  /// Hairline ink (dark: `Colors.white12`, light: slate-300).
-  static Color hairline(BuildContext context) =>
-      _isLight(context) ? _slate300 : Colors.white12;
-
-  /// Subtle tile fill (dark: white@4%, light: black@4%).
-  static Color tile(BuildContext context) =>
-      _isLight(context)
-          ? const Color(0x0A0F172A)
-          : Colors.white.withValues(alpha: 0.04);
-
-  /// Tile hairline border (dark: white@6%, light: black@6%).
-  static Color tileBorder(BuildContext context) =>
-      _isLight(context)
-          ? const Color(0x0F0F172A)
-          : Colors.white.withValues(alpha: 0.06);
-
-  /// Code block background (light: slate-100 so code stays readable).
-  static Color codeBlockBg(BuildContext context) =>
-      _isLight(context)
-          ? const Color(0xFFF1F5F9)
-          : Colors.black.withValues(alpha: 0.35);
-
-  /// Inline code background.
-  static Color codeInlineBg(BuildContext context) =>
-      _isLight(context)
-          ? const Color(0x140F172A)
-          : Colors.white.withValues(alpha: 0.08);
-
-  /// Code text (light: dark blue for contrast on the light block).
-  static Color codeText(BuildContext context) =>
-      _isLight(context)
-          ? const Color(0xFF1E3A8A)
-          : const Color(0xFF93C5FD);
-
-  /// Diff container background (follows the code block, so diffs and code
-  /// read as the same "code surface" in both themes).
-  static Color diffBg(BuildContext context) => codeBlockBg(context);
-
-  /// Diff header strip (a step above [diffBg]).
-  static Color diffHeaderBg(BuildContext context) =>
-      _isLight(context)
-          ? const Color(0xFFE2E8F0)
-          : Colors.white.withValues(alpha: 0.06);
-
-  /// Diff line fills — tinted enough to read as +/- bands in BOTH themes
-  /// (the old constant greens/reds were tuned for dark only).
-  static Color diffAddedBg(BuildContext context) => _isLight(context)
-      ? const Color(0x16B7EB8F)
-      : const Color(0xFF22C55E).withValues(alpha: 0.12);
-  static Color diffRemovedBg(BuildContext context) => _isLight(context)
-      ? const Color(0x16FCA5A5)
-      : const Color(0xFFEF4444).withValues(alpha: 0.12);
-
-  /// Diff line text — saturated base colors on light (pastels wash out
-  /// on white), the readable pastels on dark.
-  static Color diffAddedText(BuildContext context) =>
-      _isLight(context) ? const Color(0xFF15803D) : const Color(0xFF86EFAC);
-  static Color diffRemovedText(BuildContext context) =>
-      _isLight(context) ? const Color(0xFFB91C1C) : const Color(0xFFFCA5A5);
-}
-
 /// 全局主题接线 Ember 色板(spec §2):ColorScheme 直构、组件主题取同一
 /// 色板,页面无需再做局部覆盖。slot → token 映射:
 ///   primary / onPrimary              = Ember primary / 白字
@@ -410,8 +314,7 @@ class ThemeControllerProvider extends InheritedWidget {
       controller != oldWidget.controller;
 }
 
-/// Ember 设计语言色板单一来源(spec §2)。后续界面统一经此类取色;
-/// ZInk 保留为兼容层,逐步迁移后移除。
+/// Ember 设计语言色板单一来源(spec §2)。全部界面统一经此类取色。
 class EmberColors {
   final bool isDark;
   const EmberColors._(this.isDark);
@@ -456,6 +359,15 @@ class EmberColors {
   Color get textSoft => isDark ? _dSoft : _lSoft;
   Color get textMuted => isDark ? _dMuted : _lMuted;
   Color get textFaint => isDark ? _dFaint : _lFaint;
+
+  // 代码面:markdown 代码块、diff 容器、工具输出共用同一“代码表面”
+  // (spec §7.1),与主色无关、仅随明暗切换。
+  Color get codeBlockBg =>
+      isDark ? Colors.black.withValues(alpha: 0.35) : const Color(0xFFF1F5F9);
+  Color get codeInlineBg =>
+      isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0x140F172A);
+  Color get codeText =>
+      isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E3A8A);
 }
 
 /// 圆角双轨(spec §4):内容区大圆角、控制区小圆角。

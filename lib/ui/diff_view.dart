@@ -178,12 +178,13 @@ class DiffView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ember = EmberColors.of(context);
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: ZInk.diffBg(context),
+        color: ember.codeBlockBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: ZInk.tileBorder(context)),
+        border: Border.all(color: ember.hairline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -193,7 +194,7 @@ class DiffView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: ZInk.diffHeaderBg(context),
+                color: ember.headerBg,
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(10)),
               ),
@@ -202,7 +203,7 @@ class DiffView extends StatelessWidget {
                 style: TextStyle(
                     fontSize: 10.5,
                     fontFamily: 'monospace',
-                    color: ZInk.muted(context)),
+                    color: ember.textMuted),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -215,8 +216,8 @@ class DiffView extends StatelessWidget {
                 for (final line in diff.lines.take(400))
                   Container(
                     color: switch (line.type) {
-                      DiffLineType.added => ZInk.diffAddedBg(context),
-                      DiffLineType.removed => ZInk.diffRemovedBg(context),
+                      DiffLineType.added => ember.addedBg,
+                      DiffLineType.removed => ember.removedBg,
                       DiffLineType.context => Colors.transparent,
                     },
                     padding: const EdgeInsets.symmetric(
@@ -229,10 +230,10 @@ class DiffView extends StatelessWidget {
                         height: 1.45,
                         color: switch (line.type) {
                           DiffLineType.added =>
-                            ZInk.diffAddedText(context),
+                            ember.addedText,
                           DiffLineType.removed =>
-                            ZInk.diffRemovedText(context),
-                          DiffLineType.context => ZInk.soft(context),
+                            ember.removedText,
+                          DiffLineType.context => ember.textSoft,
                         },
                       ),
                     ),
@@ -242,7 +243,7 @@ class DiffView extends StatelessWidget {
                     padding: const EdgeInsets.all(8),
                     child: Text('…（diff 过长已截断）',
                         style: TextStyle(
-                            fontSize: 10, color: ZInk.faint(context))),
+                            fontSize: 10, color: ember.textFaint)),
                   ),
               ],
             ),
@@ -251,4 +252,23 @@ class DiffView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Diff 专属明暗配色(仅 [DiffView] 使用):容器与正文文字取
+/// [EmberColors] 的代码面,+/- 色带与行文字两主题各取一套——浅色用
+/// 饱和基色(粉彩在白底上发灰),暗色用粉彩(饱和色过亮刺眼)。
+extension _DiffColors on EmberColors {
+  /// 头部条:代码面之上的一档。
+  Color get headerBg =>
+      isDark ? Colors.white.withValues(alpha: 0.06) : const Color(0xFFE2E8F0);
+  Color get addedBg => isDark
+      ? const Color(0xFF22C55E).withValues(alpha: 0.12)
+      : const Color(0x16B7EB8F);
+  Color get removedBg => isDark
+      ? const Color(0xFFEF4444).withValues(alpha: 0.12)
+      : const Color(0x16FCA5A5);
+  Color get addedText =>
+      isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D);
+  Color get removedText =>
+      isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C);
 }
