@@ -2236,45 +2236,44 @@ class _ReasoningTileState extends State<_ReasoningTile> {
       decoration: BoxDecoration(
         color: Color.lerp(e.bg, e.card, 0.5),
         borderRadius: BorderRadius.circular(EmberRadius.control),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Status accent rail: blue while thinking, neutral when done —
-          // the tile's state is readable at a glance without opening it.
-          Container(
+        // Status accent rail: run while thinking, neutral when done. Drawn
+        // as a border rather than a stretched sibling Row child — Row
+        // + CrossAxisAlignment.stretch hands infinite height to its children
+        // inside the unbounded message list (crashes layout in debug and
+        // corrupts it in release).
+        border: Border(
+          left: BorderSide(
             width: 3,
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: widget.streaming ? e.run : e.textFaint,
-              borderRadius: BorderRadius.circular(2),
-            ),
+            color: widget.streaming ? e.run : e.textFaint,
           ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => setState(() => _open = !_open),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                    child: Text(
-                      '$arrow${widget.streaming ? '思考中…' : '思考过程'}',
-                      style: TextStyle(
-                          fontSize: EmberType.caption, color: e.textFaint),
-                    ),
-                  ),
+        ),
+      ),
+      // Compensate the border's painted width so content lines up exactly
+      // where the old rail child sat.
+      child: Padding(
+        padding: const EdgeInsets.only(left: 3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _open = !_open),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Text(
+                  '$arrow${widget.streaming ? '思考中…' : '思考过程'}',
+                  style: TextStyle(
+                      fontSize: EmberType.caption, color: e.textFaint),
                 ),
-                if (_open)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    child: ZemoteMarkdown(widget.text, fontSize: 12),
-                  ),
-              ],
+              ),
             ),
-          ),
-        ],
+            if (_open)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: ZemoteMarkdown(widget.text, fontSize: 12),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2332,85 +2331,81 @@ class _ToolCallTileState extends State<_ToolCallTile> {
       decoration: BoxDecoration(
         color: Color.lerp(e.bg, e.card, 0.5),
         borderRadius: BorderRadius.circular(EmberRadius.control),
+        // Status rail mirrors the icon color so the state reads at a glance
+        // even while collapsed. Drawn as a border rather than a stretched
+        // sibling Row child — Row + CrossAxisAlignment.stretch hands
+        // infinite height to its children inside the unbounded message list
+        // (crashes layout in debug and corrupts it in release).
+        border: Border(
+          left: BorderSide(width: 3, color: color),
+        ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Status rail mirrors the icon color so the state reads at a
-          // glance even while collapsed.
-          Container(
-            width: 3,
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(2),
+      // Compensate the border's painted width so content lines up exactly
+      // where the old rail child sat.
+      child: Padding(
+        padding: const EdgeInsets.only(left: 3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _open = !_open),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Row(
+                  children: [
+                    Text(_open ? '▾ ' : '▸ ',
+                        style: TextStyle(
+                            fontSize: EmberType.caption,
+                            color: e.textFaint)),
+                    Icon(icon, size: 12, color: color),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(toolName,
+                          style: TextStyle(
+                              fontSize: EmberType.caption,
+                              fontFamily: EmberFonts.term,
+                              color: e.textFaint),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => setState(() => _open = !_open),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                    child: Row(
-                      children: [
-                        Text(_open ? '▾ ' : '▸ ',
-                            style: TextStyle(
-                                fontSize: EmberType.caption,
-                                color: e.textFaint)),
-                        Icon(icon, size: 12, color: color),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(toolName,
-                              style: TextStyle(
-                                  fontSize: EmberType.caption,
-                                  fontFamily: EmberFonts.term,
-                                  color: e.textFaint),
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                      ],
+            if (_open) ...[
+              if (inputText.isNotEmpty) _kv(context, '输入', inputText),
+              if (outputText.isNotEmpty) _kv(context, '输出', outputText),
+              if (error is Map)
+                _kv(context, '错误',
+                    '${error['code'] ?? ''} ${error['message'] ?? ''}'),
+            ],
+            if (progress is Map) _ProgressRow(progress: progress),
+            if (diff != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                child: DiffView(diff: diff),
+              ),
+            for (final image in images)
+              if (image is Map && image['base64'] is String)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(
+                      base64Decode(image['base64'] as String),
+                      fit: BoxFit.contain,
+                      // Cap the decode at viewport width — inline tool
+                      // outputs can embed multi-megapixel renders.
+                      cacheWidth: (MediaQuery.sizeOf(context).width *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .round(),
+                      errorBuilder: (_, __, ___) =>
+                          const SizedBox.shrink(),
                     ),
                   ),
                 ),
-                if (_open) ...[
-                  if (inputText.isNotEmpty) _kv(context, '输入', inputText),
-                  if (outputText.isNotEmpty) _kv(context, '输出', outputText),
-                  if (error is Map)
-                    _kv(context, '错误',
-                        '${error['code'] ?? ''} ${error['message'] ?? ''}'),
-                ],
-                if (progress is Map) _ProgressRow(progress: progress),
-                if (diff != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                    child: DiffView(diff: diff),
-                  ),
-                for (final image in images)
-                  if (image is Map && image['base64'] is String)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(
-                          base64Decode(image['base64'] as String),
-                          fit: BoxFit.contain,
-                          // Cap the decode at viewport width — inline tool
-                          // outputs can embed multi-megapixel renders.
-                          cacheWidth: (MediaQuery.sizeOf(context).width *
-                                  MediaQuery.devicePixelRatioOf(context))
-                              .round(),
-                          errorBuilder: (_, __, ___) =>
-                              const SizedBox.shrink(),
-                        ),
-                      ),
-                    ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
