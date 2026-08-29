@@ -209,4 +209,119 @@ void main() {
     bridge.dispose();
     await tester.pump(const Duration(seconds: 40));
   });
+
+  testWidgets('状态胶囊随订阅实时翻转:轮次结束帧后不靠 setState 也变空闲',
+      (tester) async {
+    tester.view.physicalSize = const Size(1080, 2280);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+
+    final listeners = <int, String>{};
+    final pending = <int, Object?>{};
+    final channels = ChannelClient(sendBody: (body) {
+      final r = ValueReader(body);
+      final h = decodeValue(r) as List;
+      if (h[0] == ChannelClient.reqPromise) {
+        pending[h[1] as int] = _autoReply(h[3] as String);
+      } else if (h[0] == ChannelClient.reqEventListen) {
+        listeners[h[1] as int] = h[3] as String;
+      }
+    });
+    final bridge = BridgeSession.detached({'workspaceKey': '/ws'},
+        channels: channels);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ChatPage(
+          session: bridge,
+          scope: const {'workspacePath': '/ws'},
+          workspaceKey: '/ws',
+          sessionId: null,
+          title: '新会话',
+          embedded: true,
+        ),
+      ),
+    ));
+
+    bridge.channels
+        .handleMessage(_frame(const [ChannelClient.resInitialize, 0]));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'hi');
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    for (var i = 0; i < 12 &&
+        !listeners.containsValue('onDynamicConversationFrame'); i++) {
+      for (final id in pending.keys.toList()) {
+        _respond(bridge, id, pending.remove(id));
+      }
+      await tester.pump(const Duration(milliseconds: 150));
+    }
+    for (final id in pending.keys.toList()) {
+      _respond(bridge, id, pending.remove(id));
+    }
+    await tester.pump();
+    final convListener = listeners.entries
+        .singleWhere((e) => e.value == 'onDynamicConversationFrame')
+        .key;
+
+    // 运行中快照:userInput 行落地(echo 退役,之后不再有页面 setState)。
+    _fire(bridge, convListener, {
+      'kind': 'complete',
+      'topic': 'conversation/s1',
+      'subscriptionId': 'conv-sub',
+      'frame': {
+        'subscriptionId': 'conv-sub',
+        'toSeq': 2,
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {
+            'revision': 1,
+            'logEpoch': 'e1',
+            'control': {'phase': 'running'},
+            'rows': {
+              'totalCount': 1,
+              'firstRowId': 1,
+              'window': [
+                {'rowId': 1, 'kind': 'userInput', 'text': 'hi'},
+              ],
+            },
+          },
+        },
+      },
+    });
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text('工作中'), findsOneWidget);
+
+    // 轮次结束:仅 state.updated 增量(无任何页面 setState)。胶囊必须
+    // 经自身订阅监听翻转为「空闲」——真机症状:结束后仍显示工作中。
+    _fire(bridge, convListener, {
+      'kind': 'complete',
+      'topic': 'conversation/s1',
+      'subscriptionId': 'conv-sub',
+      'frame': {
+        'subscriptionId': 'conv-sub',
+        'fromSeq': 2,
+        'toSeq': 3,
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {
+              'op': 'state.updated',
+              'patch': {
+                'control': {'phase': 'completedSuccess'},
+              },
+            },
+          ],
+        },
+      },
+    });
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text('空闲'), findsOneWidget,
+        reason: '轮次结束帧后胶囊应实时翻转为空闲');
+    expect(find.text('工作中'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
 }

@@ -1122,7 +1122,15 @@ class _ChatPageState extends State<ChatPage> {
         // 第二行:状态胶囊(左)| 模型 pill + 溢出 + 会话列表(右)。
         Row(
           children: [
-            _sessionStatusChip(context, state),
+            // 胶囊随订阅实时跟进:phase 帧只在 state 上通知,页面
+            // build 不会因此重跑(真机:轮次结束后仍显示「工作中」)。
+            if (state == null)
+              _sessionStatusChip(context, state)
+            else
+              AnimatedBuilder(
+                animation: state,
+                builder: (context, _) => _sessionStatusChip(context, state),
+              ),
             const Spacer(),
             _headerActions(context, state, colors),
             if (widget.onOpenDrawer != null)
