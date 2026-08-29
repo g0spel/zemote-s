@@ -316,16 +316,28 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 补"的组合(存量种子混入活跃、归档不同步均源于此)。
   Future<void> _loadTasks() async {
     try {
-      final res = await widget.bridge.channels
-          .call(Channels.zcodeTask, 'listTasks', [widget.scope]);
+      Future<(bool, dynamic)> call(String method) => widget.bridge.channels
+          .call(Channels.zcodeTask, method, [widget.scope])
+          .then((r) => (true, r))
+          .catchError((Object _) => (false, const <dynamic>[]));
+      final (tasksOk, tasksData) = await call('listTasks');
+      // 归档并集:listArchivedTasks 是归档列表的显式来源(listTasks 可能
+      // 直接不下发归档条目);条目级 archived 标志若在也并入。
+      final (archOk, archData) = await call('listArchivedTasks');
       if (!mounted) return;
-      final list = res is List ? res : const [];
+      final list = tasksOk && tasksData is List ? tasksData : const [];
+      final archList = archOk && archData is List ? archData : const [];
+      final archIds = {
+        for (final t in archList)
+          if (t is Map && t['taskId'] != null) '${t['taskId']}',
+      };
       final active = <SessionEntry>[];
       final archived = <SessionEntry>[];
       for (final t in list) {
         if (t is! Map) continue;
+        final id = '${t['taskId']}';
         final e = SessionEntry({
-          'sessionId': '${t['taskId']}',
+          'sessionId': id,
           'title': '${t['title'] ?? ''}',
           'phase': '${t['displayStatus'] ?? ''}',
           'lastActivityAt':
@@ -334,12 +346,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
                   0,
           'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
           'hasBackgroundWork': t['hasBackgroundWork'] == true,
-          if (t['archived'] == true) 'archived': 1,
+          if (t['archived'] == true || archIds.contains(id)) 'archived': 1,
         });
         (e.isArchived ? archived : active).add(e);
       }
       debugPrint('[zflow] _loadTasks total=${list.length} '
-          'active=${active.length} archived=${archived.length}');
+          'active=${active.length} archived=${archived.length} '
+          'sampleKeys=${list.isEmpty ? '-' : '${(list.first as Map).keys.toList()}'}');
       // 归档归属以任务列表为准;活跃显示沿用索引条目(带 preview/实时
       // phase),_activeTaskIds 供 vanished 三重确认。
       setState(() {

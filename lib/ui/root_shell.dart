@@ -418,6 +418,12 @@ class _RootShellState extends State<RootShell> {
   /// → 复位到 draft 并提示。抽屉保持打开(用户多半正在管理操作中)。
   void _onCurrentSessionVanished() {
     if (!mounted || _activeSessionId.value == null) return;
+    final adopted = _sessionAdoptedAt;
+    if (adopted != null &&
+        DateTime.now().difference(adopted).inSeconds < 30) {
+      // 新会话宽限期内:忽略(索引快照滞后属常态)。
+      return;
+    }
     _sessionEpoch++;
     setState(() {
       _activeSessionId.value = null;
@@ -437,9 +443,15 @@ class _RootShellState extends State<RootShell> {
     if (epoch != _sessionEpoch) return;
     if (sessionId.isNotEmpty && sessionId != _activeSessionId.value) {
       _activeSessionId.value = sessionId;
+      // 新会话 adopt 宽限:刚建的会话短暂不在索引快照属常态,30s 内
+      // 抽屉的"消失"判定一律忽略(误判会拆掉订阅,回复随之丢失)。
+      _sessionAdoptedAt = DateTime.now();
     }
     _activeSessionTitle.value = title;
   }
+
+  /// 当前会话的 adopt 时刻(消失判定宽限基准)。
+  DateTime? _sessionAdoptedAt;
 
   void _showDeviceSwitcher() {
     showModalBottomSheet(
