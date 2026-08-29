@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/connection_params.dart';
+import 'package:zflow/protocol/connection_params.dart';
 
 void main() {
   group('scheme enforcement', () {

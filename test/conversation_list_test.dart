@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zemote/protocol/conversation.dart';
-import 'package:zemote/ui/session_drawer.dart';
-import 'package:zemote/ui/theme.dart';
+import 'package:zflow/protocol/conversation.dart';
+import 'package:zflow/ui/session_drawer.dart';
+import 'package:zflow/ui/theme.dart';
 
 SessionEntry _e(String id, String phase, int at, {String? title}) =>
     SessionEntry({

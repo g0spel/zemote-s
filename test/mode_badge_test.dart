@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/ui/chat_page.dart';
-import 'package:zemote/ui/theme.dart';
+import 'package:zflow/ui/chat_page.dart';
+import 'package:zflow/ui/theme.dart';
 
 /// 模型 pill 的模式徽段映射(spec §7.1:build 默认不显示;
 /// 计划橙/编辑蓝/YOLO 红;桌面端自定义模式原样透传)。

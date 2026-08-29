@@ -1,4 +1,4 @@
-package dev.g0spel.zemotes
+package dev.g0spel.zflow
 
 import android.Manifest
 import android.content.Intent
@@ -15,9 +15,9 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "zemote/update"
-    private val notifyChannelName = "zemote/notifications"
-    private val navChannelName = "zemote/nav"
+    private val channelName = "zflow/update"
+    private val notifyChannelName = "zflow/notifications"
+    private val navChannelName = "zflow/nav"
 
     private val notificationPermissionRequestCode = 4096
 
@@ -47,7 +47,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, notifyChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "startForeground" -> {
-                    ZemoteNotificationService.start(
+                    ZflowNotificationService.start(
                         this,
                         call.argument<String>("title") ?: "任务运行中",
                         call.argument<String>("text") ?: ""
@@ -57,17 +57,17 @@ class MainActivity : FlutterActivity() {
                 "updateForeground" -> {
                     val title = call.argument<String>("title") ?: "任务运行中"
                     val text = call.argument<String>("text") ?: ""
-                    val service = ZemoteNotificationService.instance
+                    val service = ZflowNotificationService.instance
                     if (service != null) {
                         service.update(title, text)
                         result.success(true)
                     } else {
-                        ZemoteNotificationService.start(this, title, text)
+                        ZflowNotificationService.start(this, title, text)
                         result.success(true)
                     }
                 }
                 "stopForeground" -> {
-                    stopService(Intent(this, ZemoteNotificationService::class.java))
+                    stopService(Intent(this, ZflowNotificationService::class.java))
                     result.success(true)
                 }
                 "notifyTaskCompleted" -> {

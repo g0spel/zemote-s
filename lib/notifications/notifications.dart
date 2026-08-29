@@ -9,8 +9,8 @@ final notificationsService = Notifications();
 /// Thin wrapper over the Android notification/nav platform channels
 /// (`zemote/notifications`, `zemote/nav`). Non-Android platforms no-op.
 class Notifications {
-  static const _channel = MethodChannel('zemote/notifications');
-  static const _nav = MethodChannel('zemote/nav');
+  static const _channel = MethodChannel('zflow/notifications');
+  static const _nav = MethodChannel('zflow/nav');
 
   Future<void> Function(Map<String, dynamic> payload)? _tapHandler;
   bool _initialized = false;

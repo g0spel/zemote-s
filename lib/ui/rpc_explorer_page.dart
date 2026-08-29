@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import 'theme.dart';
 
 /// Raw relay payload explorer: send arbitrary `zcode_type` payloads and

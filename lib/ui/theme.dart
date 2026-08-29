@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Design tokens + theme controller (dark / light / system, persisted).
 class ThemeController extends ChangeNotifier {
-  static const _prefsKey = 'zemote_theme_mode';
+  static const _prefsKey = 'zflow_theme_mode';
 
   ThemeMode _mode = ThemeMode.dark;
   ThemeMode get mode => _mode;

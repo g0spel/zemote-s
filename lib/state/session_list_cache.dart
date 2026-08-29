@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Cache is write-through from successful loads only — failures never
 /// overwrite a good list.
 class SessionListCache {
-  static const _prefix = 'zemote_session_list_v1_';
+  static const _prefix = 'zflow_session_list_v1_';
   static const _maxEntries = 100;
 
   const SessionListCache();

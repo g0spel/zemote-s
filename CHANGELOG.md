@@ -107,10 +107,10 @@
 ## [0.9.0] - 2026-08-19
 
 ### Changed
-- **更名 ZemoteS**：
+- **更名 Zflow**：
   - 仓库改名 `g0spel/zemote-s`（应用内更新源、设置页 GitHub 链接、README 徽章同步）；
   - Android 包名 `dev.g0spel.zemotes`（原 `dev.g0spel.zemote`；**已装版本需卸载重装一次**，签名键不变）；
-  - 应用显示名改为 ZemoteS（桌面图标 / 各页标题 / 中英文案）。
+  - 应用显示名改为 Zflow（桌面图标 / 各页标题 / 中英文案）。
 - **平台收敛为 Android + Web**：移除 Windows 平台目录；Web 保留编译冒烟与调试用途。
 
 ### Fixed

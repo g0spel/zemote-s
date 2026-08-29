@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/update/update_checker.dart';
+import 'package:zflow/update/update_checker.dart';
 
 void main() {
   group('compareVersions', () {
@@ -29,7 +29,7 @@ void main() {
   group('parseChecksumHex', () {
     test('extracts digest from sha256sum output', () {
       const content =
-          'a3f5b7c9d2e4f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081  ZemoteS-v1.2.3-arm64.apk\n';
+          'a3f5b7c9d2e4f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081  Zflow-v1.2.3-arm64.apk\n';
       expect(parseChecksumHex(content),
           'a3f5b7c9d2e4f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081');
     });

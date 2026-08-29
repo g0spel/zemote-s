@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/state/log_store.dart';
+import 'package:zflow/state/log_store.dart';
 
 void main() {
   test('long lines are truncated with a marker', () {

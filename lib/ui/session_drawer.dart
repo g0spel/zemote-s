@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import '../state/log_store.dart';
 import '../state/session_list_cache.dart';
 import 'ember_pressable.dart';

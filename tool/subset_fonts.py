@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """下载 Sarasa Ui/Term SC 并子集化为应用内字体。
 
-产物:assets/fonts/ZemoteS-{UI-Regular,UI-Bold,Term-Regular}.ttf
+产物:assets/fonts/Zflow-{UI-Regular,UI-Bold,Term-Regular}.ttf
 子集范围:GB2312 全集 + ASCII + 中英标点(spec §3 方案 A)。
 字体许可:SIL OFL 1.1(更纱黑体),README 需附许可声明。
 版本:v1.0.41(2026-08 核实;执行时若过时,更新 FONT_TAG 即可)。
@@ -14,11 +14,11 @@ FONT_BASE = ("https://github.com/be5invis/Sarasa-Gothic/releases/"
 # 7z 包(Unhinted:子集化反正丢弃 hinting,包更小)
 PACKAGES = {
     "SarasaUiSC-TTF-Unhinted-1.0.41.7z": [
-        ("SarasaUiSC-Regular.ttf", "ZemoteS-UI-Regular.ttf"),
-        ("SarasaUiSC-Bold.ttf", "ZemoteS-UI-Bold.ttf"),
+        ("SarasaUiSC-Regular.ttf", "Zflow-UI-Regular.ttf"),
+        ("SarasaUiSC-Bold.ttf", "Zflow-UI-Bold.ttf"),
     ],
     "SarasaTermSC-TTF-Unhinted-1.0.41.7z": [
-        ("SarasaTermSC-Regular.ttf", "ZemoteS-Term-Regular.ttf"),
+        ("SarasaTermSC-Regular.ttf", "Zflow-Term-Regular.ttf"),
     ],
 }
 OUT = pathlib.Path("assets/fonts")

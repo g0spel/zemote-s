@@ -1,6 +1,6 @@
 <div align="center">
 
-# ZemoteS
+# Zflow
 
 **Android / Web 上的 ZCode 远程控制客户端** — 独立复刻官方 Web 远程控制协议(protocol reimplementation)
 
@@ -11,13 +11,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Web-lightgrey.svg)](#平台)
 
-<img src="docs/screenshots/chat-hifi.png" alt="ZemoteS 对话页(Ember 设计)" width="880">
+<img src="docs/screenshots/chat-hifi.png" alt="Zflow 对话页(Ember 设计)" width="880">
 
 </div>
 
 ---
 
-ZemoteS 在手机上管理你的桌面 ZCode:扫码添加设备 → 连接 → 任务对话、自动化定时任务、会话洞察、模型供应商与用量管理。整个应用围绕自研的 **Ember 设计语言**构建——暖炭色板、更纱黑体、"内容区安静、控制区紧凑"的分区原则。
+Zflow 在手机上管理你的桌面 ZCode:扫码添加设备 → 连接 → 任务对话、自动化定时任务、会话洞察、模型供应商与用量管理。整个应用围绕自研的 **Ember 设计语言**构建——暖炭色板、更纱黑体、"内容区安静、控制区紧凑"的分区原则。
 
 ## 功能特性
 

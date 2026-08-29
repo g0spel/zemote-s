@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
 import '../protocol/relay_client.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
 import '../state/app_session.dart';
 import 'automation_page.dart';

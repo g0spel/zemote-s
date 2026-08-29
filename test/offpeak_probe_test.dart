@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zemote/protocol/connection_params.dart';
-import 'package:zemote/protocol/zemote_client.dart';
+import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/zflow_client.dart';
 
 /// One-off discovery probe for the `off-peak-task` channel (automations).
 /// Calls candidate method names with a workspace scope and prints each

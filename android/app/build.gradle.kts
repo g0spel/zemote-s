@@ -19,7 +19,7 @@ fun propOrEnv(name: String): String? =
     keystoreProperties.getProperty(name) ?: System.getenv("ANDROID_${name.uppercase()}")
 
 android {
-    namespace = "dev.g0spel.zemotes"
+    namespace = "dev.g0spel.zflow"
     // 37 > flutter.compileSdkVersion (36): flutter_secure_storage 11
     // compiles against SDK 37; compileSdk must be the highest of all
     // modules (backward compatible, targetSdk is unaffected).
@@ -32,9 +32,9 @@ android {
     }
 
     defaultConfig {
-        // ZemoteS package id: differs from upstream `app.zemote` so this
+        // Package id: stable install identity so this
         // build installs alongside the original (signatures differ too).
-        applicationId = "dev.g0spel.zemotes"
+        applicationId = "dev.g0spel.zflow"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

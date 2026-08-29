@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/state/account_store.dart';
+import 'package:zflow/state/account_store.dart';
 
 import 'fake_credential_storage.dart';
 

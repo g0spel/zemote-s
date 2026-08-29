@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:zemote/protocol/channel_client.dart';
-import 'package:zemote/protocol/ipc_codec.dart';
-import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/state/session_list_cache.dart';
-import 'package:zemote/ui/session_drawer.dart';
+import 'package:zflow/protocol/channel_client.dart';
+import 'package:zflow/protocol/ipc_codec.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+import 'package:zflow/state/session_list_cache.dart';
+import 'package:zflow/ui/session_drawer.dart';
 
 /// 真实协议驱动的抽屉测试。裸 SessionDrawer 在全新 detached bridge 上的
 /// channel 取号是确定性的(FIFO):id0 hello、id1 listPinnedTasks(与

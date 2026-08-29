@@ -3,10 +3,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/channel_client.dart';
-import 'package:zemote/protocol/ipc_codec.dart';
-import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/ui/automation_page.dart';
+import 'package:zflow/protocol/channel_client.dart';
+import 'package:zflow/protocol/ipc_codec.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+import 'package:zflow/ui/automation_page.dart';
 
 /// 真实协议驱动的 automation 页测试。裸 AutomationPage 在全新 detached
 /// bridge 上取号是确定性的(FIFO):id0 listAutomations、id1 listRuns

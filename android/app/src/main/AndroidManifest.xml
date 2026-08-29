@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <application
-        android:label="ZemoteS"
+        android:label="Zflow"
         android:name="${applicationName}"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher">
@@ -59,7 +59,7 @@
         <!-- Foreground service: keeps the relay alive while backgrounded and
              shows the ongoing "running tasks" notification. -->
         <service
-            android:name=".ZemoteNotificationService"
+            android:name=".ZflowNotificationService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
     </application>

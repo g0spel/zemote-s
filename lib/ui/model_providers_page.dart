@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/id.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import 'theme.dart';
 
 /// Provider status, aligned with the desktop client (verified live):

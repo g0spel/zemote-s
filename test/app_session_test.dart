@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/state/account_store.dart';
-import 'package:zemote/state/app_session.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+import 'package:zflow/state/account_store.dart';
+import 'package:zflow/state/app_session.dart';
 
 String _url(String sid) =>
     'https://zcode.z.ai/remote/v4?sid=$sid&hash=h&t=1&name=D$sid';

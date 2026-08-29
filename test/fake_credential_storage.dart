@@ -1,4 +1,4 @@
-import 'package:zemote/state/credential_storage.dart';
+import 'package:zflow/state/credential_storage.dart';
 
 /// In-memory [CredentialStorage] for tests.
 class FakeCredentialStorage implements CredentialStorage {

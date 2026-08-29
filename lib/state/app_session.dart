@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../protocol/connection_params.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import '../state/log_store.dart';
 import 'account_store.dart';
 

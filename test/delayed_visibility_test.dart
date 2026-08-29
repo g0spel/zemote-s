@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/ui/delayed_banner.dart';
+import 'package:zflow/ui/delayed_banner.dart';
 
 void main() {
   testWidgets('DelayedVisibility stays hidden before the delay elapses',

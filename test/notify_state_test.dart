@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/notifications/notify_state.dart';
-import 'package:zemote/protocol/conversation.dart';
+import 'package:zflow/notifications/notify_state.dart';
+import 'package:zflow/protocol/conversation.dart';
 
 SessionEntry _entry(String id, String phase,
     {String title = 'Task', String? preview, Map<String, dynamic>? pending}) {

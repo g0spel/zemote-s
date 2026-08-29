@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/crc32.dart';
-import 'package:zemote/protocol/rpc_transport.dart';
+import 'package:zflow/protocol/crc32.dart';
+import 'package:zflow/protocol/rpc_transport.dart';
 
 void main() {
   late List<Map<String, dynamic>> sent;

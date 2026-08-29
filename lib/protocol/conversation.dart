@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'channel_client.dart';
 import 'id.dart';
-import 'zemote_client.dart';
+import 'zflow_client.dart';
 
 /// Conversation V4 protocol over the `zcode-agent` channel.
 ///

@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/state/crash_report.dart';
+import 'package:zflow/state/crash_report.dart';
 
 void main() {
   test('record → read round-trip, clear removes', () async {

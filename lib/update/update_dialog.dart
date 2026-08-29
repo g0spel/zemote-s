@@ -10,7 +10,7 @@ import '../ui/theme.dart';
 import 'update_checker.dart';
 
 /// Android-side install support (see `MainActivity.kt`).
-const apkChannel = MethodChannel('zemote/update');
+const apkChannel = MethodChannel('zflow/update');
 
 /// Prompts the user with the release info. On Android, tapping 更新
 /// downloads the APK (with progress) and hands it to the system installer.
@@ -71,7 +71,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     });
     try {
       final dir = await apkChannel.invokeMethod<String>('getApkDir');
-      final file = File('$dir/ZemoteS-${widget.info.latestVersion}.apk');
+      final file = File('$dir/Zflow-${widget.info.latestVersion}.apk');
       // Partial files are kept for resume; a corrupt download is caught by
       // the checksum step (which deletes the file) and retried fresh.
       await _download(apkUrl, file.path, (p) {

@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/connection_params.dart';
-import 'package:zemote/protocol/crc32.dart';
-import 'package:zemote/protocol/ipc_codec.dart';
-import 'package:zemote/protocol/proof.dart';
+import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/crc32.dart';
+import 'package:zflow/protocol/ipc_codec.dart';
+import 'package:zflow/protocol/proof.dart';
 
 void main() {
   test('parse zemote connection url', () {

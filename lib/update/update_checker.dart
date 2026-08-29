@@ -30,7 +30,7 @@ class UpdateInfo {
 
 /// Queries `https://api.github.com/repos/g0spel/zemote-s/releases/latest`
 /// and compares the release tag with [currentVersion]. The release tag is
-/// `vX.Y.Z`; the CI (`build-apk.yml`) uploads `ZemoteS-vX.Y.Z-arm64.apk` and
+/// `vX.Y.Z`; the CI (`build-apk.yml`) uploads `Zflow-vX.Y.Z-arm64.apk` and
 /// its `.sha256` as assets.
 Future<UpdateInfo> checkForUpdates({
   String currentVersion = appVersion,

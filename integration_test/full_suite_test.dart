@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zemote/protocol/connection_params.dart';
-import 'package:zemote/protocol/zemote_client.dart';
+import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/zflow_client.dart';
 
 /// Full feature suite against the real desktop. Every check logs
 /// [PASS]/[FAIL]; non-critical protocol rejections are recorded as [INFO].

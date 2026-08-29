@@ -4,8 +4,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zemote/ui/markdown_view.dart';
-import 'package:zemote/ui/theme.dart';
+import 'package:zflow/ui/markdown_view.dart';
+import 'package:zflow/ui/theme.dart';
 
 void main() {
   // WCAG 相对亮度与对比度(仅测试用,校验 AA 下限)。Color.r/g/b 为

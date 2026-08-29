@@ -1,4 +1,4 @@
-package dev.g0spel.zemotes
+package dev.g0spel.zflow
 
 import android.app.Activity
 import android.content.Intent

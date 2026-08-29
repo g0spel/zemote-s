@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/ui/automation_page.dart';
+import 'package:zflow/ui/automation_page.dart';
 
 void main() {
   group('scheduleLabel', () {

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zemote/protocol/connection_params.dart';
-import 'package:zemote/protocol/zemote_client.dart';
+import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/zflow_client.dart';
 
 /// Read-only diagnostic probe: connect -> pair -> open bridge -> subscribe a
 /// session and DUMP the row structure (kind/rowId/turnId/text length/state).

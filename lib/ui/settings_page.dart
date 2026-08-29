@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/relay_client.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
 import '../state/app_session.dart';
 import '../state/crash_report.dart';
@@ -274,7 +274,7 @@ class SettingsPage extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline, size: 20),
               title: const Text('关于'),
-              subtitle: const Text('ZemoteS v$appVersion · 协议复刻版'),
+              subtitle: const Text('Zflow v$appVersion · 协议复刻版'),
               trailing: _chevron,
               onTap: () => _showAbout(context),
             ),
@@ -315,9 +315,9 @@ class SettingsPage extends StatelessWidget {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('ZemoteS'),
+        title: const Text('Zflow'),
         content: Text(
-            'ZemoteS (Flutter) v$appVersion · 协议复刻版\n\n'
+            'Zflow (Flutter) v$appVersion · 协议复刻版\n\n'
             'GitHub: https://github.com/g0spel/zemote-s'),
         actions: [
           TextButton(

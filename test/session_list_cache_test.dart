@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:zemote/state/session_list_cache.dart';
+import 'package:zflow/state/session_list_cache.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -13,7 +13,7 @@ void main() {
 
     expect(a, isNot(b));
     expect(a, isNot(contains('secret')));
-    expect(a, startsWith('zemote_session_list_v1_'));
+    expect(a, startsWith('zflow_session_list_v1_'));
   });
 
   test('cache roundtrip keeps session list fields', () async {

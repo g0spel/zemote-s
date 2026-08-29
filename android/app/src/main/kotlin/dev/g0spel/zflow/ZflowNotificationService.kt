@@ -1,4 +1,4 @@
-package dev.g0spel.zemotes
+package dev.g0spel.zflow
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -15,17 +15,17 @@ import androidx.core.app.NotificationCompat
  * ongoing "running tasks" notification. Content is updated via
  * [update] whenever the monitor publishes a new snapshot.
  */
-class ZemoteNotificationService : Service() {
+class ZflowNotificationService : Service() {
     companion object {
         const val CHANNEL_RUNNING = "running_tasks"
         const val NOTIFICATION_ID = 1001
 
         @Volatile
-        var instance: ZemoteNotificationService? = null
+        var instance: ZflowNotificationService? = null
             private set
 
         fun start(context: Context, title: String, text: String) {
-            val intent = Intent(context, ZemoteNotificationService::class.java)
+            val intent = Intent(context, ZflowNotificationService::class.java)
                 .putExtra("title", title)
                 .putExtra("text", text)
             context.startForegroundService(intent)

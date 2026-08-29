@@ -3,17 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/connection_params.dart';
-import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/ui/chat_page.dart';
-import 'package:zemote/state/account_store.dart';
-import 'package:zemote/state/app_session.dart';
-import 'package:zemote/ui/session_drawer.dart';
-import 'package:zemote/ui/device_management_page.dart';
-import 'package:zemote/ui/root_shell.dart';
-import 'package:zemote/ui/settings_page.dart';
-import 'package:zemote/ui/theme.dart';
-import 'package:zemote/ui/ui_settings.dart';
+import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+import 'package:zflow/ui/chat_page.dart';
+import 'package:zflow/state/account_store.dart';
+import 'package:zflow/state/app_session.dart';
+import 'package:zflow/ui/session_drawer.dart';
+import 'package:zflow/ui/device_management_page.dart';
+import 'package:zflow/ui/root_shell.dart';
+import 'package:zflow/ui/settings_page.dart';
+import 'package:zflow/ui/theme.dart';
+import 'package:zflow/ui/ui_settings.dart';
 
 import 'fake_credential_storage.dart';
 

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../protocol/conversation.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import 'notifications.dart';
 import 'notify_state.dart';
 

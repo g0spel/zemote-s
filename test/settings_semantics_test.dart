@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/ui/model_providers_page.dart';
-import 'package:zemote/ui/usage_page.dart';
+import 'package:zflow/ui/model_providers_page.dart';
+import 'package:zflow/ui/usage_page.dart';
 
 void main() {
   group('usage limit semantics', () {

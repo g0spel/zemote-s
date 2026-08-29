@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zemote/protocol/channel_client.dart';
-import 'package:zemote/protocol/connection_params.dart';
-import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/ui/chat_page.dart' show deriveTodoSteps;
+import 'package:zflow/protocol/channel_client.dart';
+import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+import 'package:zflow/ui/chat_page.dart' show deriveTodoSteps;
 
 /// Read-only debug probe for the insight panels: dumps the REAL payload
 /// shapes of conversationPlansV4 / conversationFileChangesV4 /

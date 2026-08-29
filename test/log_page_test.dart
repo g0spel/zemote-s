@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/state/account_store.dart';
-import 'package:zemote/state/app_session.dart';
-import 'package:zemote/state/log_store.dart';
-import 'package:zemote/ui/log_page.dart';
-import 'package:zemote/ui/settings_page.dart';
+import 'package:zflow/state/account_store.dart';
+import 'package:zflow/state/app_session.dart';
+import 'package:zflow/state/log_store.dart';
+import 'package:zflow/ui/log_page.dart';
+import 'package:zflow/ui/settings_page.dart';
 
 import 'fake_credential_storage.dart';
 

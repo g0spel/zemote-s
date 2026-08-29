@@ -3,9 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// UI preferences: locale (zh-CN / en-US), text scale, code font size.
 class UiSettings extends ChangeNotifier {
-  static const _localeKey = 'zemote_ui_locale';
-  static const _scaleKey = 'zemote_ui_text_scale';
-  static const _codeFontKey = 'zemote_ui_code_font_size';
+  static const _localeKey = 'zflow_ui_locale';
+  static const _scaleKey = 'zflow_ui_text_scale';
+  static const _codeFontKey = 'zflow_ui_code_font_size';
 
   String locale = 'zh-CN';
   double textScale = 1.0;
@@ -68,7 +68,7 @@ String tr(BuildContext context, String key) {
 }
 
 const _zh = {
-  'app.title': 'ZemoteS 远程控制',
+  'app.title': 'Zflow 远程控制',
   'nav.tasks': '任务',
   'nav.settings': '设置',
   'chat.inputHint': '向 ZCode 发送消息…',
@@ -97,7 +97,7 @@ const _zh = {
 };
 
 const _en = {
-  'app.title': 'ZemoteS Remote',
+  'app.title': 'Zflow Remote',
   'nav.tasks': 'Tasks',
   'nav.settings': 'Settings',
   'chat.inputHint': 'Message ZCode…',

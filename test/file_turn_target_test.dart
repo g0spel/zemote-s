@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/channel_client.dart';
-import 'package:zemote/protocol/conversation.dart';
-import 'package:zemote/ui/chat_page.dart';
+import 'package:zflow/protocol/channel_client.dart';
+import 'package:zflow/protocol/conversation.dart';
+import 'package:zflow/ui/chat_page.dart';
 
 void main() {
   group('latestCompletedTurn', () {

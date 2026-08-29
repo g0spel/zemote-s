@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 import 'theme.dart';
 
 /// Entitlement / quota usage page (usage-stats.getEntitlementSnapshot).

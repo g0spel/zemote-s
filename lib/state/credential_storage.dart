@@ -16,7 +16,7 @@ class SecureCredentialStorage implements CredentialStorage {
   const SecureCredentialStorage();
 
   static const _storage = FlutterSecureStorage();
-  static const _key = 'zemote_accounts_v1';
+  static const _key = 'zflow_accounts_v1';
 
   @override
   Future<String?> read() => _storage.read(key: _key);

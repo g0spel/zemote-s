@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
-import '../protocol/zemote_client.dart';
+import '../protocol/zflow_client.dart';
 
 /// Channel-level RPC explorer: call any method on any IPC channel
 /// (zcode-task, zcode-agent, skills, mcp-sync, plugins, usage-stats, …).

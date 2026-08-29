@@ -3,11 +3,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/channel_client.dart';
-import 'package:zemote/protocol/conversation.dart';
-import 'package:zemote/protocol/ipc_codec.dart';
-import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/ui/chat_page.dart';
+import 'package:zflow/protocol/channel_client.dart';
+import 'package:zflow/protocol/conversation.dart';
+import 'package:zflow/protocol/ipc_codec.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+import 'package:zflow/ui/chat_page.dart';
 
 /// wire 帧([resInitialize, 0] 初始化帧或 [type, id] 响应帧 + data)。
 Uint8List _inFrame(List<Object?> header, [Object? data]) {

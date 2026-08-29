@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/ui/chat_page.dart';
+import 'package:zflow/ui/chat_page.dart';
 
 void main() {
   group('deriveTodoSteps (desktop-host logic mirror)', () {
