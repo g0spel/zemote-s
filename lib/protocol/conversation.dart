@@ -1256,7 +1256,11 @@ class SessionEntry {
   final Map<String, dynamic> raw;
 
   /// 归档时间戳(宿主 time_archived);0/缺省 = 未归档。桌面端归档后
-  /// sessions-index 增量会带上该字段,列表据此分流到「归档」组。
+  /// 列表数据会带上该字段,列表据此分流到「归档」组。
+  ///
+  /// 字段名双方言:V4 索引(phase/lastActivityAt/archived)与
+  /// listSessions 的 Bae 投影(status/updatedAt/archivedAt)并存,
+  /// 解析时两套都认。
   final int archivedAt;
 
   bool get isArchived => archivedAt > 0;
@@ -1265,12 +1269,16 @@ class SessionEntry {
       : sessionId = '${raw['sessionId'] ?? ''}',
         parentSessionId = raw['parentSessionId'] as String?,
         title = '${raw['title'] ?? ''}',
-        phase = '${raw['phase'] ?? ''}',
+        phase = '${raw['phase'] ?? raw['status'] ?? ''}',
         lastAssistantPreview = raw['lastAssistantPreview'] as String?,
-        lastActivityAt = (raw['lastActivityAt'] as num?)?.toInt() ?? 0,
+        lastActivityAt = (raw['lastActivityAt'] as num?)?.toInt() ??
+            (raw['updatedAt'] as num?)?.toInt() ??
+            0,
         createdAt = (raw['createdAt'] as num?)?.toInt() ?? 0,
         hasBackgroundWork = raw['hasBackgroundWork'] == true,
-        archivedAt = (raw['archived'] as num?)?.toInt() ?? 0,
+        archivedAt = (raw['archived'] as num?)?.toInt() ??
+            (raw['archivedAt'] as num?)?.toInt() ??
+            0,
         pendingInteraction =
             (raw['pendingInteraction'] as Map?)?.cast<String, dynamic>();
 }

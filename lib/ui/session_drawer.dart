@@ -287,7 +287,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
   Future<void> _loadArchived() async {
     try {
       final res = await widget.bridge.channels.call(
-          Channels.zcodeTask, 'listSessions', [
+          Channels.zcodeAgent, 'listSessions', [
         {
           'workspace': {
             'workspacePath': widget.scope['workspacePath'],
@@ -305,8 +305,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
       final fetched = [
         for (final m in list)
           if (m is Map) SessionEntry(m.cast<String, dynamic>()),
-      ].where((e) => e.isArchived && !liveIds.contains(e.sessionId)).toList();
-      log('[v4] 归档列表 ${fetched.length} 条(共 ${list.length})');
+      ]
+          .where((e) => e.isArchived && !liveIds.contains(e.sessionId))
+          .toList();
+      log('[v4] 归档列表:响应 ${list.length} 条,归档 ${fetched.length} 条');
+      debugPrint('[zflow] archived fetch: resp=${list.length} '
+          'archived=${fetched.length} '
+          'sample=${list.isEmpty ? '-' : '${(list.first as Map).keys.toList()}'}');
       if (!mounted) return;
       setState(() => _archived = fetched);
     } catch (e) {

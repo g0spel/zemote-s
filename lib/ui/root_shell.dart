@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
 import '../protocol/conversation.dart' show SessionEntry;
+import '../protocol/channel_client.dart';
 import '../protocol/relay_client.dart';
 import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
@@ -33,6 +34,17 @@ String? workspaceKeyOf(Map<String, dynamic> w) {
   }
   return null;
 }
+
+/// 宿主 bootstrap 工作区条目({path, label?, workspaceIdentity?})→
+/// 内部约定字段({workspacePath, workspaceKey,...})。
+Map<String, dynamic> _normalizeWorkspace(Map<dynamic, dynamic> w) => {
+      ...w.cast<String, dynamic>(),
+      'workspacePath': w['workspacePath'] ?? w['path'],
+      'workspaceKey': (w['workspaceIdentity'] as String?)?.trim().isNotEmpty ==
+              true
+          ? (w['workspaceIdentity'] as String).trim()
+          : w['path'],
+    };
 
 String workspaceTitle(Map<String, dynamic> w) {
   final label = w['label'] as String?;
@@ -218,7 +230,15 @@ class _RootShellState extends State<RootShell> {
       final bootstrap = await client.bootstrap();
       if (!_isCurrentChain(gen)) return;
       final list = bootstrap['workspaces'];
-      setState(() => _workspaces = list is List ? list : const []);
+      setState(() => _workspaces = list is List
+          // 宿主条目字段是 {path, label?, workspaceIdentity?}:归一化为
+          // 内部约定的 workspacePath/workspaceKey(workspaceKey 算法与
+          // 宿主 Xmn 一致:identity 优先,否则 path)。缺失会导致
+          // V4 订阅无 directory(全局索引、跨工作区混入)以及
+          // listSessions 被必填校验拒绝。
+          ? [for (final w in list)
+              if (w is Map) _normalizeWorkspace(w)]
+          : const []);
       // 连接完成不直接开新会话:进入工作区/会话选择(抽屉),
       // 由用户决定进入哪个工作区、哪个会话。
       if (!_isCurrentChain(gen)) return;
@@ -269,38 +289,45 @@ class _RootShellState extends State<RootShell> {
       });
       _startTaskNotifier(session, workspace);
       // 进入工作区默认打开最近一个未归档会话(UX 反馈:不要落在空白
-      // draft)。订阅首个快照取最近条目;无会话/失败/测试用 detached
-      // bridge(handshake 即抛)保持 draft。
+      // draft)。索引订阅的 runtimePolicy=existing-only 依赖会话运行时
+      // (此刻还不存在,宿主会拒),改走一次性 listSessions:无运行时
+      // 依赖,按 time_updated 降序,roots 只取顶层会话。
       try {
-        log('[v4] 打开工作区:订阅索引取最近会话…');
-        final sub = await session
-            .conversation(_scopeOf(workspace))
-            .subscribeSessionsIndex();
+        final res = await session.channels.call(
+            Channels.zcodeAgent, 'listSessions', [
+          {
+            'workspace': {
+              'workspacePath': workspace['workspacePath'],
+              if (workspace['workspaceIdentity'] != null)
+                'workspaceKey': workspace['workspaceIdentity'],
+            },
+            'limit': 5,
+          }
+        ]);
+        final list = res is Map && res['sessions'] is List
+            ? res['sessions'] as List
+            : const [];
         SessionEntry? recent;
-        for (var i = 0; i < 60; i++) {
-          if (!_isCurrentChain(gen)) break;
-          if (sub.state.ready) {
-            for (final e in sub.state.list) {
-              if (!e.isArchived) {
-                recent = e;
-                break;
-              }
-            }
+        for (final m in list) {
+          if (m is! Map) continue;
+          final e = SessionEntry(m.cast<String, dynamic>());
+          if (!e.isArchived) {
+            recent = e;
             break;
           }
-          await Future<void>.delayed(const Duration(milliseconds: 50));
         }
-        await sub.dispose();
         final picked = recent;
-        log('[v4] 最近会话:ready=${sub.state.ready} '
-            '列表=${sub.state.list.length} 选中=${picked?.sessionId ?? '无'}');
-        await sub.dispose();
+        log('[v4] 最近会话:listSessions ${list.length} 条,'
+            '选中=${picked?.sessionId ?? '无'}');
+        debugPrint('[zflow] recent-session: list=${list.length} '
+            'picked=${picked?.sessionId ?? 'none'}');
         if (picked != null && mounted && _isCurrentChain(gen)) {
           _sessionEpoch++;
           setState(() => _activeSessionId.value = picked.sessionId);
         }
       } catch (e) {
         log('[诊断] 最近会话打开失败: $e');
+        debugPrint('[zflow] recent-session FAILED: $e');
       }
     } catch (e) {
       if (!mounted || !_isCurrentChain(gen)) return;
