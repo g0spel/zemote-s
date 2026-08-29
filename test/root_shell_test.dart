@@ -337,7 +337,7 @@ void main() {
     await _openDrawer(tester);
 
     expect(find.byType(SessionDrawer), findsOneWidget);
-    expect(find.text('WS'), findsOneWidget); // 工作区名
+    expect(find.text('WS'), findsWidgets); // 工作区名(顶栏 + 抽屉)
     expect(find.text('/ws-a'), findsOneWidget); // 等宽路径
     expect(find.text('1 台设备'), findsOneWidget); // 底部设备状态条
     // 抽屉内「＋新会话」入口。
@@ -593,7 +593,9 @@ void main() {
     await tester.pumpAndSettle(); // 链完成,打开第一个工作区
 
     await _openDrawer(tester);
-    await tester.tap(find.text('WS-A')); // 工作区条 → sheet
+    await tester.tap(find.descendant(
+        of: find.byType(SessionDrawer),
+        matching: find.text('WS-A'))); // 工作区条 → sheet
     await tester.pumpAndSettle();
 
     // 当前工作区行:实时会话数徽(测试环境订阅无快照 → 0);他区无徽标。

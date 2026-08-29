@@ -1073,12 +1073,12 @@ class _ChatPageState extends State<ChatPage> {
             Expanded(child: _embeddedTitle(context)),
           ],
         ),
-        // 第二行:会话状态 | 模型 pill | 溢出菜单 | 会话列表。
+        // 第二行:状态胶囊(左)| 模型 pill + 溢出 + 会话列表(右)。
         Row(
           children: [
-            _sessionStatusIcon(context, state),
-            const SizedBox(width: EmberSpacing.gapS),
-            Expanded(child: _headerActions(context, state, colors)),
+            _sessionStatusChip(context, state),
+            const Spacer(),
+            _headerActions(context, state, colors),
             if (widget.onOpenDrawer != null)
               IconButton(
                 icon: const Icon(Icons.menu, size: 22),
@@ -1091,47 +1091,69 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// 会话流工作状态图标(UX 反馈:第二行加状态显示)。运行中 = 旋转
-  /// 箭头(primary),空闲 = 空心圆(textFaint);draft 无订阅时同样按
-  /// 空闲处理。
-  Widget _sessionStatusIcon(BuildContext context, ConversationState? state) {
+  /// 会话流工作状态胶囊(UX 反馈:文字+图标)。运行中 = 旋转箭头 +
+  /// 「工作中」(primary),空闲 = 空心圆 + 「空闲」(textFaint);draft
+  /// 无订阅时同样按空闲处理。
+  Widget _sessionStatusChip(BuildContext context, ConversationState? state) {
     final colors = EmberColors.of(context);
     final running = state != null && state.isRunning;
-    return Padding(
-      padding: const EdgeInsets.only(left: 2),
-      child: Tooltip(
-        message: running ? '工作中' : '空闲',
-        child: Icon(
-          running ? Icons.motion_photos_on : Icons.radio_button_unchecked,
-          size: 15,
-          color: running ? colors.primary : colors.textFaint,
-        ),
+    final color = running ? colors.primary : colors.textFaint;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(EmberRadius.avatar),
+        border: Border.all(
+            color: running ? colors.primary.withValues(alpha: 0.4) : colors.hairline),
       ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(running ? Icons.motion_photos_on : Icons.radio_button_unchecked,
+            size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(running ? '工作中' : '空闲',
+            style: TextStyle(
+                fontSize: EmberType.caption,
+                fontWeight: FontWeight.w600,
+                color: color)),
+      ]),
     );
   }
 
   /// 会话名:null/空显示「新会话」;经 listenable 跟进桌面端生成的标题。
+  /// 标题下方小字显示所属工作区(UX 反馈:第一行 = 标题 + 工作区)。
   Widget _embeddedTitle(BuildContext context) {
     final colors = EmberColors.of(context);
     final listenable = widget.headerTitle;
+    final ws = widget.headerWorkspace ?? '';
+    TextStyle titleStyle() => TextStyle(
+        fontSize: EmberType.body,
+        fontWeight: FontWeight.w600,
+        color: colors.textSolid);
+    Widget titleWidget;
     if (listenable == null) {
-      return Text(widget.title,
+      titleWidget = Text(widget.title,
+          overflow: TextOverflow.ellipsis, style: titleStyle());
+    } else {
+      titleWidget = ValueListenableBuilder<String?>(
+        valueListenable: listenable,
+        builder: (context, title, _) => Text(
+          title == null || title.isEmpty ? '新会话' : title,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-              fontSize: EmberType.body,
-              fontWeight: FontWeight.w600,
-              color: colors.textSolid));
+          style: titleStyle(),
+        ),
+      );
     }
-    return ValueListenableBuilder<String?>(
-      valueListenable: listenable,
-      builder: (context, title, _) => Text(
-        title == null || title.isEmpty ? '新会话' : title,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-            fontSize: EmberType.body,
-            fontWeight: FontWeight.w600,
-            color: colors.textSolid),
-      ),
+    if (ws.isEmpty) return titleWidget;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        titleWidget,
+        Text(ws,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: EmberType.caption, color: colors.textFaint)),
+      ],
     );
   }
 

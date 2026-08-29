@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
+import '../protocol/conversation.dart' show SessionEntry;
 import '../protocol/relay_client.dart';
 import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
@@ -266,6 +267,34 @@ class _RootShellState extends State<RootShell> {
         _activeWorkspace = workspace;
       });
       _startTaskNotifier(session, workspace);
+      // 进入工作区默认打开最近一个未归档会话(UX 反馈:不要落在空白
+      // draft)。订阅首个快照取最近条目;无会话/失败/测试用 detached
+      // bridge(handshake 即抛)保持 draft。
+      try {
+        final sub = await session
+            .conversation(_scopeOf(workspace))
+            .subscribeSessionsIndex();
+        SessionEntry? recent;
+        for (var i = 0; i < 60; i++) {
+          if (!_isCurrentChain(gen)) break;
+          if (sub.state.ready) {
+            for (final e in sub.state.list) {
+              if (!e.isArchived) {
+                recent = e;
+                break;
+              }
+            }
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        await sub.dispose();
+        final picked = recent;
+        if (picked != null && mounted && _isCurrentChain(gen)) {
+          _sessionEpoch++;
+          setState(() => _activeSessionId.value = picked.sessionId);
+        }
+      } catch (_) {}
     } catch (e) {
       if (!mounted || !_isCurrentChain(gen)) return;
       ScaffoldMessenger.of(context)
