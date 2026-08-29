@@ -31,6 +31,12 @@ String providerDisabledReasonText(String raw) => switch (raw) {
       _ => raw,
     };
 
+/// 主供应商判别(spec §7.4:主供应商默认展开模型明细,其余折叠)。
+/// 依据是 wire 协议里可验证的 `source` 字段:服务端下发的内置供应商
+/// 不带 `source: 'custom'`(见 providerStatusOf 的对齐注释),仅用户
+/// 自建项在本页保存时固定写入 `source: 'custom'`,故非 custom 即主。
+bool isPrimaryProvider(Map<String, dynamic> p) => p['source'] != 'custom';
+
 /// Model providers management (model-provider channel: getAll/save/delete).
 class ModelProvidersPage extends StatefulWidget {
   final BridgeSession session;
@@ -210,9 +216,8 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                         ProviderStatus.disabled =>
                           ('已停用', colors.textFaint),
                       };
-                      // 主供应商(spec §7.4:默认展开模型明细,其余折叠)——
-                      // 内置供应商(非 source:'custom')即主供应商。
-                      final isMain = p['source'] != 'custom';
+                      // 主供应商(spec §7.4)——判别依据见 [isPrimaryProvider]。
+                      final isMain = isPrimaryProvider(p);
                       return Card(
                         child: ExpansionTile(
                           initiallyExpanded: isMain,

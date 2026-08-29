@@ -88,4 +88,29 @@ void main() {
       );
     });
   });
+
+  group('primary provider (wire `source` field)', () {
+    test('内置供应商(无 source / source 非 custom)→ 主供应商', () {
+      expect(isPrimaryProvider({'id': 'builtin:bigmodel'}), isTrue);
+      expect(
+        isPrimaryProvider({
+          'id': 'fef59e36', 'name': 'Zai', 'source': 'builtin',
+        }),
+        isTrue,
+      );
+    });
+
+    test('自建供应商(source: custom)→ 非主', () {
+      expect(
+        isPrimaryProvider({
+          'id': 'custom:abc', 'name': '我的中转', 'source': 'custom',
+        }),
+        isFalse,
+      );
+    });
+
+    test('source 缺失视为非自建(主供应商默认展开)', () {
+      expect(isPrimaryProvider({}), isTrue);
+    });
+  });
 }

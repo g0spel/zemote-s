@@ -1,4 +1,6 @@
 // test/ember_theme_test.dart
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +8,19 @@ import 'package:zemote/ui/markdown_view.dart';
 import 'package:zemote/ui/theme.dart';
 
 void main() {
+  // WCAG 相对亮度与对比度(仅测试用,校验 AA 下限)。Color.r/g/b 为
+  // 0..1 的 sRGB 分量。
+  double luminance(Color c) {
+    double ch(double v) =>
+        v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b);
+  }
+
+  double contrast(Color a, Color b) {
+    final la = luminance(a), lb = luminance(b);
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05);
+  }
+
   group('EmberColors', () {
     test('dark palette matches spec', () {
       final c = EmberColors.dark();
@@ -21,7 +36,7 @@ void main() {
       expect(c.textSolid, const Color(0xFFEEE7DC));
       expect(c.textSoft, const Color(0xFFC9BFAF));
       expect(c.textMuted, const Color(0xFF8A8074));
-      expect(c.textFaint, const Color(0xFF5C554B));
+      expect(c.textFaint, const Color(0xFF868179));
       expect(c.isDark, isTrue);
     });
 
@@ -30,12 +45,23 @@ void main() {
       expect(c.bg, const Color(0xFFF7F3EC));
       expect(c.card, const Color(0xFFFFFFFF));
       expect(c.raise, const Color(0xFFEFE9DF));
-      expect(c.primary, const Color(0xFFC25E3A));
+      expect(c.primary, const Color(0xFFBA5A37));
       expect(c.textSolid, const Color(0xFF2A241E));
       expect(c.textSoft, const Color(0xFF4A4238));
       expect(c.textMuted, const Color(0xFF786D5E));
-      expect(c.textFaint, const Color(0xFFA69B8C));
+      expect(c.textFaint, const Color(0xFF766E64));
       expect(c.isDark, isFalse);
+    });
+
+    test('AA contrast: light primary on white, faints on bg ≥ 4.5:1', () {
+      final light = EmberColors.light();
+      final dark = EmberColors.dark();
+      // 白字 onPrimary(spec §2:主色白字下限)。
+      expect(
+          contrast(const Color(0xFFFFFFFF), light.primary), greaterThanOrEqualTo(4.5));
+      // 文字最浅档 on bg(spec §2:辅助信息可读下限)。
+      expect(contrast(light.textFaint, light.bg), greaterThanOrEqualTo(4.5));
+      expect(contrast(dark.textFaint, dark.bg), greaterThanOrEqualTo(4.5));
     });
 
     testWidgets('EmberColors.of follows theme brightness', (tester) async {

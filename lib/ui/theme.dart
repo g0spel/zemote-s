@@ -334,17 +334,20 @@ class EmberColors {
   static const _dSolid = Color(0xFFEEE7DC);
   static const _dSoft = Color(0xFFC9BFAF);
   static const _dMuted = Color(0xFF8A8074);
-  static const _dFaint = Color(0xFF5C554B);
+  // AA:on bg(#1B1917) ≥ 4.5:1(实测 4.53)。旧值 #5C554B 仅 2.38。
+  static const _dFaint = Color(0xFF868179);
 
   // 浅色(暖纸白)
   static const _lBg = Color(0xFFF7F3EC);
   static const _lCard = Color(0xFFFFFFFF);
   static const _lRaise = Color(0xFFEFE9DF);
-  static const _lPrimary = Color(0xFFC25E3A);
+  // AA:主色 onPrimary 白字 ≥ 4.5:1(实测 4.56);旧值 #C25E3A 仅 3.55。
+  static const _lPrimary = Color(0xFFBA5A37);
   static const _lSolid = Color(0xFF2A241E);
   static const _lSoft = Color(0xFF4A4238);
   static const _lMuted = Color(0xFF786D5E);
-  static const _lFaint = Color(0xFFA69B8C);
+  // AA:on bg(#F7F3EC) ≥ 4.5:1(实测 4.54)。旧值 #A69B8C 仅 2.47。
+  static const _lFaint = Color(0xFF766E64);
 
   Color get bg => isDark ? _dBg : _lBg;
   Color get card => isDark ? _dCard : _lCard;

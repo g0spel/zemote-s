@@ -1963,33 +1963,42 @@ class _UserBubble extends StatelessWidget {
       alignment: Alignment.centerRight,
       child: Container(
         margin: const EdgeInsets.only(left: 56, top: 4, bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: EmberColors.of(context).primary,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(EmberRadius.content),
-            topRight: Radius.circular(EmberRadius.content),
-            bottomLeft: Radius.circular(EmberRadius.content),
-            bottomRight: Radius.circular(EmberRadius.bubbleTail),
-          ),
-        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (attachments is List)
-              for (final a in attachments)
-                if (a is Map)
-                  _AttachmentView(
-                    attachment: a.cast<String, dynamic>(),
-                    transport: transport,
-                    sessionId: sessionId,
-                  ),
-            if (text.isNotEmpty)
-              SelectableText(text,
-                  style: const TextStyle(
-                      fontSize: 14, height: 1.5, color: Colors.white)),
-            if (badge != null)
-              _MsgBadge(status: badge!, onRetry: onRetry),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: EmberColors.of(context).primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(EmberRadius.content),
+                  topRight: Radius.circular(EmberRadius.content),
+                  bottomLeft: Radius.circular(EmberRadius.content),
+                  bottomRight: Radius.circular(EmberRadius.bubbleTail),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (attachments is List)
+                    for (final a in attachments)
+                      if (a is Map)
+                        _AttachmentView(
+                          attachment: a.cast<String, dynamic>(),
+                          transport: transport,
+                          sessionId: sessionId,
+                        ),
+                  if (text.isNotEmpty)
+                    SelectableText(text,
+                        style: const TextStyle(
+                            fontSize: 14, height: 1.5, color: Colors.white)),
+                ],
+              ),
+            ),
+            // 徽标挂在气泡外的 bg 上(时间戳位):faint/run/err 相对 bg
+            // 才有正常对比度,放在橙底内会被主色压住。
+            if (badge != null) _MsgBadge(status: badge!, onRetry: onRetry),
           ],
         ),
       ),
@@ -3191,53 +3200,57 @@ class _InsightsSheetState extends State<InsightsSheet> {
         borderRadius: const BorderRadius.vertical(
             top: Radius.circular(EmberRadius.sheet)),
       ),
-      child: Column(
-        children: [
-          // sheet 顶部把手条(与输入区把手同形,提示可拖拽)。
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(top: 8, bottom: 4),
-              decoration: BoxDecoration(
-                color: ember.textFaint,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
-            child: Row(
-              children: [
-                _chip(context, _todo, Icons.checklist_outlined, '待办',
-                    _todoCount),
-                const SizedBox(width: 6),
-                _chip(context, _files, Icons.folder_outlined, '文件',
-                    _turnFileTotal),
-                const SizedBox(width: 6),
-                _chip(context, _bg, Icons.hub_outlined, '后台', _bgCount),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      // 底部 SafeArea:手势条区域不遮挡面板内容。
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // sheet 顶部把手条(与输入区把手同形,提示可拖拽)。
+            Center(
               child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
                 decoration: BoxDecoration(
-                  color: EmberColors.of(context).card,
-                  borderRadius: BorderRadius.circular(12),
+                  color: ember.textFaint,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                child: switch (_tab) {
-                  _todo => _todoPanel(context),
-                  _files => _filesPanel(context),
-                  _ => _bgPanel(context),
-                },
               ),
             ),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+              child: Row(
+                children: [
+                  _chip(context, _todo, Icons.checklist_outlined, '待办',
+                      _todoCount),
+                  const SizedBox(width: 6),
+                  _chip(context, _files, Icons.folder_outlined, '文件',
+                      _turnFileTotal),
+                  const SizedBox(width: 6),
+                  _chip(context, _bg, Icons.hub_outlined, '后台', _bgCount),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: EmberColors.of(context).card,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: switch (_tab) {
+                    _todo => _todoPanel(context),
+                    _files => _filesPanel(context),
+                    _ => _bgPanel(context),
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3317,6 +3330,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
     const encoder = JsonEncoder.withIndent('  ');
     return SingleChildScrollView(
       controller: widget.scrollController,
+      physics: const AlwaysScrollableScrollPhysics(),
       child: SelectableText(
         data == null ? '（无数据）' : encoder.convert(data),
         style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
@@ -3350,6 +3364,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
     } else {
       body = ListView.builder(
         controller: widget.scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
         shrinkWrap: true,
         // +1 slot is the plan-section header — only when a plan exists
         // (todos without a plan snapshot must not dereference it).
@@ -3534,6 +3549,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
             Flexible(
               child: ListView.builder(
                 controller: widget.scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
                 shrinkWrap: true,
                 itemCount: entries.length,
                 itemBuilder: (context, i) =>
@@ -3860,6 +3876,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
         Flexible(
           child: ListView(
             controller: widget.scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
             shrinkWrap: true,
             children: [
               for (final w in works) _workTile(context, w),
