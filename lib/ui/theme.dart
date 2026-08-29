@@ -34,22 +34,13 @@ class ThemeController extends ChangeNotifier {
   }
 }
 
+/// 旧色板残留:仅剩仍被页面引用的状态色;主题层已改走 [EmberColors]。
 class ZColors {
   static const primary = Color(0xFF3B82F6);
-  static const primaryDim = Color(0xFF2563EB);
-  static const darkBg = Color(0xFF0B1220);
-  static const darkSurface = Color(0xFF111A2E);
-  static const darkCard = Color(0xFF16203A);
-  static const darkBorder = Color(0x1FFFFFFF);
   static const success = Color(0xFF22C55E);
   static const warning = Color(0xFFF59E0B);
   static const danger = Color(0xFFEF4444);
   static const running = Color(0xFF38BDF8);
-
-  static const lightBg = Color(0xFFF6F8FC);
-  static const lightSurface = Color(0xFFFFFFFF);
-  static const lightCard = Color(0xFFFFFFFF);
-  static const lightBorder = Color(0x14000000);
 }
 
 /// Theme-aware ink colors. Replaces hardcoded `Colors.white*` (dark-theme
@@ -148,24 +139,31 @@ class ZInk {
       _isLight(context) ? const Color(0xFFB91C1C) : const Color(0xFFFCA5A5);
 }
 
+/// 全局主题接线 Ember 色板(spec §2):ColorScheme 直构、组件主题取同一
+/// 色板,页面无需再做局部覆盖。slot → token 映射:
+///   primary / onPrimary              = Ember primary / 白字
+///   surface、surfaceContainerHighest = card(浮层、卡片、输入框同一面)
+///   onSurface / onSurfaceVariant     = textSolid / textMuted
+///   outline                          = hairline;scaffold 底色 = bg
 ThemeData buildDarkTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: ZColors.primary,
-    brightness: Brightness.dark,
-  ).copyWith(
-    primary: ZColors.primary,
-    surface: ZColors.darkSurface,
-    surfaceContainerHighest: ZColors.darkCard,
-    outline: ZColors.darkBorder,
+  const c = EmberColors.dark();
+  final scheme = ColorScheme.dark(
+    primary: c.primary,
+    onPrimary: Colors.white,
+    surface: c.card,
+    surfaceContainerHighest: c.card,
+    onSurface: c.textSolid,
+    onSurfaceVariant: c.textMuted,
+    outline: c.hairline,
   );
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
     fontFamily: EmberFonts.ui,
     colorScheme: scheme,
-    scaffoldBackgroundColor: ZColors.darkBg,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: ZColors.darkBg,
+    scaffoldBackgroundColor: c.bg,
+    appBarTheme: AppBarTheme(
+      backgroundColor: c.bg,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
@@ -173,94 +171,121 @@ ThemeData buildDarkTheme() {
         fontSize: 17,
         fontWeight: FontWeight.w600,
         fontFamily: EmberFonts.ui,
-        color: Colors.white,
+        color: c.textSolid,
       ),
-      iconTheme: IconThemeData(color: Colors.white70),
+      iconTheme: IconThemeData(color: c.textSoft),
     ),
     cardTheme: CardThemeData(
-      color: ZColors.darkCard,
+      color: c.card,
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: ZColors.darkBorder),
+        side: BorderSide(color: c.hairline),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: ZColors.darkSurface,
+      fillColor: c.card,
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: ZColors.darkBorder),
+        borderSide: BorderSide(color: c.hairline),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: ZColors.darkBorder),
+        borderSide: BorderSide(color: c.hairline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: ZColors.primary, width: 1.5),
+        borderSide: BorderSide(color: c.primary, width: 1.5),
       ),
-      hintStyle: const TextStyle(
-          color: Colors.white30, fontSize: 14, fontFamily: EmberFonts.ui),
+      hintStyle: TextStyle(
+          color: c.textFaint, fontSize: 14, fontFamily: EmberFonts.ui),
     ),
-    dividerTheme: const DividerThemeData(
-      color: ZColors.darkBorder,
+    dividerTheme: DividerThemeData(
+      color: c.hairline,
       thickness: 1,
       space: 1,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: ZColors.darkCard,
+      backgroundColor: c.raise,
       contentTextStyle:
-          const TextStyle(color: Colors.white, fontFamily: EmberFonts.ui),
+          TextStyle(color: c.textSolid, fontFamily: EmberFonts.ui),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: ZColors.darkSurface,
-      shape: RoundedRectangleBorder(
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: c.card,
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: ZColors.darkSurface,
+      backgroundColor: c.card,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
-    tabBarTheme: const TabBarThemeData(
-      labelColor: ZColors.primary,
-      unselectedLabelColor: Colors.white38,
-      indicatorColor: ZColors.primary,
-      dividerColor: ZColors.darkBorder,
+    tabBarTheme: TabBarThemeData(
+      labelColor: c.primary,
+      unselectedLabelColor: c.textFaint,
+      indicatorColor: c.primary,
+      dividerColor: c.hairline,
     ),
-    textTheme: const TextTheme(
-      bodyMedium: TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
-      bodySmall: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: c.card,
+      indicatorColor: c.primary.withValues(alpha: 0.18),
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          size: 22,
+          color: states.contains(WidgetState.selected)
+              ? c.primary
+              : c.textMuted,
+        ),
+      ),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          fontSize: EmberType.caption,
+          fontFamily: EmberFonts.ui,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w600
+              : FontWeight.w400,
+          color: states.contains(WidgetState.selected)
+              ? c.primary
+              : c.textMuted,
+        ),
+      ),
+    ),
+    textTheme: TextTheme(
+      bodyMedium: TextStyle(color: c.textSolid, fontSize: 14, height: 1.5),
+      bodySmall: TextStyle(color: c.textMuted, fontSize: 12, height: 1.4),
       titleMedium: TextStyle(
-          color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-      labelSmall: TextStyle(color: Colors.white38, fontSize: 11),
+          color: c.textSolid, fontSize: 15, fontWeight: FontWeight.w600),
+      labelSmall: TextStyle(color: c.textFaint, fontSize: 11),
     ),
   );
 }
 
+/// 浅色主题:同一套 Ember 映射(见 [buildDarkTheme] 注释),仅取浅色分支。
 ThemeData buildLightTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: ZColors.primary,
-    brightness: Brightness.light,
-  ).copyWith(
-    primary: ZColors.primaryDim,
-    surface: ZColors.lightSurface,
-    outline: ZColors.lightBorder,
+  const c = EmberColors.light();
+  final scheme = ColorScheme.light(
+    primary: c.primary,
+    onPrimary: Colors.white,
+    surface: c.card,
+    surfaceContainerHighest: c.card,
+    onSurface: c.textSolid,
+    onSurfaceVariant: c.textMuted,
+    outline: c.hairline,
   );
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
     fontFamily: EmberFonts.ui,
     colorScheme: scheme,
-    scaffoldBackgroundColor: ZColors.lightBg,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: ZColors.lightBg,
+    scaffoldBackgroundColor: c.bg,
+    appBarTheme: AppBarTheme(
+      backgroundColor: c.bg,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
@@ -268,58 +293,85 @@ ThemeData buildLightTheme() {
         fontSize: 17,
         fontWeight: FontWeight.w600,
         fontFamily: EmberFonts.ui,
-        color: Color(0xFF0F172A),
+        color: c.textSolid,
       ),
-      iconTheme: IconThemeData(color: Color(0xFF475569)),
+      iconTheme: IconThemeData(color: c.textMuted),
     ),
     cardTheme: CardThemeData(
-      color: ZColors.lightCard,
+      color: c.card,
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: ZColors.lightBorder),
+        side: BorderSide(color: c.hairline),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: ZColors.lightSurface,
+      fillColor: c.card,
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: ZColors.lightBorder),
+        borderSide: BorderSide(color: c.hairline),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: ZColors.lightBorder),
+        borderSide: BorderSide(color: c.hairline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: ZColors.primary, width: 1.5),
+        borderSide: BorderSide(color: c.primary, width: 1.5),
       ),
-      hintStyle: const TextStyle(
-          color: Colors.black26, fontSize: 14, fontFamily: EmberFonts.ui),
+      hintStyle: TextStyle(
+          color: c.textFaint, fontSize: 14, fontFamily: EmberFonts.ui),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
+      backgroundColor: c.raise,
+      contentTextStyle:
+          TextStyle(color: c.textSolid, fontFamily: EmberFonts.ui),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: ZColors.lightSurface,
-      shape: RoundedRectangleBorder(
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: c.card,
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: ZColors.lightSurface,
+      backgroundColor: c.card,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
-    tabBarTheme: const TabBarThemeData(
-      labelColor: ZColors.primaryDim,
-      unselectedLabelColor: Colors.black38,
-      indicatorColor: ZColors.primaryDim,
-      dividerColor: ZColors.lightBorder,
+    tabBarTheme: TabBarThemeData(
+      labelColor: c.primary,
+      unselectedLabelColor: c.textFaint,
+      indicatorColor: c.primary,
+      dividerColor: c.hairline,
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: c.card,
+      indicatorColor: c.primary.withValues(alpha: 0.18),
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          size: 22,
+          color: states.contains(WidgetState.selected)
+              ? c.primary
+              : c.textMuted,
+        ),
+      ),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          fontSize: EmberType.caption,
+          fontFamily: EmberFonts.ui,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w600
+              : FontWeight.w400,
+          color: states.contains(WidgetState.selected)
+              ? c.primary
+              : c.textMuted,
+        ),
+      ),
     ),
   );
 }
@@ -341,41 +393,6 @@ class ThemeControllerProvider extends InheritedWidget {
   @override
   bool updateShouldNotify(ThemeControllerProvider oldWidget) =>
       controller != oldWidget.controller;
-}
-
-/// Status color mapping shared by task/chat UIs. The unknown-status fallback
-/// is theme-aware so it stays visible on light surfaces too.
-Color statusColor(String status, BuildContext context) {
-  switch (status) {
-    case 'running':
-    case 'prewarming':
-      return ZColors.running;
-    case 'error':
-    case 'failed':
-      return ZColors.danger;
-    case 'completed':
-    case 'completedSuccess':
-      return ZColors.success;
-    case 'completedInterrupted':
-    case 'cancelled':
-      return ZColors.warning;
-    default:
-      return ZInk.faint(context);
-  }
-}
-
-/// Human relative time, e.g. `刚刚` / `5分钟前` / `昨天` / `3天前`.
-String relativeTime(int? millis) {
-  if (millis == null || millis <= 0) return '';
-  final time = DateTime.fromMillisecondsSinceEpoch(millis);
-  final diff = DateTime.now().difference(time);
-  if (diff.inMinutes < 1) return '刚刚';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-  if (diff.inHours < 24) return '${diff.inHours}小时前';
-  if (diff.inDays == 1) return '昨天';
-  if (diff.inDays < 30) return '${diff.inDays}天前';
-  return '${time.year}-${time.month.toString().padLeft(2, '0')}-'
-      '${time.day.toString().padLeft(2, '0')}';
 }
 
 /// Ember 设计语言色板单一来源(spec §2)。后续界面统一经此类取色;

@@ -475,56 +475,30 @@ class _RootShellState extends State<RootShell> {
           ),
         ),
       ),
-      bottomNavigationBar: NavigationBarTheme(
-        data: NavigationBarThemeData(
-          backgroundColor: colors.card,
-          indicatorColor: colors.primary.withValues(alpha: 0.18),
-          iconTheme: WidgetStateProperty.resolveWith(
-            (states) => IconThemeData(
-              size: 22,
-              color: states.contains(WidgetState.selected)
-                  ? colors.primary
-                  : colors.textMuted,
-            ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) =>
+            setState(() {
+              _tab = i;
+              _drawerOpen = false; // 抽屉仅对话 Tab 有,离开即收
+            }),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: '对话',
           ),
-          labelTextStyle: WidgetStateProperty.resolveWith(
-            (states) => TextStyle(
-              fontSize: EmberType.caption,
-              fontFamily: EmberFonts.ui,
-              fontWeight: states.contains(WidgetState.selected)
-                  ? FontWeight.w600
-                  : FontWeight.w400,
-              color: states.contains(WidgetState.selected)
-                  ? colors.primary
-                  : colors.textMuted,
-            ),
+          NavigationDestination(
+            icon: Icon(Icons.schedule_outlined),
+            selectedIcon: Icon(Icons.schedule),
+            label: '自动化',
           ),
-        ),
-        child: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (i) =>
-              setState(() {
-                _tab = i;
-                _drawerOpen = false; // 抽屉仅对话 Tab 有,离开即收
-              }),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.forum_outlined),
-              selectedIcon: Icon(Icons.forum),
-              label: '对话',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.schedule_outlined),
-              selectedIcon: Icon(Icons.schedule),
-              label: '自动化',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: '设置',
-            ),
-          ],
-        ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: '设置',
+          ),
+        ],
       ),
     );
   }

@@ -26,7 +26,9 @@ class ZemoteMarkdown extends StatelessWidget {
         UiSettingsProvider.of(context)?.codeFontSize ?? fontSize - 1.5;
     final styleSheet = MarkdownStyleSheet(
       p: TextStyle(
-          fontSize: fontSize, height: 1.6, color: ZInk.solid(context)),
+          fontSize: fontSize,
+          height: 1.6,
+          color: EmberColors.of(context).textSolid),
       h1: const TextStyle(
           fontSize: 20, fontWeight: FontWeight.w700, height: 1.6),
       h2: const TextStyle(

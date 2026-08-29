@@ -1,6 +1,8 @@
 // test/ember_theme_test.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zemote/ui/markdown_view.dart';
 import 'package:zemote/ui/theme.dart';
 
 void main() {
@@ -81,6 +83,43 @@ void main() {
       expect(EmberType.body, 13.0);
       expect(EmberType.secondary, 12.0);
       expect(EmberType.caption, 11.0);
+    });
+  });
+
+  group('global theme wired to Ember', () {
+    test('dark theme colorScheme/scaffold come from EmberColors', () {
+      final theme = buildDarkTheme();
+      final c = EmberColors.dark();
+      expect(theme.colorScheme.primary, c.primary);
+      expect(theme.colorScheme.onPrimary, Colors.white);
+      expect(theme.colorScheme.surface, c.card);
+      expect(theme.colorScheme.surfaceContainerHighest, c.card);
+      expect(theme.colorScheme.outline, c.hairline);
+      expect(theme.scaffoldBackgroundColor, c.bg);
+    });
+
+    test('light theme colorScheme/scaffold come from EmberColors', () {
+      final theme = buildLightTheme();
+      final c = EmberColors.light();
+      expect(theme.colorScheme.primary, c.primary);
+      expect(theme.colorScheme.surface, c.card);
+      expect(theme.colorScheme.surfaceContainerHighest, c.card);
+      expect(theme.colorScheme.outline, c.hairline);
+      expect(theme.scaffoldBackgroundColor, c.bg);
+    });
+
+    testWidgets('markdown body ink follows Ember textSolid', (tester) async {
+      for (final themeData in [buildDarkTheme(), buildLightTheme()]) {
+        await tester.pumpWidget(MaterialApp(
+          theme: themeData,
+          home: const ZemoteMarkdown('hello'),
+        ));
+        final p = tester
+            .widget<MarkdownBody>(find.byType(MarkdownBody))
+            .styleSheet!
+            .p!;
+        expect(p.color, EmberColors.of(tester.element(find.byType(MarkdownBody))).textSolid);
+      }
     });
   });
 
