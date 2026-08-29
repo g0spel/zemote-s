@@ -142,6 +142,8 @@ class ZInk {
 /// 全局主题接线 Ember 色板(spec §2):ColorScheme 直构、组件主题取同一
 /// 色板,页面无需再做局部覆盖。slot → token 映射:
 ///   primary / onPrimary              = Ember primary / 白字
+///   secondary 三槽                   = primary / raise / textSolid
+///     (SegmentedButton、ChoiceChip、FilledButton.tonal 选中态取用)
 ///   surface、surfaceContainerHighest = card(浮层、卡片、输入框同一面)
 ///   onSurface / onSurfaceVariant     = textSolid / textMuted
 ///   outline                          = hairline;scaffold 底色 = bg
@@ -150,6 +152,9 @@ ThemeData buildDarkTheme() {
   final scheme = ColorScheme.dark(
     primary: c.primary,
     onPrimary: Colors.white,
+    secondary: c.primary,
+    secondaryContainer: c.raise,
+    onSecondaryContainer: c.textSolid,
     surface: c.card,
     surfaceContainerHighest: c.card,
     onSurface: c.textSolid,
@@ -272,6 +277,9 @@ ThemeData buildLightTheme() {
   final scheme = ColorScheme.light(
     primary: c.primary,
     onPrimary: Colors.white,
+    secondary: c.primary,
+    secondaryContainer: c.raise,
+    onSecondaryContainer: c.textSolid,
     surface: c.card,
     surfaceContainerHighest: c.card,
     onSurface: c.textSolid,
@@ -325,6 +333,11 @@ ThemeData buildLightTheme() {
       ),
       hintStyle: TextStyle(
           color: c.textFaint, fontSize: 14, fontFamily: EmberFonts.ui),
+    ),
+    dividerTheme: DividerThemeData(
+      color: c.hairline,
+      thickness: 1,
+      space: 1,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,

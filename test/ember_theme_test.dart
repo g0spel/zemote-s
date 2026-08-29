@@ -92,6 +92,10 @@ void main() {
       final c = EmberColors.dark();
       expect(theme.colorScheme.primary, c.primary);
       expect(theme.colorScheme.onPrimary, Colors.white);
+      // secondary 三槽不落 SDK 默认(硬编码青),选中态走 Ember。
+      expect(theme.colorScheme.secondary, c.primary);
+      expect(theme.colorScheme.secondaryContainer, c.raise);
+      expect(theme.colorScheme.onSecondaryContainer, c.textSolid);
       expect(theme.colorScheme.surface, c.card);
       expect(theme.colorScheme.surfaceContainerHighest, c.card);
       expect(theme.colorScheme.outline, c.hairline);
@@ -102,10 +106,22 @@ void main() {
       final theme = buildLightTheme();
       final c = EmberColors.light();
       expect(theme.colorScheme.primary, c.primary);
+      expect(theme.colorScheme.secondary, c.primary);
+      expect(theme.colorScheme.secondaryContainer, c.raise);
+      expect(theme.colorScheme.onSecondaryContainer, c.textSolid);
       expect(theme.colorScheme.surface, c.card);
       expect(theme.colorScheme.surfaceContainerHighest, c.card);
       expect(theme.colorScheme.outline, c.hairline);
       expect(theme.scaffoldBackgroundColor, c.bg);
+    });
+
+    test('divider theme follows hairline in both themes', () {
+      for (final (themeData, c) in [
+        (buildDarkTheme(), EmberColors.dark()),
+        (buildLightTheme(), EmberColors.light()),
+      ]) {
+        expect(themeData.dividerTheme.color, c.hairline);
+      }
     });
 
     testWidgets('markdown body ink follows Ember textSolid', (tester) async {
