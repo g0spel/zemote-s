@@ -187,7 +187,6 @@ class _SessionDrawerState extends State<SessionDrawer> {
     _subscribe();
     _seedFromCache();
     _loadPinned();
-    _loadArchived();
   }
 
   @override
@@ -278,47 +277,6 @@ class _SessionDrawerState extends State<SessionDrawer> {
     });
   }
 
-  /// 归档会话:V4 实时索引固定 includeArchived=false(宿主写死),归档
-  /// 条目只能经 listSessions(includeArchived:true)拉取。宿主按
-  /// workspacePath 前缀过滤,实时列表已含的 sessionId 去重后并入分组
-  /// 输入(分组器按 isArchived 分流到「归档」组)。
-  List<SessionEntry> _archived = const [];
-
-  Future<void> _loadArchived() async {
-    try {
-      final res = await widget.bridge.channels.call(
-          Channels.zcodeAgent, 'listSessions', [
-        {
-          'workspace': {
-            'workspacePath': widget.scope['workspacePath'],
-            if (widget.scope['workspaceIdentity'] != null)
-              'workspaceKey': widget.scope['workspaceIdentity'],
-          },
-          'includeArchived': true,
-          'limit': 50,
-        }
-      ]);
-      final list = res is Map && res['sessions'] is List
-          ? res['sessions'] as List
-          : const [];
-      final liveIds = {for (final e in _entries) e.sessionId};
-      final fetched = [
-        for (final m in list)
-          if (m is Map) SessionEntry(m.cast<String, dynamic>()),
-      ]
-          .where((e) => e.isArchived && !liveIds.contains(e.sessionId))
-          .toList();
-      log('[v4] 归档列表:响应 ${list.length} 条,归档 ${fetched.length} 条');
-      debugPrint('[zflow] archived fetch: resp=${list.length} '
-          'archived=${fetched.length} '
-          'sample=${list.isEmpty ? '-' : '${(list.first as Map).keys.toList()}'}');
-      if (!mounted) return;
-      setState(() => _archived = fetched);
-    } catch (e) {
-      log('[诊断] 归档列表拉取失败: $e');
-    }
-  }
-
   /// 订阅 ready 后 write(2c):把当前列表落盘,供下次打开时秒开。
   /// 空列表不写(失败/清空不覆盖好数据,与旧实现一致)。write 完成后才
   /// 标记 _cacheSyncedSub:失败或被中断时标记未锁定,下个快照可重试。
@@ -368,9 +326,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$errorPrefix: $failed 项失败')));
     }
-    // 操作(置顶/归档/删除)都可能改变置顶集与归档集 → 重拉刷新分组。
+    // 操作(置顶/归档/删除)可能改变置顶集 → 重拉刷新分组展示。
     unawaited(_loadPinned());
-    unawaited(_loadArchived());
   }
 
   Future<void> _deleteSelection() async {
@@ -697,9 +654,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
       padding: const EdgeInsets.symmetric(
           horizontal: EmberSpacing.page, vertical: EmberSpacing.gapS),
       children: [
-        for (final group in groupSessions(
-            [...entries, ...filterSessions(_archived, _query)], _pinnedIds)
-            .entries) ...[
+        for (final group in groupSessions(entries, _pinnedIds).entries) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 EmberSpacing.cardPad, EmberSpacing.gapS, 0, 4),

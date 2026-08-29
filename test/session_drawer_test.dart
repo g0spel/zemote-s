@@ -105,18 +105,17 @@ void main() {
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
     await tester.pump(); // id0 hello + id1 listPinnedTasks
     _respond(channels, 0, <String, dynamic>{});
-    await tester.pump(); // id2 listSessions(归档,空)+ id3 initialize
+    await tester.pump(); // id2 initialize
     respondPinned(pinned); // id1 应答
-    _respond(channels, 2, {'sessions': const <Object?>[]});
-    _respond(channels, 3, <String, dynamic>{});
-    await tester.pump(); // id4 帧监听器 + id5 subscribeIndex
-    _respond(channels, 5, {
+    _respond(channels, 2, <String, dynamic>{});
+    await tester.pump(); // id3 帧监听器 + id4 subscribeIndex
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
     // wire 帧{kind,topic,subscriptionId,frame};内层逻辑帧同样携带
     // subscriptionId(_acceptLogicalFrame 以它过滤)。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 4], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -164,11 +163,11 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '置顶'));
     await tester.pump();
     final (pinHeader, pinArgs) = _decodeRequest(sent.last);
-    expect(pinHeader, [ChannelClient.reqPromise, 6, 'zcode-task', 'setTaskPinned']);
+    expect(pinHeader, [ChannelClient.reqPromise, 5, 'zcode-task', 'setTaskPinned']);
     expect(pinArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t', 'pinned': true},
     ]);
-    _respond(channels, 6, <String, dynamic>{});
+    _respond(channels, 5, <String, dynamic>{});
     await tester.pump(); // 完成后退出多选 + id6 置顶集刷新
     respondPinned(const []); // 刷新应答:置顶集清空
     await tester.pump();
@@ -179,11 +178,11 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '归档'));
     await tester.pump();
     final (archHeader, archArgs) = _decodeRequest(sent.last);
-    expect(archHeader, [ChannelClient.reqPromise, 9, 'zcode-task', 'archiveTask']);
+    expect(archHeader, [ChannelClient.reqPromise, 7, 'zcode-task', 'archiveTask']);
     expect(archArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t'},
     ]);
-    _respond(channels, 9, <String, dynamic>{});
+    _respond(channels, 7, <String, dynamic>{});
     await tester.pump(); // id8 刷新
     respondPinned(const []);
     await tester.pump();
@@ -198,11 +197,11 @@ void main() {
         of: find.byType(AlertDialog), matching: find.text('删除')));
     await tester.pump();
     final (delHeader, delArgs) = _decodeRequest(sent.last);
-    expect(delHeader, [ChannelClient.reqPromise, 12, 'zcode-task', 'deleteTask']);
+    expect(delHeader, [ChannelClient.reqPromise, 9, 'zcode-task', 'deleteTask']);
     expect(delArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t'},
     ]);
-    _respond(channels, 12, <String, dynamic>{});
+    _respond(channels, 9, <String, dynamic>{});
     await tester.pump(); // id10 刷新
     respondPinned(const []);
     await tester.pump();
@@ -248,10 +247,9 @@ void main() {
     _respond(channels, 0, <String, dynamic>{});
     await tester.pump(); // id2 initialize
     respondPinned(const []);
-    _respond(channels, 2, {'sessions': const <Object?>[]});
-    _respond(channels, 3, <String, dynamic>{});
-    await tester.pump(); // id4 帧监听器 + id5 subscribeIndex
-    _respond(channels, 5, {
+    _respond(channels, 2, <String, dynamic>{});
+    await tester.pump(); // id3 帧监听器 + id4 subscribeIndex
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -262,7 +260,7 @@ void main() {
     expect(statusDotFinder, findsNothing);
 
     // 实时快照到达 → 覆盖种子;running 条目恢复状态点。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 4], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -313,11 +311,10 @@ void main() {
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
     await tester.pump(); // id0 hello + id1 listPinnedTasks
     _respond(channels, 0, <String, dynamic>{});
-    await tester.pump(); // id2 listSessions(归档)+ id3 initialize
+    await tester.pump(); // id2 initialize
     respondPinned(const []);
-    _respond(channels, 2, {'sessions': const <Object?>[]});
-    _respond(channels, 3, <String, dynamic>{});
-    await tester.pump(); // id4 帧监听器 + id5 subscribe 发出,由调用方应答
+    _respond(channels, 2, <String, dynamic>{});
+    await tester.pump(); // id3 帧监听器 + id4 subscribe 发出,由调用方应答
   }
 
   /// 握手 + 订阅 ack,但不推实时快照 —— 抽屉停留在「实时未到达」态(种子可见)。
@@ -331,7 +328,7 @@ void main() {
       workspacePath,
       currentSessionId: currentSessionId,
     );
-    _respond(channels, 5, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -339,7 +336,7 @@ void main() {
 
   /// 推一张 sessions-index 快照(逐帧走真实 wire 路径)。
   void pushSnapshot(List<Object?> sessions) {
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 4], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -370,7 +367,7 @@ void main() {
     await pumpDrawerHandshake(tester, '/ws-t');
     // 订阅请求(id4)应答错误 → _error 态。
     channels.handleMessage(_inFrame(
-        [ChannelClient.resPromiseError, 5], {'message': 'sub exploded'}));
+        [ChannelClient.resPromiseError, 4], {'message': 'sub exploded'}));
     await tester.pump();
     // 订阅失败路径含订阅对象回收(异步多跳),两次 pump 保证错误上屏。
     await tester.pump();
@@ -384,7 +381,7 @@ void main() {
     // 重试成功 → 错误横幅消失,回到「实时未到达」种子态。
     await tester.tap(find.text('重试'));
     await tester.pump();
-    _respond(channels, 7, {
+    _respond(channels, 6, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -400,7 +397,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await pumpDrawerHandshake(tester, '/ws-t');
     channels.handleMessage(_inFrame(
-        [ChannelClient.resPromiseError, 5], {'message': 'sub exploded'}));
+        [ChannelClient.resPromiseError, 4], {'message': 'sub exploded'}));
     await tester.pump();
 
     expect(find.textContaining('会话列表加载失败'), findsOneWidget);
@@ -448,7 +445,7 @@ void main() {
     switchCounts.clear();
     vanishedCalls.clear();
     await pumpDrawerHandshake(tester, '/ws-t', currentSessionId: 's1');
-    _respond(channels, 5, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -460,7 +457,7 @@ void main() {
     expect(switchCounts, isEmpty);
 
     // s1 被删除/归档:增量推送把它从索引移除 → 回调宿主一次。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 4], {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 3], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -488,7 +485,7 @@ void main() {
     switchCounts.clear();
     vanishedCalls.clear();
     await pumpDrawerHandshake(tester, '/ws-t', currentSessionId: 's-new');
-    _respond(channels, 5, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -554,7 +551,7 @@ void main() {
     await pumpDrawerHandshake(tester, '/ws-t');
     channels.handleMessage(_inFrame(
         [ChannelClient.resPromiseError, 1], {'message': 'pinned exploded'}));
-    _respond(channels, 5, {
+    _respond(channels, 4, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
@@ -581,19 +578,19 @@ void main() {
     await tester.pump();
     final (pinHeader, _) = _decodeRequest(sent.last);
     expect(
-        pinHeader, [ChannelClient.reqPromise, 6, 'zcode-task', 'setTaskPinned']);
-    _respond(channels, 6, <String, dynamic>{});
-    await tester.pump(); // 退出多选 + id7 置顶集刷新请求发出
+        pinHeader, [ChannelClient.reqPromise, 5, 'zcode-task', 'setTaskPinned']);
+    _respond(channels, 5, <String, dynamic>{});
+    await tester.pump(); // 退出多选 + id6 置顶集刷新请求发出
 
     // 刷新是紧随操作的新一次 listPinnedTasks。
-    final (refreshHeader, refreshArgs) = requestById(7);
+    final (refreshHeader, refreshArgs) = requestById(6);
     expect(refreshHeader,
-        [ChannelClient.reqPromise, 7, 'zcode-task', 'listPinnedTasks']);
+        [ChannelClient.reqPromise, 6, 'zcode-task', 'listPinnedTasks']);
     expect(refreshArgs, [
       {'workspacePath': '/ws-t'},
     ]);
 
-    _respond(channels, 7, [
+    _respond(channels, 6, [
       {'taskId': 's1'},
     ]);
     await tester.pump();

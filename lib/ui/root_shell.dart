@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
 import '../protocol/conversation.dart' show SessionEntry;
-import '../protocol/channel_client.dart';
 import '../protocol/relay_client.dart';
 import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
@@ -288,39 +287,35 @@ class _RootShellState extends State<RootShell> {
         _activeWorkspace = workspace;
       });
       _startTaskNotifier(session, workspace);
-      // 进入工作区默认打开最近一个未归档会话(UX 反馈:不要落在空白
-      // draft)。索引订阅的 runtimePolicy=existing-only 依赖会话运行时
-      // (此刻还不存在,宿主会拒),改走一次性 listSessions:无运行时
-      // 依赖,按 time_updated 降序,roots 只取顶层会话。
+      // 进入工作区默认打开最近一个未归档会话(不要落在空白 draft)。
+      // 与抽屉同一条已验证通路:V4 索引订阅(scope 已归一化,directory
+      // 正确下发);等首个快照(上限 4s)取最近未归档条目。listSessions
+      // 是桌面端本地 API,不在 zcode-agent 的 relay 白名单里,不可用。
       try {
-        final res = await session.channels.call(
-            Channels.zcodeAgent, 'listSessions', [
-          {
-            'workspace': {
-              'workspacePath': workspace['workspacePath'],
-              if (workspace['workspaceIdentity'] != null)
-                'workspaceKey': workspace['workspaceIdentity'],
-            },
-            'limit': 5,
-          }
-        ]);
-        final list = res is Map && res['sessions'] is List
-            ? res['sessions'] as List
-            : const [];
+        final sub = await session
+            .conversation(_scopeOf(workspace))
+            .subscribeSessionsIndex();
         SessionEntry? recent;
-        for (final m in list) {
-          if (m is! Map) continue;
-          final e = SessionEntry(m.cast<String, dynamic>());
-          if (!e.isArchived) {
-            recent = e;
+        for (var i = 0; i < 80; i++) {
+          if (!_isCurrentChain(gen)) break;
+          if (sub.state.ready) {
+            for (final e in sub.state.list) {
+              if (!e.isArchived) {
+                recent = e;
+                break;
+              }
+            }
             break;
           }
+          await Future<void>.delayed(const Duration(milliseconds: 50));
         }
         final picked = recent;
-        log('[v4] 最近会话:listSessions ${list.length} 条,'
-            '选中=${picked?.sessionId ?? '无'}');
-        debugPrint('[zflow] recent-session: list=${list.length} '
+        log('[v4] 最近会话:ready=${sub.state.ready} '
+            '列表=${sub.state.list.length} 选中=${picked?.sessionId ?? '无'}');
+        debugPrint('[zflow] recent-session: ready=${sub.state.ready} '
+            'list=${sub.state.list.length} '
             'picked=${picked?.sessionId ?? 'none'}');
+        await sub.dispose();
         if (picked != null && mounted && _isCurrentChain(gen)) {
           _sessionEpoch++;
           setState(() => _activeSessionId.value = picked.sessionId);
