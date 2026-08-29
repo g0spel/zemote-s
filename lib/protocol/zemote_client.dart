@@ -482,16 +482,21 @@ class BridgeSession {
   BridgeSession._({
     required Map<String, dynamic> bridge,
     required void Function(BridgeSession) onDispose,
+    ChannelClient? channels,
   })  : _bridge = bridge,
         _transport = _placeholderTransport(bridge),
-        _channels = ChannelClient(sendBody: (_) {}),
+        _channels = channels ?? ChannelClient(sendBody: (_) {}),
         _onDispose = onDispose;
 
   /// Standalone session with a no-op send path — test scaffold for UI code
   /// that holds a [BridgeSession] without a live relay connection.
+  /// [channels] 可注入自建 ChannelClient(faker 测试捕获 outgoing 请求)。
   @visibleForTesting
-  factory BridgeSession.detached(Map<String, dynamic> bridge) =>
-      BridgeSession._(bridge: bridge, onDispose: (_) {});
+  factory BridgeSession.detached(
+    Map<String, dynamic> bridge, {
+    ChannelClient? channels,
+  }) =>
+      BridgeSession._(bridge: bridge, onDispose: (_) {}, channels: channels);
 
   static RpcFrameTransport _placeholderTransport(
           Map<String, dynamic> bridge) =>

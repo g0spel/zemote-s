@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:zemote/protocol/connection_params.dart';
 import 'package:zemote/protocol/zemote_client.dart';
+import 'package:zemote/ui/chat_page.dart';
 import 'package:zemote/state/account_store.dart';
 import 'package:zemote/state/app_session.dart';
 import 'package:zemote/ui/conversation_list_page.dart';
@@ -97,11 +98,21 @@ Future<AccountStore> _pumpShell(
   return store;
 }
 
-String? _conversationKey(WidgetTester tester) {
-  for (final w in tester.widgetList(find.byType(ConversationListPage))) {
-    return (w as ConversationListPage).workspaceKey;
-  }
-  return null;
+String? _chatSessionId(WidgetTester tester) =>
+    tester.widget<ChatPage>(find.byType(ChatPage)).sessionId;
+
+Future<void> _openDrawer(WidgetTester tester) async {
+  await tester.tap(find.byIcon(Icons.menu));
+  // 有界 pump:200ms 开启动画走完即可;内嵌会话的加载转圈会让
+  // pumpAndSettle 永不静止。
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+}
+
+/// 抽屉关闭动画(200ms)的有界等待。
+Future<void> _pumpDrawerClose(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
 }
 
 /// Flushes the fake-async timers leaked by mounted pages' pending RPC
@@ -170,12 +181,12 @@ void main() {
     // A 的连接被 gate 挡住 → 壳停在“连接中”。
     expect(find.text('连接设备中…'), findsOneWidget);
 
-    // 连接进行中切到 B:B 立即连上并开桥。
+    // 连接进行中切到 B:B 立即连上并开桥(顶栏胶囊 + 内嵌 draft 聊天)。
     await sessionOf(tester).switchTo(store.accounts[1]);
     await tester.pump();
     await tester.pump();
     expect(find.text('DeviceB'), findsOneWidget); // 顶栏胶囊
-    expect(_conversationKey(tester), '/ws-b'); // bridge 是 B 的工作区
+    expect(_chatSessionId(tester), isNull); // B 的工作区 draft
 
     // 释放 A:A 完成后不得抢回激活态,壳最终仍是 B。
     gateA.complete();
@@ -183,7 +194,7 @@ void main() {
     await tester.pump();
     expect(sessionOf(tester).current?.label, 'DeviceB');
     expect(find.text('DeviceB'), findsOneWidget);
-    expect(_conversationKey(tester), '/ws-b');
+    expect(_chatSessionId(tester), isNull);
     await _flushPendingTimers(tester);
   });
 
@@ -199,7 +210,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle(); // A 链完成
-    expect(_conversationKey(tester), '/ws-a');
+    expect(_chatSessionId(tester), isNull); // A 的 draft
 
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
@@ -213,7 +224,7 @@ void main() {
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         0);
     expect(find.text('DeviceB'), findsOneWidget);
-    expect(_conversationKey(tester), '/ws-b');
+    expect(_chatSessionId(tester), isNull);
     await _flushPendingTimers(tester);
   });
 
@@ -229,7 +240,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle(); // 链完成,对话页挂载
-    expect(_conversationKey(tester), '/ws-a');
+    expect(_chatSessionId(tester), isNull);
 
     // 模拟被挤下线/外部断开:session.current 变 null。
     await sessionOf(tester).disconnect(store.accounts[0].id);
@@ -241,7 +252,7 @@ void main() {
     expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         0);
-    expect(_conversationKey(tester), isNull); // 残留 bridge 已卸载
+    expect(find.byType(ChatPage), findsNothing); // 残留会话已卸载
     await _flushPendingTimers(tester);
   });
 
@@ -267,6 +278,258 @@ void main() {
 
     // 回到对话 Tab 后,back 恢复为系统默认(可退出)。
     expect(shellPopScope().canPop, isTrue);
+  });
+
+  /// 开一条带工作区 bridge 的假链,链完成后对话 Tab 处于"未选会话"态。
+  Future<void> pumpWithBridge(WidgetTester tester) async {
+    await _pumpShell(
+      tester,
+      urls: [_deviceUrl],
+      clientFactory: (params, onLog) => _FakeClient(
+        params,
+        workspaces: [
+          {'workspacePath': '/ws-a', 'label': 'WS'},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle(); // 链完成
+  }
+
+  testWidgets('有 bridge 时对话 Tab 默认渲染 draft 新会话(列表收进抽屉)',
+      (tester) async {
+    await pumpWithBridge(tester);
+    expect(find.byType(ChatPage), findsOneWidget);
+    expect(find.byType(SessionDrawer), findsNothing);
+    expect(find.text('输入消息开始新会话'), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('☰ 呼出抽屉:工作区条/搜索/＋新会话/设备状态条渲染',
+      (tester) async {
+    await pumpWithBridge(tester);
+    await _openDrawer(tester);
+
+    expect(find.byType(SessionDrawer), findsOneWidget);
+    expect(find.text('WS'), findsOneWidget); // 工作区名
+    expect(find.text('/ws-a'), findsOneWidget); // 等宽路径
+    expect(find.text('1 台设备'), findsOneWidget); // 底部设备状态条
+    // 抽屉内「＋新会话」入口。
+    expect(
+        find.descendant(
+            of: find.byType(SessionDrawer), matching: find.text('新会话')),
+        findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('左缘右滑呼出抽屉', (tester) async {
+    await pumpWithBridge(tester);
+    final gesture = await tester.startGesture(const Offset(2, 400));
+    await gesture.moveBy(const Offset(60, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byType(SessionDrawer), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('抽屉点「新会话」→ 关抽屉回 draft(输入框可发)', (tester) async {
+    await pumpWithBridge(tester);
+    await _openDrawer(tester);
+
+    await tester.tap(find.descendant(
+        of: find.byType(SessionDrawer), matching: find.text('新会话')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SessionDrawer), findsNothing); // 选后自动关
+    expect(find.byType(ChatPage), findsOneWidget);
+    expect(find.text('输入消息开始新会话'), findsOneWidget);
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.enabled, isNot(false));
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('选中会话内嵌渲染消息流(无 AppBar);会话内呼出抽屉选另一会话可切换',
+      (tester) async {
+    await pumpWithBridge(tester);
+
+    await _openDrawer(tester);
+    tester
+        .widget<SessionDrawer>(find.byType(SessionDrawer))
+        .onPick('s1'); // 模拟点会话条目
+    await _pumpDrawerClose(tester);
+
+    expect(find.byType(SessionDrawer), findsNothing); // 选后自动关
+    expect(_chatSessionId(tester), 's1');
+    expect(find.byType(ChatPage), findsOneWidget);
+    // embedded 模式:无 Scaffold/AppBar 外壳(壳自身用自定义 _TopBar)。
+    expect(find.byType(AppBar), findsNothing);
+
+    // T2 移交 Medium:会话内呼出抽屉,点另一会话直接切换。
+    await _openDrawer(tester);
+    tester
+        .widget<SessionDrawer>(find.byType(SessionDrawer))
+        .onPick('s2');
+    await _pumpDrawerClose(tester);
+
+    expect(_chatSessionId(tester), 's2');
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('draft 首条消息创建会话后回写选择:切走再切回不再开新 draft',
+      (tester) async {
+    await pumpWithBridge(tester);
+    expect(_chatSessionId(tester), isNull);
+
+    // 模拟 draft 首条消息 createSession 成功后 ChatPage 的回写
+    // (onSessionInfo 自 Task 4 起携带 sessionId)。
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s-new', '桌面起的标题');
+    await tester.pump();
+
+    // 标题即时上头部(ValueListenable);回写不重建内嵌实例(draft 态保留)。
+    expect(find.text('桌面起的标题'), findsOneWidget);
+    await _openDrawer(tester);
+    expect(
+      tester
+          .widget<SessionDrawer>(find.byType(SessionDrawer))
+          .currentSessionId,
+      's-new', // 抽屉高亮跟随回写
+    );
+    await _pumpDrawerClose(tester);
+
+    // 切走(自动化 Tab 卸载内嵌 ChatPage)再切回:按回写的会话恢复,
+    // 而不是落到一个新 draft。
+    await tester.tap(find.text('自动化'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('对话'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(_chatSessionId(tester), 's-new');
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('回写后抽屉点「新会话」仍显式开新 draft,点回写会话无缝恢复',
+      (tester) async {
+    await pumpWithBridge(tester);
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s-new', '桌面起的标题');
+    await tester.pump();
+
+    // 显式「＋新会话」:用户意图优先,回到全新 draft(不动回写前的实例态)。
+    await _openDrawer(tester);
+    tester
+        .widget<SessionDrawer>(find.byType(SessionDrawer))
+        .onPick(null);
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), isNull);
+    expect(find.text('输入消息开始新会话'), findsOneWidget);
+
+    // 点回写会话:恢复 s-new,不再是 draft。
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s-new');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's-new');
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('抽屉重选当前会话标题保持且实例存活;选另一会话清空后由新实例回写',
+      (tester) async {
+    await pumpWithBridge(tester);
+
+    // 回写会话选择 + 桌面端生成的标题(存活实例的标题推送只在变化时发)。
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s1', '桌面起的标题');
+    await tester.pump();
+    expect(find.text('桌面起的标题'), findsOneWidget);
+
+    // 重选当前高亮会话:只关抽屉——实例存活(element 不换)、标题保持,
+    // 不回落「新会话」占位(清了就没有人再推了)。
+    final elementBefore = tester.element(find.byType(ChatPage));
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
+    await _pumpDrawerClose(tester);
+    expect(find.byType(SessionDrawer), findsNothing);
+    expect(tester.element(find.byType(ChatPage)), same(elementBefore));
+    expect(find.text('桌面起的标题'), findsOneWidget);
+    expect(find.text('新会话'), findsNothing);
+
+    // 选不同会话:重建代数递增 → 全新实例,旧标题清空回落「新会话」占位。
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s2');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's2');
+    expect(tester.element(find.byType(ChatPage)), isNot(same(elementBefore)));
+    expect(find.text('桌面起的标题'), findsNothing);
+    expect(find.text('新会话'), findsOneWidget);
+
+    // 新实例经 onSessionInfo 回写后标题恢复。
+    tester
+        .widget<ChatPage>(find.byType(ChatPage))
+        .onSessionInfo!('s2', '另一会话的标题');
+    await tester.pump();
+    expect(find.text('另一会话的标题'), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('选中会话后切换设备:抽屉关闭回到 draft(复位)', (tester) async {
+    final store = await _pumpShell(
+      tester,
+      urls: [_url('a', 'DeviceA'), _url('b', 'DeviceB')],
+      clientFactory: (params, onLog) => _FakeClient(
+        params,
+        workspaces: [
+          {'workspacePath': '/ws-${params.deviceSid}', 'label': 'WS'},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle(); // A 链完成
+
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's1');
+
+    await _openDrawer(tester); // 抽屉开着时切换设备
+    await sessionOf(tester).switchTo(store.accounts[1]);
+    await _pumpDrawerClose(tester);
+
+    // 复位:抽屉关闭、会话选择失效,落到 B 的 draft。
+    expect(find.byType(SessionDrawer), findsNothing);
+    expect(_chatSessionId(tester), isNull);
+    expect(find.text('输入消息开始新会话'), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('选中会话并开抽屉后设备被外部断开:回断开态且抽屉不残留',
+      (tester) async {
+    final store = await _pumpShell(
+      tester,
+      urls: [_deviceUrl],
+      clientFactory: (params, onLog) => _FakeClient(
+        params,
+        workspaces: [
+          {'workspacePath': '/ws-a', 'label': 'WS'},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle(); // 链完成
+
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's1');
+
+    await _openDrawer(tester);
+    await sessionOf(tester).disconnect(store.accounts[0].id);
+    await _pumpDrawerClose(tester);
+
+    expect(find.text('设备未连接'), findsOneWidget);
+    expect(find.byType(SessionDrawer), findsNothing);
+    expect(find.byType(ChatPage), findsNothing);
+    await _flushPendingTimers(tester);
   });
 }
 

@@ -78,6 +78,25 @@ class _RootShellState extends State<RootShell> {
   TaskNotifier? _taskNotifier;
   AppLifecycleListener? _lifecycle;
 
+  /// 会话抽屉开关(仅对话 Tab;随会话态复位/切 Tab 一起关闭)。
+  bool _drawerOpen = false;
+
+  /// 对话 Tab 的会话选择:null = draft 新会话(内嵌 ChatPage
+  /// sessionId:null,首条消息 createSession,列表收进抽屉);
+  /// 其余值 = 内嵌会话 id(经 ValueKey 重建)。draft 发出首条消息后由
+  /// ChatPage 的 onSessionInfo 回写 id(实例内部已切到该会话,不触发
+  /// 重建;下次重建/切 Tab 按已选会话恢复,不再开新 draft)。
+  final ValueNotifier<String?> _activeSessionId = ValueNotifier(null);
+
+  /// 内嵌 ChatPage 的重建代数:仅用户驱动的切换(抽屉选择/设备或工作区
+  /// 复位)递增并强制全新实例;会话 id 的静默变化(draft 采纳回写)不动
+  /// 它,保证当前实例跨壳重建存活(composer 草稿、在途 echo 不丢)。
+  int _sessionEpoch = 0;
+
+  /// 头部会话名:null 显示"新会话";由内嵌 ChatPage 的 onSessionInfo
+  /// 回写(桌面端生成或重命名标题时)。
+  final ValueNotifier<String?> _activeSessionTitle = ValueNotifier(null);
+
   /// 当前壳已加载/正在加载的设备 id(防止 session 通知重复触发引导链)。
   String? _loadedAccountId;
 
@@ -144,6 +163,7 @@ class _RootShellState extends State<RootShell> {
           _phase = _ConnectPhase.idle;
           _connectError = null;
           _workspaces = const [];
+          _resetSessionState();
         });
         return;
       }
@@ -173,6 +193,7 @@ class _RootShellState extends State<RootShell> {
       _workspaces = const [];
       _activeWorkspace = null;
       _bridge = null;
+      _resetSessionState();
     });
     try {
       final client = await widget.session.connect(account);
@@ -295,6 +316,44 @@ class _RootShellState extends State<RootShell> {
           'workspaceIdentity': workspace['workspaceIdentity'],
       };
 
+  /// 设备切换/断开后会话选择失效:回到 draft 态,抽屉一并关闭;
+  /// 重建代数递增,内嵌 ChatPage 换设备后必须全新实例。
+  void _resetSessionState() {
+    _sessionEpoch++;
+    _activeSessionId.value = null;
+    _activeSessionTitle.value = null;
+    _drawerOpen = false;
+  }
+
+  /// 抽屉选择:null = 新会话(draft);否则内嵌打开该会话。标题不随
+  /// 选择注入,由 ChatPage 的 sessions-index 推送回写(桌面端生成)。
+  /// 切到不同会话才递增重建代数并清标题(重选当前会话只关抽屉:实例
+  /// 存活且其标题推送只在变化时发一次,清了头部就永远停在「新会话」)。
+  void _pickFromDrawer(String? sessionId) {
+    final changed = sessionId != _activeSessionId.value;
+    if (changed) _sessionEpoch++;
+    setState(() {
+      _activeSessionId.value = sessionId;
+      if (changed) _activeSessionTitle.value = null;
+    });
+    _closeDrawer();
+  }
+
+  void _openDrawer() => setState(() => _drawerOpen = true);
+
+  void _closeDrawer() => setState(() => _drawerOpen = false);
+
+  /// 内嵌 ChatPage 回写:会话 id(draft 首条消息 createSession 后采纳)
+  /// + 桌面端生成的标题。静默写 ValueNotifier——不 setState,当前内嵌
+  /// 实例继续存活;标题经 ValueListenableBuilder 上头部,id 在下一次
+  /// 壳重建(切 Tab/抽屉)时作为已选会话生效。
+  void _onSessionInfo(String sessionId, String title) {
+    if (sessionId.isNotEmpty && sessionId != _activeSessionId.value) {
+      _activeSessionId.value = sessionId;
+    }
+    _activeSessionTitle.value = title;
+  }
+
   void _showDeviceSwitcher() {
     showModalBottomSheet(
       context: context,
@@ -303,6 +362,36 @@ class _RootShellState extends State<RootShell> {
         store: widget.store,
       ),
     );
+  }
+
+  /// 抽屉工作区条 ⌄:底部升起工作区切换层(spec §7.1;设备切换在顶栏,
+  /// 工作区切换在抽屉,与 bootstrap→workspaces→sessions 层级一致)。
+  void _showWorkspaceSwitcher() {
+    final active = _activeWorkspace;
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => _WorkspaceSwitchSheet(
+        workspaces: _workspaces,
+        activeKey: active == null ? null : workspaceKeyOf(active),
+        onPick: (w) {
+          Navigator.pop(context);
+          _switchWorkspace(w);
+        },
+      ),
+    );
+  }
+
+  /// 同一设备内切换工作区:作废在途链、释放旧 bridge、重开新 bridge。
+  Future<void> _switchWorkspace(Map<String, dynamic> workspace) async {
+    final key = workspaceKeyOf(workspace);
+    final active = _activeWorkspace;
+    if (key == null || (active != null && key == workspaceKeyOf(active))) {
+      return;
+    }
+    final gen = ++_chainGeneration;
+    _teardownDeviceState();
+    setState(() => _resetSessionState());
+    await _openWorkspace(workspace, gen);
   }
 
   void _retryConnect() {
@@ -324,27 +413,39 @@ class _RootShellState extends State<RootShell> {
     final session = widget.session;
     final bridge = _bridge;
     final workspace = _activeWorkspace;
+    final chatMounted = _chatMounted(session, bridge, workspace);
     return Scaffold(
       backgroundColor: colors.bg,
       body: PopScope(
         // Back behavior under home mounting: on the conversations tab the
-        // system back exits as usual (canPop=true lets the root route pop);
-        // on other tabs back is intercepted and returns to conversations.
-        canPop: _tab == 0,
+        // system back exits as usual (canPop=true lets the root route pop),
+        // unless the session drawer is open — back closes it first; on other
+        // tabs back is intercepted and returns to conversations.
+        canPop: _tab == 0 && !_drawerOpen,
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) return;
-          setState(() => _tab = 0);
+          setState(() {
+            if (_drawerOpen) {
+              _drawerOpen = false;
+            } else {
+              _tab = 0;
+            }
+          });
         },
         child: SafeArea(
           child: Column(
             children: [
-              _TopBar(
-                account: session.current,
-                workspaceName:
-                    workspace == null ? null : workspaceTitle(workspace),
-                onSwitch: _showDeviceSwitcher,
-                onManageDevices: _openDeviceManagement,
-              ),
+              // 对话 Tab 且内嵌聊天已挂载时,顶栏由 ChatPage 自绘(模型
+              // pill/停止/溢出菜单需要会话订阅,见 ChatPage._embeddedHeader);
+              // 其余状态与 Tab 用共享 _TopBar(工作区名 + 管理设备)。
+              if (!chatMounted)
+                _TopBar(
+                  account: session.current,
+                  workspaceName:
+                      workspace == null ? null : workspaceTitle(workspace),
+                  onSwitch: _showDeviceSwitcher,
+                  onManageDevices: _openDeviceManagement,
+                ),
               if (session.client != null)
                 _ConnectionBanner(client: session.client!),
               Expanded(
@@ -401,7 +502,11 @@ class _RootShellState extends State<RootShell> {
         ),
         child: NavigationBar(
           selectedIndex: _tab,
-          onDestinationSelected: (i) => setState(() => _tab = i),
+          onDestinationSelected: (i) =>
+              setState(() {
+                _tab = i;
+                _drawerOpen = false; // 抽屉仅对话 Tab 有,离开即收
+              }),
           destinations: const [
             NavigationDestination(
               icon: Icon(Icons.forum_outlined),
@@ -436,6 +541,19 @@ class _RootShellState extends State<RootShell> {
     );
   }
 
+  /// 对话 Tab 的内嵌聊天是否已挂载(挂载时顶栏由 ChatPage 自绘,
+  /// 设备胶囊经 headerLeading 注入)。
+  bool _chatMounted(
+    AppSession session,
+    BridgeSession? bridge,
+    Map<String, dynamic>? workspace,
+  ) =>
+      _tab == 0 &&
+      _phase == _ConnectPhase.done &&
+      session.current != null &&
+      bridge != null &&
+      workspace != null;
+
   Widget _conversationsTab(BuildContext context, BridgeSession? bridge) {
     final colors = EmberColors.of(context);
     final session = widget.session;
@@ -463,11 +581,45 @@ class _RootShellState extends State<RootShell> {
         return _failedView(colors);
       case _ConnectPhase.done:
         if (bridge != null && workspace != null) {
-          return ConversationListPage(
-            key: ValueKey(workspaceKeyOf(workspace)),
-            bridge: bridge,
-            scope: _scopeOf(workspace),
-            workspaceKey: workspaceKeyOf(workspace) ?? '',
+          final sessionId = _activeSessionId.value;
+          // 对话 Tab 常驻内嵌 ChatPage(null = draft 新会话,首条消息
+          // createSession);会话列表收进左缘抽屉(T2 移交:会话内唯一
+          // 的列表入口)。
+          return _DrawerHost(
+            open: _drawerOpen,
+            onOpen: _openDrawer,
+            onDismiss: _closeDrawer,
+            drawer: SessionDrawer(
+              bridge: bridge,
+              scope: _scopeOf(workspace),
+              workspaceName: workspaceTitle(workspace),
+              workspacePath: workspace['workspacePath'] as String? ?? '',
+              currentSessionId: sessionId,
+              onPick: _pickFromDrawer,
+              onSwitchWorkspace: _showWorkspaceSwitcher,
+              onManageDevices: () {
+                _closeDrawer();
+                _openDeviceManagement();
+              },
+              deviceCount: widget.store.accounts.length,
+              deviceOnline: session.client != null,
+            ),
+            child: ChatPage(
+              key: ValueKey(_sessionEpoch),
+              embedded: true,
+              session: bridge,
+              scope: _scopeOf(workspace),
+              workspaceKey: workspaceKeyOf(workspace) ?? '',
+              sessionId: sessionId,
+              title: _activeSessionTitle.value ?? '新会话',
+              onSessionInfo: _onSessionInfo,
+              headerLeading: _DeviceCapsule(
+                account: session.current,
+                onTap: _showDeviceSwitcher,
+              ),
+              headerTitle: _activeSessionTitle,
+              onOpenDrawer: _openDrawer,
+            ),
           );
         }
         return _mutedHint('桌面端没有打开的工作区', colors);
@@ -529,7 +681,8 @@ class _RootShellState extends State<RootShell> {
   }
 }
 
-/// 顶栏:设备切换胶囊(头像圆 + 设备名 + ▾)+ 当前工作区名 + 管理设备入口。
+/// 顶栏(共享形态,对话 Tab 内嵌聊天挂载时由 ChatPage 自绘顶栏):
+/// 设备切换胶囊(头像 + 设备名 + ▾)+ 工作区名 + 管理设备。
 class _TopBar extends StatelessWidget {
   final Account? account;
   final String? workspaceName;
@@ -546,7 +699,6 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
-    final label = account?.label ?? '未连接设备';
     final host = account?.params?.source.host ?? '';
     return Material(
       color: colors.bg,
@@ -555,56 +707,7 @@ class _TopBar extends StatelessWidget {
             EmberSpacing.page, EmberSpacing.gapS),
         child: Row(
           children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(EmberRadius.control),
-              onTap: onSwitch,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: EmberSpacing.gapS, vertical: 5),
-                decoration: BoxDecoration(
-                  color: colors.card,
-                  borderRadius: BorderRadius.circular(EmberRadius.control),
-                  border: Border.all(color: colors.hairline),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 22,
-                      height: 22,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: colors.primary,
-                        borderRadius:
-                            BorderRadius.circular(EmberRadius.avatar),
-                      ),
-                      child: Text(
-                        label.isEmpty ? '?' : label[0],
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: EmberSpacing.gapS),
-                    Flexible(
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: EmberType.body,
-                          fontWeight: FontWeight.w600,
-                          color: colors.textSolid,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Icon(Icons.arrow_drop_down,
-                        size: 18, color: colors.textMuted),
-                  ],
-                ),
-              ),
-            ),
+            _DeviceCapsule(account: account, onTap: onSwitch),
             const SizedBox(width: EmberSpacing.gapM),
             Expanded(
               child: Text(
@@ -619,6 +722,69 @@ class _TopBar extends StatelessWidget {
               tooltip: '管理设备',
               onPressed: onManageDevices,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 设备切换胶囊(头像圆 + 设备名 + ▾):顶栏与内嵌聊天顶栏共用,
+/// 点按下拉切换/管理设备(spec §7.1)。
+class _DeviceCapsule extends StatelessWidget {
+  final Account? account;
+  final VoidCallback onTap;
+
+  const _DeviceCapsule({required this.account, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    final label = account?.label ?? '未连接设备';
+    return InkWell(
+      borderRadius: BorderRadius.circular(EmberRadius.control),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: EmberSpacing.gapS, vertical: 5),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          border: Border.all(color: colors.hairline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: colors.primary,
+                borderRadius: BorderRadius.circular(EmberRadius.avatar),
+              ),
+              child: Text(
+                label.isEmpty ? '?' : label[0],
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(width: EmberSpacing.gapS),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: EmberType.body,
+                  fontWeight: FontWeight.w600,
+                  color: colors.textSolid,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: colors.textMuted),
           ],
         ),
       ),
@@ -717,6 +883,219 @@ class _DisconnectedView extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 会话抽屉宿主:内容 + 左缘 24px 把手(右滑呼出)+ 遮罩 + 76% 宽抽屉
+/// 面板(200ms ease-out 平移,spec §5 唯二动效)。关闭动画结束后摘除
+/// 面板;开抽屉时系统 back 由壳的 PopScope 拦截为收抽屉。
+class _DrawerHost extends StatefulWidget {
+  final Widget child;
+  final Widget drawer;
+  final bool open;
+  final VoidCallback onOpen;
+  final VoidCallback onDismiss;
+
+  const _DrawerHost({
+    required this.child,
+    required this.drawer,
+    required this.open,
+    required this.onOpen,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_DrawerHost> createState() => _DrawerHostState();
+}
+
+class _DrawerHostState extends State<_DrawerHost>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<Offset> _slide;
+
+  /// 面板是否在树上(关闭动画播完才摘除,收起也有过渡)。
+  bool _shown = false;
+
+  /// 左缘把手本次拖拽的累计水平位移。
+  double _edgeDx = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+      value: widget.open ? 1.0 : 0.0,
+    );
+    _slide = Tween(begin: const Offset(-1, 0), end: Offset.zero).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+    _shown = widget.open;
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed && _shown) {
+        setState(() => _shown = false);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(_DrawerHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.open == oldWidget.open) return;
+    if (widget.open) {
+      setState(() => _shown = true);
+      _controller.forward();
+    } else {
+      _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth * 0.76;
+      return Stack(
+        children: [
+          Positioned.fill(child: widget.child),
+          // 左缘把手:仅在关闭时挂载,避免与抽屉内手势竞争。
+          if (!widget.open)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 24,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: (_) => _edgeDx = 0,
+                onHorizontalDragUpdate: (d) => _edgeDx += d.delta.dx,
+                onHorizontalDragEnd: (details) {
+                  // 位移为主(慢拖),速度兜底(快甩)。
+                  if (_edgeDx > 48 || (details.primaryVelocity ?? 0) > 200) {
+                    widget.onOpen();
+                  }
+                },
+              ),
+            ),
+          if (_shown) ...[
+            // 遮罩:点击收抽屉;收起动画期间不拦截指针。
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: !widget.open,
+                child: GestureDetector(
+                  onTap: widget.onDismiss,
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) => ColoredBox(
+                      color: Colors.black
+                          .withValues(alpha: 0.32 * _controller.value),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: SizedBox(
+                width: width,
+                child: SlideTransition(
+                  position: _slide,
+                  child: widget.drawer,
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
+    });
+  }
+}
+
+/// 抽屉工作区切换层:列出该设备的全部工作区,活动项打勾(spec §7.1:
+/// 设备切换在顶栏、工作区切换在抽屉)。
+class _WorkspaceSwitchSheet extends StatelessWidget {
+  final List<dynamic> workspaces;
+  final String? activeKey;
+  final void Function(Map<String, dynamic> workspace) onPick;
+
+  const _WorkspaceSwitchSheet({
+    required this.workspaces,
+    required this.activeKey,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    final items = [
+      for (final w in workspaces)
+        if (w is Map) w.cast<String, dynamic>(),
+    ];
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('切换工作区',
+                  style: TextStyle(
+                      fontSize: EmberType.section,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textSolid)),
+            ),
+          ),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: items.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(height: 1, indent: 16),
+              itemBuilder: (context, index) {
+                final w = items[index];
+                final isActive = workspaceKeyOf(w) == activeKey;
+                return ListTile(
+                  leading: Icon(
+                    isActive
+                        ? Icons.folder
+                        : Icons.folder_open,
+                    color: isActive ? colors.primary : colors.textFaint,
+                  ),
+                  title: Text(workspaceTitle(w),
+                      style: TextStyle(
+                          color: colors.textSolid,
+                          fontWeight: isActive
+                              ? FontWeight.w700
+                              : FontWeight.w400)),
+                  subtitle: w['workspacePath'] is String &&
+                          (w['workspacePath'] as String).isNotEmpty
+                      ? Text(w['workspacePath'],
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontFamily: EmberFonts.term,
+                              color: colors.textFaint))
+                      : null,
+                  trailing: isActive
+                      ? Icon(Icons.check_circle,
+                          size: 18, color: colors.primary)
+                      : null,
+                  onTap: () => onPick(w),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: EmberSpacing.gapS),
+        ],
       ),
     );
   }
