@@ -311,46 +311,46 @@ class _SessionDrawerState extends State<SessionDrawer> {
     });
   }
 
-  /// zcode-task 任务列表(活跃 + 归档):活跃集用于把 V4 索引漏出的
-  /// 归档条目从今天/更早剔除;归档集填「归档」组。失败静默(索引仍在)。
+  /// zcode-task `listTasks`:条目自带 archived 布尔(宿主 schema 实证),
+  /// 一次拉取即得权威的活跃/归档分流——替代此前"索引猜 + listArchived
+  /// 补"的组合(存量种子混入活跃、归档不同步均源于此)。
   Future<void> _loadTasks() async {
-    Future<(bool, dynamic)> call(String method) => widget.bridge.channels
-        .call(Channels.zcodeTask, method, [widget.scope])
-        .then((r) => (true, r))
-        .catchError((Object _) => (false, const <dynamic>[]));
-    final (tasksOk, tasksData) = await call('listTasks');
-    final (_, archivedData) = await call('listArchivedTasks');
-    if (!mounted) return;
-    final archivedList = archivedData is List ? archivedData : const [];
-    final archived = <SessionEntry>[
-      for (final t in archivedList)
-        if (t is Map)
-          SessionEntry({
-            'sessionId': '${t['taskId']}',
-            'title': '${t['title'] ?? ''}',
-            'phase': '${t['displayStatus'] ?? t['status'] ?? ''}',
-            'lastActivityAt':
-                (t['updatedAt'] as num?)?.toInt() ??
-                    (t['createdAt'] as num?)?.toInt() ??
-                    0,
-            'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
-            'hasBackgroundWork': t['hasBackgroundWork'] == true,
-            'archived': 1,
-          }),
-    ];
-    log('[v4] 任务列表:归档 ${archived.length} 条');
-    debugPrint('[zflow] _loadTasks archived=${archived.length}');
-    setState(() {
-      _archived = archived;
-      _archivedIds = {for (final e in archived) e.sessionId};
-      if (tasksOk && tasksData is List) {
-        _activeTaskIds = {
-          for (final t in tasksData)
-            if (t is Map && t['taskId'] != null) '${t['taskId']}',
-        };
+    try {
+      final res = await widget.bridge.channels
+          .call(Channels.zcodeTask, 'listTasks', [widget.scope]);
+      if (!mounted) return;
+      final list = res is List ? res : const [];
+      final active = <SessionEntry>[];
+      final archived = <SessionEntry>[];
+      for (final t in list) {
+        if (t is! Map) continue;
+        final e = SessionEntry({
+          'sessionId': '${t['taskId']}',
+          'title': '${t['title'] ?? ''}',
+          'phase': '${t['displayStatus'] ?? ''}',
+          'lastActivityAt':
+              (t['updatedAt'] as num?)?.toInt() ??
+                  (t['createdAt'] as num?)?.toInt() ??
+                  0,
+          'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
+          'hasBackgroundWork': t['hasBackgroundWork'] == true,
+          if (t['archived'] == true) 'archived': 1,
+        });
+        (e.isArchived ? archived : active).add(e);
       }
-      _tasksLoaded = true;
-    });
+      debugPrint('[zflow] _loadTasks total=${list.length} '
+          'active=${active.length} archived=${archived.length}');
+      // 归档归属以任务列表为准;活跃显示沿用索引条目(带 preview/实时
+      // phase),_activeTaskIds 供 vanished 三重确认。
+      setState(() {
+        _activeTaskIds = {for (final e in active) e.sessionId};
+        _archived = archived;
+        _archivedIds = {for (final e in archived) e.sessionId};
+        _tasksLoaded = true;
+      });
+    } catch (e) {
+      log('[诊断] listTasks 拉取失败: $e');
+    }
   }
 
   /// 订阅 ready 后 write(2c):把当前列表落盘,供下次打开时秒开。

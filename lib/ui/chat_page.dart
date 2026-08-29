@@ -683,20 +683,23 @@ class _ChatPageState extends State<ChatPage> {
 
   /// Builds the createSession `config` payload from the draft selection.
   Map<String, dynamic>? _buildDraftConfig() {
-    if (_draftConfig.isEmpty) return null;
+    // 未显式改过的项回填 prepareWorkspace 的当前值(用户在 pill/模式按钮
+    // 看到的就是这些值,期望按它建会话;缺省时宿主会用默认档,表现为
+    // "思考等级没按选好的来")。
+    String? pick(String key, String optionId) =>
+        _draftConfig[key] ?? '${_prep?.option(optionId)?.currentValue ?? ''}';
+    final modelValue = _draftConfig['model'] ??
+        '${_prep?.option('model')?.currentValue ?? ''}';
     final config = <String, dynamic>{};
-    final modelValue = _draftConfig['model'];
-    if (modelValue != null && modelValue.isNotEmpty) {
+    if (modelValue.isNotEmpty) {
       final (provider, model) = providerModelOf(_prep, modelValue);
       config['provider'] = provider;
       config['model'] = model;
     }
-    if (_draftConfig['thought'] != null) {
-      config['thought'] = _draftConfig['thought'];
-    }
-    if (_draftConfig['mode'] != null) {
-      config['mode'] = _draftConfig['mode'];
-    }
+    final thought = pick('thought', 'thought_level');
+    if (thought != null && thought.isNotEmpty) config['thought'] = thought;
+    final mode = pick('mode', 'mode');
+    if (mode != null && mode.isNotEmpty) config['mode'] = mode;
     return config.isEmpty ? null : config;
   }
 
