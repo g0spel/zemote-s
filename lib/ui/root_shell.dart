@@ -325,16 +325,16 @@ class _RootShellState extends State<RootShell> {
     _drawerOpen = false;
   }
 
-  /// 抽屉选择:null = 新会话(draft);否则内嵌打开该会话。标题不随
-  /// 选择注入,由 ChatPage 的 sessions-index 推送回写(桌面端生成)。
-  /// 切到不同会话才递增重建代数并清标题(重选当前会话只关抽屉:实例
-  /// 存活且其标题推送只在变化时发一次,清了头部就永远停在「新会话」)。
+  /// 抽屉选择:null = 新会话(draft);否则内嵌打开该会话。标题不随选择
+  /// 注入,由 ChatPage 的 sessions-index 推送回写(桌面端生成)。任何显式
+  /// 选择都递增重建代数(A11):重选当前会话即「重开」——全新实例,其
+  /// 会话订阅失败态得以自愈;仅 draft(null)→null 幂等不重建。
   void _pickFromDrawer(String? sessionId) {
-    final changed = sessionId != _activeSessionId.value;
-    if (changed) _sessionEpoch++;
+    final alreadyDraft = sessionId == null && _activeSessionId.value == null;
+    if (!alreadyDraft) _sessionEpoch++;
     setState(() {
       _activeSessionId.value = sessionId;
-      if (changed) _activeSessionTitle.value = null;
+      _activeSessionTitle.value = null;
     });
     _closeDrawer();
   }
@@ -357,10 +357,13 @@ class _RootShellState extends State<RootShell> {
   }
 
   /// 内嵌 ChatPage 回写:会话 id(draft 首条消息 createSession 后采纳)
-  /// + 桌面端生成的标题。静默写 ValueNotifier——不 setState,当前内嵌
-  /// 实例继续存活;标题经 ValueListenableBuilder 上头部,id 在下一次
-  /// 壳重建(切 Tab/抽屉)时作为已选会话生效。
-  void _onSessionInfo(String sessionId, String title) {
+  /// + 桌面端生成的标题 + 推送发出时实例的重建代数。静默写
+  /// ValueNotifier——不 setState,当前内嵌实例继续存活;标题经
+  /// ValueListenableBuilder 上头部,id 在下一次壳重建(切 Tab/抽屉)时
+  /// 作为已选会话生效。代数已递增 = 旧实例的迟到推送,直接丢弃(A10:
+  /// 消毫秒级覆盖竞态——旧实例的采纳/标题不得覆盖用户已做的新选择)。
+  void _onSessionInfo(String sessionId, String title, int epoch) {
+    if (epoch != _sessionEpoch) return;
     if (sessionId.isNotEmpty && sessionId != _activeSessionId.value) {
       _activeSessionId.value = sessionId;
     }
@@ -603,6 +606,7 @@ class _RootShellState extends State<RootShell> {
               sessionId: sessionId,
               title: _activeSessionTitle.value ?? '新会话',
               onSessionInfo: _onSessionInfo,
+              sessionEpoch: _sessionEpoch,
               headerLeading: _DeviceCapsule(
                 account: session.current,
                 onTap: _showDeviceSwitcher,

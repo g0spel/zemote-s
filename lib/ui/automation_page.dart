@@ -538,7 +538,9 @@ class _AutomationPageState extends State<AutomationPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             children: [
-              if (_automations.isEmpty && _queue.isEmpty)
+              // A5:空态与统计卡只看 automations 本身 —— 闲时队列非空但无
+              // 自动化时不再渲染 0/0/0 统计卡,空态提示与队列同屏不冲突。
+              if (_automations.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 40),
                   child: Center(

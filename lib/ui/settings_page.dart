@@ -458,27 +458,33 @@ class _DiagnosticsPage extends StatelessWidget {
   const _DiagnosticsPage({this.client, this.bridge});
 
   /// 诊断计数前置(spec §7.4):有 [诊断] 条目时在行尾显示计数徽。
+  /// AnimatedBuilder 挂 LogStore:进页后新增条目实时刷新(A8)。
   Widget _diagCountTrailing(BuildContext context) {
-    final count = LogStore.instance.entries
-        .where((e) => e.isDiagnostic)
-        .length;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      if (count > 0) ...[
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: EmberColors.of(context).warn.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text('$count',
-              style: TextStyle(
-                  fontSize: EmberType.caption,
-                  color: EmberColors.of(context).warn)),
-        ),
-        const SizedBox(width: EmberSpacing.gapS),
-      ],
-      _chevron,
-    ]);
+    return AnimatedBuilder(
+      animation: LogStore.instance,
+      builder: (context, _) {
+        final count = LogStore.instance.entries
+            .where((e) => e.isDiagnostic)
+            .length;
+        return Row(mainAxisSize: MainAxisSize.min, children: [
+          if (count > 0) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: EmberColors.of(context).warn.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text('$count',
+                  style: TextStyle(
+                      fontSize: EmberType.caption,
+                      color: EmberColors.of(context).warn)),
+            ),
+            const SizedBox(width: EmberSpacing.gapS),
+          ],
+          _chevron,
+        ]);
+      },
+    );
   }
 
   @override

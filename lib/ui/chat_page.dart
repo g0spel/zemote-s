@@ -54,9 +54,16 @@ class ChatPage extends StatefulWidget {
   /// Embedded title push: fires whenever the desktop's title for this
   /// session changes (created/renamed — esp. right after a draft's
   /// createSession) and once when a draft adopts its session id, so the
-  /// host can write back the now-current session. Never fires in
-  /// Scaffold mode.
-  final void Function(String sessionId, String title)? onSessionInfo;
+  /// host can write back the now-current session. The host's rebuild epoch
+  /// is echoed back as [onSessionInfo]'s third argument so a late push from
+  /// a superseded instance can be recognized and ignored (A10). Never
+  /// fires in Scaffold mode.
+  final void Function(String sessionId, String title, int epoch)?
+      onSessionInfo;
+
+  /// Host shell 的会话重建代数(原样经 [onSessionInfo] 带回)。宿主以
+  /// ValueKey(epoch) 重建本页,实例存活期间该值不变。
+  final int sessionEpoch;
 
   /// Embedded header pieces owned by the host shell: the device capsule
   /// (built by the shell, opens the device switcher) and the drawer open
@@ -75,6 +82,7 @@ class ChatPage extends StatefulWidget {
     required this.title,
     this.embedded = false,
     this.onSessionInfo,
+    this.sessionEpoch = 0,
     this.headerLeading,
     this.headerTitle,
     this.onOpenDrawer,
@@ -253,8 +261,9 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 推送 (sessionId, title) 给宿主:会话 id 只在变化时推一次(draft 采纳
-  /// 后宿主立即回写,标题未生成时带空串);标题有值且变化时再推。
+  /// 推送 (sessionId, title, epoch) 给宿主:会话 id 只在变化时推一次
+  /// (draft 采纳后宿主立即回写,标题未生成时带空串);标题有值且变化时
+  /// 再推。epoch 为宿主重建代数,宿主据此丢弃旧实例的迟到推送。
   void _pushSessionInfo() {
     final sub = _titleSub;
     final sessionId = _sessionId;
@@ -265,7 +274,7 @@ class _ChatPageState extends State<ChatPage> {
     if (!idNew && !titleNew) return;
     _pushedSessionId = sessionId;
     if (titleNew) _pushedTitle = title;
-    widget.onSessionInfo!(sessionId, title);
+    widget.onSessionInfo!(sessionId, title, widget.sessionEpoch);
   }
 
   /// Draft 首条消息创建会话后的采纳。索引推送(含桌面端生成的标题)可能
@@ -1346,7 +1355,7 @@ class _ModeBanner extends StatelessWidget {
     final color = yolo ? colors.err : colors.warn;
     final text = yolo
         ? 'YOLO 模式 · 全部操作免确认，请确认在工作机上'
-        : '计划模式中 · 只读研究，方案产出后需你确认';
+        : '计划模式中 · 只读研究，方案产出后需你确认才会动手';
     return Container(
       width: double.infinity,
       color: color.withValues(alpha: 0.15),

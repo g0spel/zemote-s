@@ -101,6 +101,13 @@ Future<AccountStore> _pumpShell(
 String? _chatSessionId(WidgetTester tester) =>
     tester.widget<ChatPage>(find.byType(ChatPage)).sessionId;
 
+/// 以当前内嵌实例自身的代数回写(模拟该实例的 onSessionInfo 推送;
+/// A10 起回调签名携带 epoch)。
+void _pushSessionInfo(WidgetTester tester, String sessionId, String title) {
+  final chat = tester.widget<ChatPage>(find.byType(ChatPage));
+  chat.onSessionInfo!(sessionId, title, chat.sessionEpoch);
+}
+
 Future<void> _openDrawer(WidgetTester tester) async {
   await tester.tap(find.byIcon(Icons.menu));
   // 有界 pump:200ms 开启动画走完即可;内嵌会话的加载转圈会让
@@ -381,9 +388,7 @@ void main() {
 
     // 模拟 draft 首条消息 createSession 成功后 ChatPage 的回写
     // (onSessionInfo 自 Task 4 起携带 sessionId)。
-    tester
-        .widget<ChatPage>(find.byType(ChatPage))
-        .onSessionInfo!('s-new', '桌面起的标题');
+    _pushSessionInfo(tester, 's-new', '桌面起的标题');
     await tester.pump();
 
     // 标题即时上头部(ValueListenable);回写不重建内嵌实例(draft 态保留)。
@@ -412,9 +417,7 @@ void main() {
   testWidgets('回写后抽屉点「新会话」仍显式开新 draft,点回写会话无缝恢复',
       (tester) async {
     await pumpWithBridge(tester);
-    tester
-        .widget<ChatPage>(find.byType(ChatPage))
-        .onSessionInfo!('s-new', '桌面起的标题');
+    _pushSessionInfo(tester, 's-new', '桌面起的标题');
     await tester.pump();
 
     // 显式「＋新会话」:用户意图优先,回到全新 draft(不动回写前的实例态)。
@@ -434,43 +437,68 @@ void main() {
     await _flushPendingTimers(tester);
   });
 
-  testWidgets('抽屉重选当前会话标题保持且实例存活;选另一会话清空后由新实例回写',
+  testWidgets('抽屉重选当前会话即重开(实例重建,订阅失败自愈);draft→draft 幂等',
       (tester) async {
     await pumpWithBridge(tester);
 
-    // 回写会话选择 + 桌面端生成的标题(存活实例的标题推送只在变化时发)。
-    tester
-        .widget<ChatPage>(find.byType(ChatPage))
-        .onSessionInfo!('s1', '桌面起的标题');
+    // 回写会话选择 + 桌面端生成的标题。
+    _pushSessionInfo(tester, 's1', '桌面起的标题');
     await tester.pump();
     expect(find.text('桌面起的标题'), findsOneWidget);
 
-    // 重选当前高亮会话:只关抽屉——实例存活(element 不换)、标题保持,
-    // 不回落「新会话」占位(清了就没有人再推了)。
+    // 重选当前高亮会话:「重选」即重开(A11)——epoch 递增,内嵌实例
+    // 全新(element 不换不了),标题清空回落占位,等新实例的索引推送回写
+    // (订阅失败态由此自愈:新实例重新发起订阅)。
     final elementBefore = tester.element(find.byType(ChatPage));
     await _openDrawer(tester);
     tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
     await _pumpDrawerClose(tester);
     expect(find.byType(SessionDrawer), findsNothing);
-    expect(tester.element(find.byType(ChatPage)), same(elementBefore));
-    expect(find.text('桌面起的标题'), findsOneWidget);
-    expect(find.text('新会话'), findsNothing);
-
-    // 选不同会话:重建代数递增 → 全新实例,旧标题清空回落「新会话」占位。
-    await _openDrawer(tester);
-    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s2');
-    await _pumpDrawerClose(tester);
-    expect(_chatSessionId(tester), 's2');
+    expect(_chatSessionId(tester), 's1'); // 仍是该会话,但实例已重建
     expect(tester.element(find.byType(ChatPage)), isNot(same(elementBefore)));
     expect(find.text('桌面起的标题'), findsNothing);
     expect(find.text('新会话'), findsOneWidget);
 
     // 新实例经 onSessionInfo 回写后标题恢复。
-    tester
-        .widget<ChatPage>(find.byType(ChatPage))
-        .onSessionInfo!('s2', '另一会话的标题');
+    _pushSessionInfo(tester, 's1', '重开后的标题');
     await tester.pump();
-    expect(find.text('另一会话的标题'), findsOneWidget);
+    expect(find.text('重开后的标题'), findsOneWidget);
+
+    // draft →「新会话」:已是 draft,幂等不重建(element 不换)。
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick(null);
+    await _pumpDrawerClose(tester);
+    final draftElement = tester.element(find.byType(ChatPage));
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick(null);
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), isNull);
+    expect(tester.element(find.byType(ChatPage)), same(draftElement));
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('旧实例的迟到 onSessionInfo 推送被 epoch 代际戳丢弃(A10)',
+      (tester) async {
+    await pumpWithBridge(tester);
+
+    // 捕获 draft 实例(epoch N)的推送回调,随后切走:epoch 递增。
+    final staleChat = tester.widget<ChatPage>(find.byType(ChatPage));
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s2');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's2');
+
+    // 旧 draft 实例的迟到推送(createSession 完成于切换之后):不得把
+    // 用户的 s2 选择覆盖回 s-late。
+    staleChat.onSessionInfo!('s-late', '迟到标题', staleChat.sessionEpoch);
+    await tester.pump();
+    expect(_chatSessionId(tester), 's2'); // 未被覆盖
+    expect(find.text('迟到标题'), findsNothing);
+
+    // 现役实例的推送仍正常生效。
+    _pushSessionInfo(tester, 's2', '现役标题');
+    await tester.pump();
+    expect(find.text('现役标题'), findsOneWidget);
     await _flushPendingTimers(tester);
   });
 
