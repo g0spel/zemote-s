@@ -180,6 +180,15 @@ class _SessionDrawerState extends State<SessionDrawer> {
   List<SessionEntry> _archived = const [];
   Set<String> _archivedIds = const {};
 
+  /// 任务列表(活跃+归档)已到达:到达前活跃列表不做归档剔除,避免
+  /// 索引先到/任务后到的中间帧闪一下"空/骤减"。
+  bool _tasksLoaded = false;
+
+  /// zcode-task listTasks 的活跃任务 id 集(权威):vanished 判定以
+  /// 「索引消失 && 不在权威活跃集」为准——新建会话尚未进索引快照、或
+  /// 短暂被归档种子挤出的场景不再误判"已归档,回到新会话"。
+  Set<String> _activeTaskIds = const {};
+
   /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照;write 完成才标记)。
   SessionsIndexSubscription? _cacheSyncedSub;
 
@@ -274,7 +283,15 @@ class _SessionDrawerState extends State<SessionDrawer> {
     final present = _entries.any((e) => e.sessionId == id);
     if (present) {
       _currentSeen = true;
-    } else if (_currentSeen) {
+      return;
+    }
+    if (_currentSeen) {
+      // 索引里不在了,但任务列表(权威)说它还活着(活跃或在归档区):
+      // 不是删除,绝不能复位——此前这里误判,把刚建的新会话判成
+      // "已归档"复位,回复随之丢失(真机复现)。
+      final knownAlive =
+          _activeTaskIds.contains(id) || _archivedIds.contains(id);
+      if (knownAlive) return;
       _currentSeen = false;
       widget.onCurrentSessionVanished();
     }
@@ -301,7 +318,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
         .call(Channels.zcodeTask, method, [widget.scope])
         .then((r) => (true, r))
         .catchError((Object _) => (false, const <dynamic>[]));
-    final _ = await call('listTasks');
+    final (tasksOk, tasksData) = await call('listTasks');
     final (_, archivedData) = await call('listArchivedTasks');
     if (!mounted) return;
     final archivedList = archivedData is List ? archivedData : const [];
@@ -326,6 +343,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
     setState(() {
       _archived = archived;
       _archivedIds = {for (final e in archived) e.sessionId};
+      if (tasksOk && tasksData is List) {
+        _activeTaskIds = {
+          for (final t in tasksData)
+            if (t is Map && t['taskId'] != null) '${t['taskId']}',
+        };
+      }
+      _tasksLoaded = true;
     });
   }
 
@@ -339,10 +363,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
         .whenComplete(() => _cacheSyncedSub = sub));
   }
 
-  List<SessionEntry> get _filtered =>
-      filterSessions(_entries, _query)
-          .where((e) => !_archivedIds.contains(e.sessionId))
-          .toList();
+  List<SessionEntry> get _filtered => filterSessions(_entries, _query)
+      .where((e) => !_tasksLoaded || !_archivedIds.contains(e.sessionId))
+      .toList();
 
   // ------------------------------------------------------- manage actions
 

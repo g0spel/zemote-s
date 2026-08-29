@@ -538,10 +538,10 @@ class _ChatPageState extends State<ChatPage> {
         log('[chat] createSession ok in ${sw.elapsedMilliseconds}ms');
         _adoptCreatedSession(sessionId);
         setState(() => _progress = null);
-        // 2) subscribe BEFORE sending: the fresh session's relay fanout
-        // only reaches this client once the index/conversation subscription
-        // is live, so any earlier send risks the reply never arriving.
-        await _subscribe();
+        // 2) 订阅与发送并行:sendText 是 RPC 直达宿主,不依赖本端订阅;
+        // 回复经订阅推送,await 订阅只会白等(真机实测首条慢 ~10s)。
+        // 订阅在后台补上,回复从建立完成那一刻开始照收。
+        unawaited(_subscribe());
       }
       final text = '${echo['text']}';
       if (text.startsWith('/goal ')) {
