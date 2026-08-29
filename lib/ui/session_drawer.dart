@@ -12,8 +12,9 @@ import 'task_detail_page.dart';
 import 'theme.dart';
 
 /// Conversation list primitives shared by the session drawer (Ember shell):
-/// the single source is the live `sessions-index` subscription, no
-/// channel-list merge (2b 裁决:双源合并逻辑不迁移).
+/// task entries are the primary data (zcode-task listTasks), enriched by
+/// the live `sessions-index` subscription — the pre-redesign task_home
+/// skeleton, restored (UI 大改期间曾倒置为索引单一源,已回退).
 
 /// Newest first, by last activity.
 List<SessionEntry> sortSessions(List<SessionEntry> entries) {
@@ -194,6 +195,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 「索引消失 && 不在权威活跃集」为准——新建会话尚未进索引快照、或
   /// 短暂被归档种子挤出的场景不再误判"已归档,回到新会话"。
   Set<String> _activeTaskIds = const {};
+
+  /// listTasks 的活跃任务条目(旧版 task_home 同源的主体数据):索引
+  /// 还没收录的活跃任务照常显示(容差);索引到达的条目由其字段富化
+  /// (preview/实时 phase)。UI 大改期间曾被倒置为"索引为主体、任务只做
+  /// 过滤",r25–r33 的混入/归档空/滞后隐藏均源于此——已回退旧骨架,
+  /// 仅叠加孤儿过滤与归档剔除两个已验证修复。
+  List<SessionEntry> _activeTasks = const [];
 
   /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照;write 完成才标记)。
   SessionsIndexSubscription? _cacheSyncedSub;
@@ -388,9 +396,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
     });
   }
 
-  /// zcode-task `listTasks`:条目自带 archived 布尔(宿主 schema 实证),
-  /// 一次拉取即得权威的活跃/归档分流——替代此前"索引猜 + listArchived
-  /// 补"的组合(存量种子混入活跃、归档不同步均源于此)。
+  /// zcode-task `listTasks` + `listArchivedTasks`(旧版 task_home 同源):
+  /// 任务条目是列表主体(_activeTasks),归档组由 archList 条目直构,
+  /// 双 id 集供孤儿过滤与 vanished 三重确认。任一失败保留旧数据不 wipe。
   Future<void> _loadTasks() async {
     if (_loadingTasks) {
       _reloadQueued = true;
@@ -453,9 +461,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
               'orphan=${idxIds.where((id) => !actIds.contains(id) && !archIds.contains(id)).length}');
         }
       }
-      // 归档归属以任务列表为准;活跃显示沿用索引条目(带 preview/实时
-      // phase),_activeTaskIds 供 vanished 三重确认。
+      // 主体数据落位:任务条目(_activeTasks,索引未收录也照常显示)+
+      // 归档组(archList 直构)+ 双 id 集(孤儿过滤与 vanished 三重确认)。
       setState(() {
+        _activeTasks = active;
         _activeTaskIds = {for (final e in active) e.sessionId};
         _archived = archived;
         _archivedIds = {for (final e in archived) e.sessionId};
@@ -485,13 +494,32 @@ class _SessionDrawerState extends State<SessionDrawer> {
         .whenComplete(() => _cacheSyncedSub = sub));
   }
 
-  /// 活跃组 = 索引 ∩ 活跃任务。sessions-index 会广播已归档与已删任务
-  /// 的会话且条目无归档标志;归属只能以任务列表为准——不在活跃任务里
-  /// 的索引条目(归档走 _archived 组,已删任务的孤儿直接隐藏,与桌面
-  /// 端任务列表行为一致)。任务未载回前(!ready 阶段)仍按索引展示。
-  List<SessionEntry> get _filtered => filterSessions(_entries, _query)
-      .where((e) => !_tasksLoaded || _activeTaskIds.contains(e.sessionId))
-      .toList();
+  /// 活跃显示列表 = 任务条目为主体 + 索引富化(旧版 task_home 骨架):
+  ///
+  /// - 索引收录且属于活跃任务的条目 → 用索引字段(preview/实时
+  ///   phase/桌面端生成的标题),每次索引推送即时刷新;
+  /// - 索引还没收录的活跃任务(桌面端新建,快照秒级滞后)→ 任务条目
+  ///   照常显示(旧版容差,曾在此版倒置中丢失);
+  /// - 已归档(_archivedIds)与已删任务的孤儿(不在任何任务列表)的
+  ///   索引条目不引入——sessions-index 会广播它们且条目无归档标志,
+  ///   归档组走 _archived,孤儿隐藏(与桌面端任务列表一致)。
+  /// 任务未载回前(!_tasksLoaded)按索引原样展示,载回即收敛。
+  List<SessionEntry> get _displayActive {
+    if (!_tasksLoaded) return _entries;
+    final byId = <String, SessionEntry>{};
+    for (final e in _entries) {
+      if (_archivedIds.contains(e.sessionId)) continue;
+      if (!_activeTaskIds.contains(e.sessionId)) continue;
+      byId[e.sessionId] = e;
+    }
+    for (final t in _activeTasks) {
+      byId.putIfAbsent(t.sessionId, () => t);
+    }
+    return sortSessions(byId.values.toList());
+  }
+
+  List<SessionEntry> get _filtered =>
+      filterSessions(_displayActive, _query);
 
   // ------------------------------------------------------- manage actions
 
@@ -501,9 +529,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
         if (pinned != null) 'pinned': pinned,
       };
 
-  /// 批量置顶/归档/删除。列表以 sessions-index 推送为准(裁决):不做
-  /// 乐观移除,操作完成后等索引刷新。[pinned] 仅 setTaskPinned 需要
-  /// (抽屉无取消置顶语义,恒 true;对照 integration_test 服务端契约)。
+  /// 批量置顶/归档/删除。列表归属以任务列表为准、字段以索引推送富化:
+  /// 不做乐观移除,操作完成后重拉任务集并等索引刷新。[pinned] 仅
+  /// setTaskPinned 需要(抽屉无取消置顶语义,恒 true;对照
+  /// integration_test 服务端契约)。
   Future<void> _applySelection(
     String method,
     String errorPrefix, {

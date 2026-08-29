@@ -178,11 +178,11 @@ void main() {
     // channel 初始化 + 泵到稳定:循环应答已知方法(握手→任务列表→
     // initialize→订阅),直至不再产生新请求;最后应答订阅 ack。
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
-    // listTasks 按种子会话生成活跃任务(归属=任务列表;索引条目需在
-    // 活跃任务里才进活跃组,已删任务的孤儿被隐藏)。
+    // listTasks 按种子会话生成活跃任务(任务为主体:索引未收录的
+    // 活跃任务也显示;不在任务列表的索引条目=孤儿被隐藏)。
     final activeTasks = [
       for (final e in entries)
-        if (e is Map && (e['archived'] as num? ?? 0) == 0)
+        if ((e['archived'] as num? ?? 0) == 0)
           {'taskId': e['sessionId'], 'title': e['title']},
     ];
     final results = <String, Object?>{
@@ -643,6 +643,7 @@ void main() {
     ]);
     await tester.pump(); // listArchivedTasks 请求此拍才发出(串行 await)
     respondLast(channels, sent, 'listArchivedTasks', result: const []);
+    await tester.pump(); // 归属落位(setState)后再渲染一帧
     await tester.pump();
     expect(find.text('修复登录'), findsNothing);
     expect(vanishedCalls.length, 1);
