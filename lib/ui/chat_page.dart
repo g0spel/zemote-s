@@ -231,15 +231,35 @@ class _ChatPageState extends State<ChatPage> {
     _stickToBottom = _scrollController.position.pixels <= 40;
   }
 
+  /// prepareWorkspace 最近一次成功拉取时刻(5s 新鲜度窗:窗内重复打开
+  /// 模型面板不再发请求,连开即开)。
+  DateTime? _prepFetchedAt;
+
   /// 只刷 prepareWorkspace(模型/思考档/模式可选项的实时来源)。
+  /// 必须 refresh: true——传输层有会话级缓存,不带参数会直接返回缓存
+  /// (模型增删后旧缓存照旧,面板"刷新"实际没上线)。
   Future<void> _refreshPrep() async {
     try {
-      final prep = await _transport.prepareWorkspace();
+      final prep = await _transport.prepareWorkspace(refresh: true);
       if (mounted) {
-        setState(() => _prep = prep);
+        setState(() {
+          _prep = prep;
+          _prepFetchedAt = DateTime.now();
+        });
         _validateDraftAgainstPrep();
       }
     } catch (_) {}
+  }
+
+  /// 面板打开时的取数:新鲜(≤5s)直接用,否则强制拉一次;失败退缓存。
+  Future<WorkspacePrep?> _fetchPrepForSheet() async {
+    final fetchedAt = _prepFetchedAt;
+    if (fetchedAt != null &&
+        DateTime.now().difference(fetchedAt) < const Duration(seconds: 5)) {
+      return _prep;
+    }
+    await _refreshPrep();
+    return _prep;
   }
 
   Future<void> _loadPrep() async {
@@ -861,14 +881,9 @@ class _ChatPageState extends State<ChatPage> {
 
   // ------------------------------------------------------------ sheets
 
-  Future<void> _showModelSheet() async {
-    // 面板数据源是 prepareWorkspace(进页时缓存)——模型增删后缓存会
-    // 保留已删模型。打开前强制刷新一次(3s 上限,失败/超时退缓存;
-    // 健康链路上 ~200ms 无感)。
-    await _refreshPrep()
-        .timeout(const Duration(seconds: 3), onTimeout: () {})
-        .catchError((_) {});
-    if (!mounted) return;
+  void _showModelSheet() {
+    // 立即用缓存打开(零等待);面板自持刷新——新鲜(≤5s)不发请求,
+    // 否则强制拉取,数据到达后原地更新列表(删除的模型随之消失)。
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -878,6 +893,7 @@ class _ChatPageState extends State<ChatPage> {
         prep: _prep,
         sessionId: _sessionId,
         draftConfig: _draftConfig,
+        onRefreshPrep: _fetchPrepForSheet,
         onDraftChange: (key, value) {
           setState(() => _draftConfig[key] = value);
           _saveDraftPrefs();
@@ -4938,6 +4954,9 @@ class _ModelModeSheet extends StatefulWidget {
   final WorkspacePrep? prep;
   final String? sessionId;
   final Map<String, String>? draftConfig;
+
+  /// 打开时的实时取数(新鲜度窗内不发请求);null 退回 [prep] 缓存。
+  final Future<WorkspacePrep?> Function()? onRefreshPrep;
   final void Function(String key, String value)? onDraftChange;
 
   const _ModelModeSheet({
@@ -4946,6 +4965,7 @@ class _ModelModeSheet extends StatefulWidget {
     this.prep,
     this.sessionId,
     this.draftConfig,
+    this.onRefreshPrep,
     this.onDraftChange,
   });
 
@@ -4955,9 +4975,31 @@ class _ModelModeSheet extends StatefulWidget {
 
 /// Stateful 的原因:面板内点选必须立即反映(此前 StatelessWidget 只在
 /// 重开面板时才看到新值);草稿选择镜像在 [_draft],会话态变化经
-/// AnimatedBuilder 跟进。
+/// AnimatedBuilder 跟进。prep 取数也在此层:打开先用缓存,后台拉到
+/// 新数据后原地替换(模型列表增删即时可见)。
 class _ModelModeSheetState extends State<_ModelModeSheet> {
   late final Map<String, String> _draft = Map.of(widget.draftConfig ?? const {});
+
+  WorkspacePrep? _freshPrep;
+  bool _refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final refresh = widget.onRefreshPrep;
+    if (refresh != null) {
+      setState(() => _refreshing = true);
+      refresh().then((fresh) {
+        if (!mounted) return;
+        setState(() {
+          _refreshing = false;
+          if (fresh != null) _freshPrep = fresh;
+        });
+      });
+    }
+  }
+
+  WorkspacePrep? get _prep => _freshPrep ?? widget.prep;
 
   bool get _isDraft => widget.sessionId == null || widget.sessionId!.isEmpty;
 
@@ -4970,7 +5012,7 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
   /// length, search enhancement) surfaced read-only from prepareWorkspace.
   List<ConfigOption> get _otherOptions {
     const known = {'model', 'mode', 'thought_level'};
-    final options = widget.prep?.configOptions;
+    final options = _prep?.configOptions;
     if (options == null) return const [];
     return options.where((o) => !known.contains(o.id)).toList();
   }
@@ -4990,8 +5032,8 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
   Widget _content(BuildContext context) {
     final sid = widget.sessionId ?? '';
     final config = widget.state?.config ?? const {};
-    final modelOption = widget.prep?.option('model');
-    final thoughtOption = widget.prep?.option('thought_level');
+    final modelOption = _prep?.option('model');
+    final thoughtOption = _prep?.option('thought_level');
     final followup = '${config['followupMode'] ?? 'queue'}';
 
     // Current selection: prefer the LIVE session config (updates after a
@@ -5019,6 +5061,14 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
             Text(_isDraft ? '新会话 · 模型' : '模型',
                 style: const TextStyle(
                     fontSize: 16, fontWeight: FontWeight.w600)),
+            if (_refreshing)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: SizedBox(
+                  height: 2,
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              ),
             const SizedBox(height: 16),
             const SizedBox(height: 12),
             if (thoughtOption != null &&
@@ -5040,7 +5090,7 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
                         } else {
                           final modelValue = currentModelValue;
                           final (provider, model) = modelValue.isNotEmpty
-                              ? providerModelOf(widget.prep, modelValue)
+                              ? providerModelOf(_prep, modelValue)
                               : (
                                   '${config['provider'] ?? ''}',
                                   '${config['model'] ?? ''}'
@@ -5118,13 +5168,13 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
                       _setDraft('model', v.value);
                     } else {
                       final (provider, model) =
-                          providerModelOf(widget.prep, v.value);
+                          providerModelOf(_prep, v.value);
                       // thought must be valid for the target model:
                       // keep current if supported, else fall back to the
                       // thought option's currentValue (Turbo: enabled/off)
                       final currentThought =
                           widget.state?.currentThought ?? '';
-                      final thoughtOpt = widget.prep?.option('thought_level');
+                      final thoughtOpt = _prep?.option('thought_level');
                       final thought = currentThought.isNotEmpty &&
                               (thoughtOpt?.options.any(
                                       (o) => o.value == currentThought) ??
