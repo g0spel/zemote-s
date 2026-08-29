@@ -85,7 +85,14 @@ class ConversationTransport {
   Future<ConversationSubscription> subscribe(String sessionId) async {
     await handshake();
     final subscription = ConversationSubscription._(this, sessionId);
-    await subscription._start();
+    try {
+      await subscription._start();
+    } catch (_) {
+      // 订阅失败也必须回收(周期 watchdog/recovered 监听),否则残留
+      // 僵尸订阅;错误本身原样上抛给调用方。
+      await subscription.dispose();
+      rethrow;
+    }
     _subscriptions[sessionId] = subscription;
     return subscription;
   }
@@ -720,7 +727,14 @@ class ConversationTransport {
   Future<SessionsIndexSubscription> subscribeSessionsIndex() async {
     await handshake();
     final subscription = SessionsIndexSubscription._(this);
-    await subscription._start();
+    try {
+      await subscription._start();
+    } catch (_) {
+      // 与 subscribe() 同一约定:失败回收订阅(周期清理定时器与
+      // recovered 监听不得残留),错误原样上抛。
+      await subscription.dispose();
+      rethrow;
+    }
     return subscription;
   }
 

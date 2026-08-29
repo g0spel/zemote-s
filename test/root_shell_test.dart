@@ -503,6 +503,58 @@ void main() {
     await _flushPendingTimers(tester);
   });
 
+  testWidgets('当前会话从索引消失:宿主复位回 draft 并提示(A4 宿主侧)', (tester) async {
+    await pumpWithBridge(tester);
+
+    await _openDrawer(tester);
+    tester.widget<SessionDrawer>(find.byType(SessionDrawer)).onPick('s1');
+    await _pumpDrawerClose(tester);
+    expect(_chatSessionId(tester), 's1');
+    final elementBefore = tester.element(find.byType(ChatPage));
+
+    // 抽屉打开(生产中删除/归档就发生在抽屉内)时,diff 出当前会话已从
+    // 索引消失 → 回调宿主。
+    await _openDrawer(tester);
+    tester
+        .widget<SessionDrawer>(find.byType(SessionDrawer))
+        .onCurrentSessionVanished();
+    await tester.pump();
+
+    // 回 draft:内嵌实例重建(epoch bump),抽屉保持打开,并提示用户。
+    expect(_chatSessionId(tester), isNull);
+    expect(find.byType(SessionDrawer), findsOneWidget);
+    expect(tester.element(find.byType(ChatPage)), isNot(same(elementBefore)));
+    expect(find.text('当前会话已删除或归档，已回到新会话'), findsOneWidget);
+    await _flushPendingTimers(tester);
+  });
+
+  testWidgets('工作区切换 sheet:当前工作区行显示实时会话数,他区不显示(A15)',
+      (tester) async {
+    await _pumpShell(
+      tester,
+      urls: [_deviceUrl],
+      clientFactory: (params, onLog) => _FakeClient(
+        params,
+        workspaces: [
+          {'workspacePath': '/ws-a', 'label': 'WS-A'},
+          {'workspacePath': '/ws-b', 'label': 'WS-B'},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle(); // 链完成,打开第一个工作区
+
+    await _openDrawer(tester);
+    await tester.tap(find.text('WS-A')); // 工作区条 → sheet
+    await tester.pumpAndSettle();
+
+    // 当前工作区行:实时会话数徽(测试环境订阅无快照 → 0);他区无徽标。
+    expect(find.text('0 会话'), findsOneWidget);
+    expect(find.text('WS-A'), findsWidgets); // 抽屉条 + sheet 活动行
+    expect(find.text('WS-B'), findsOneWidget);
+
+    await _flushPendingTimers(tester);
+  });
+
   testWidgets('选中会话并开抽屉后设备被外部断开:回断开态且抽屉不残留',
       (tester) async {
     final store = await _pumpShell(

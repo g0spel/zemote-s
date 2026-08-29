@@ -343,6 +343,19 @@ class _RootShellState extends State<RootShell> {
 
   void _closeDrawer() => setState(() => _drawerOpen = false);
 
+  /// A4:当前内嵌会话被删除/归档(从 sessions-index 消失,抽屉 diff 回调)
+  /// → 复位到 draft 并提示。抽屉保持打开(用户多半正在管理操作中)。
+  void _onCurrentSessionVanished() {
+    if (!mounted || _activeSessionId.value == null) return;
+    _sessionEpoch++;
+    setState(() {
+      _activeSessionId.value = null;
+      _activeSessionTitle.value = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前会话已删除或归档，已回到新会话')));
+  }
+
   /// 内嵌 ChatPage 回写:会话 id(draft 首条消息 createSession 后采纳)
   /// + 桌面端生成的标题。静默写 ValueNotifier——不 setState,当前内嵌
   /// 实例继续存活;标题经 ValueListenableBuilder 上头部,id 在下一次
@@ -366,13 +379,15 @@ class _RootShellState extends State<RootShell> {
 
   /// 抽屉工作区条 ⌄:底部升起工作区切换层(spec §7.1;设备切换在顶栏,
   /// 工作区切换在抽屉,与 bootstrap→workspaces→sessions 层级一致)。
-  void _showWorkspaceSwitcher() {
+  /// [sessionCount] 为当前工作区实时会话数(抽屉的 sessions-index 订阅)。
+  void _showWorkspaceSwitcher(int sessionCount) {
     final active = _activeWorkspace;
     showModalBottomSheet(
       context: context,
       builder: (context) => _WorkspaceSwitchSheet(
         workspaces: _workspaces,
         activeKey: active == null ? null : workspaceKeyOf(active),
+        activeSessionCount: sessionCount,
         onPick: (w) {
           Navigator.pop(context);
           _switchWorkspace(w);
@@ -571,6 +586,7 @@ class _RootShellState extends State<RootShell> {
               currentSessionId: sessionId,
               onPick: _pickFromDrawer,
               onSwitchWorkspace: _showWorkspaceSwitcher,
+              onCurrentSessionVanished: _onCurrentSessionVanished,
               onManageDevices: () {
                 _closeDrawer();
                 _openDeviceManagement();
@@ -939,7 +955,8 @@ class _DrawerHostState extends State<_DrawerHost>
       return Stack(
         children: [
           Positioned.fill(child: widget.child),
-          // 左缘把手:仅在关闭时挂载,避免与抽屉内手势竞争。
+          // 左缘把手:仅在关闭时挂载,避免与抽屉内手势竞争。translucent:
+          // 把手只认拖拽,点按穿透到下层内容(A13)。
           if (!widget.open)
             Positioned(
               left: 0,
@@ -947,7 +964,7 @@ class _DrawerHostState extends State<_DrawerHost>
               bottom: 0,
               width: 24,
               child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
+                behavior: HitTestBehavior.translucent,
                 onHorizontalDragStart: (_) => _edgeDx = 0,
                 onHorizontalDragUpdate: (d) => _edgeDx += d.delta.dx,
                 onHorizontalDragEnd: (details) {
@@ -994,16 +1011,21 @@ class _DrawerHostState extends State<_DrawerHost>
   }
 }
 
-/// 抽屉工作区切换层:列出该设备的全部工作区,活动项打勾(spec §7.1:
-/// 设备切换在顶栏、工作区切换在抽屉)。
+/// 抽屉工作区切换层:列出该设备的全部工作区,活动项打勾并显示实时会话
+/// 数(spec §7.1:设备切换在顶栏、工作区切换在抽屉)。会话数仅当前工作区
+/// 可得(在途 sessions-index 订阅),其他工作区不显示徽标也不加占位。
 class _WorkspaceSwitchSheet extends StatelessWidget {
   final List<dynamic> workspaces;
   final String? activeKey;
+
+  /// 当前工作区实时会话数(宿主自抽屉订阅取)。
+  final int activeSessionCount;
   final void Function(Map<String, dynamic> workspace) onPick;
 
   const _WorkspaceSwitchSheet({
     required this.workspaces,
     required this.activeKey,
+    required this.activeSessionCount,
     required this.onPick,
   });
 
@@ -1045,12 +1067,33 @@ class _WorkspaceSwitchSheet extends StatelessWidget {
                         : Icons.folder_open,
                     color: isActive ? colors.primary : colors.textFaint,
                   ),
-                  title: Text(workspaceTitle(w),
-                      style: TextStyle(
-                          color: colors.textSolid,
-                          fontWeight: isActive
-                              ? FontWeight.w700
-                              : FontWeight.w400)),
+                  title: Row(
+                    children: [
+                      Flexible(
+                        child: Text(workspaceTitle(w),
+                            style: TextStyle(
+                                color: colors.textSolid,
+                                fontWeight: isActive
+                                    ? FontWeight.w700
+                                    : FontWeight.w400)),
+                      ),
+                      if (isActive) ...[
+                        const SizedBox(width: EmberSpacing.gapS),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: colors.primary.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text('$activeSessionCount 会话',
+                              style: TextStyle(
+                                  fontSize: EmberType.caption,
+                                  color: colors.primary)),
+                        ),
+                      ],
+                    ],
+                  ),
                   subtitle: w['workspacePath'] is String &&
                           (w['workspacePath'] as String).isNotEmpty
                       ? Text(w['workspacePath'],

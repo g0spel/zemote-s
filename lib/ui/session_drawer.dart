@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
@@ -102,8 +101,14 @@ class SessionDrawer extends StatefulWidget {
   /// 选择会话(null = 新会话)。宿主负责关闭抽屉。
   final ValueChanged<String?> onPick;
 
-  /// 工作区条 ⌄:宿主弹出工作区切换 sheet。
-  final VoidCallback onSwitchWorkspace;
+  /// 工作区条 ⌄:宿主弹出工作区切换 sheet;携带当前工作区的实时会话数
+  /// (取自本抽屉的在途 sessions-index 订阅;其他工作区无数据来源,由
+  /// 宿主决定不显示)。
+  final ValueChanged<int> onSwitchWorkspace;
+
+  /// 当前内嵌会话从 sessions-index 消失(本抽屉曾见到、后被删除/归档)
+  /// 时回调宿主复位到 draft。订阅失败或列表未就绪不触发。
+  final VoidCallback onCurrentSessionVanished;
 
   /// 底部设备状态条点击:进设备管理页。
   final VoidCallback onManageDevices;
@@ -120,6 +125,7 @@ class SessionDrawer extends StatefulWidget {
     required this.currentSessionId,
     required this.onPick,
     required this.onSwitchWorkspace,
+    required this.onCurrentSessionVanished,
     required this.onManageDevices,
     required this.deviceCount,
     required this.deviceOnline,
@@ -150,8 +156,12 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 离线种子(2c):打开抽屉先展示上次缓存,实时数据到达即覆盖。
   List<SessionEntry> _seed = const [];
 
-  /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照)。
+  /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照;write 完成才标记)。
   SessionsIndexSubscription? _cacheSyncedSub;
+
+  /// 当前内嵌会话是否已在实时列表中出现过(A4 消失检测的基准:draft 采纳
+  /// 等场景下列表尚未收录该会话不算消失)。
+  bool _currentSeen = false;
 
   @override
   void initState() {
@@ -159,16 +169,6 @@ class _SessionDrawerState extends State<SessionDrawer> {
     _transport = widget.bridge.conversation(widget.scope, onLog: log);
     _subscribe();
     _seedFromCache();
-  }
-
-  @override
-  void didUpdateWidget(SessionDrawer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // 宿主切换了工作区/桥:旧订阅属于旧 scope,重挂。
-    if (oldWidget.bridge != widget.bridge ||
-        !mapEquals(oldWidget.scope, widget.scope)) {
-      _resubscribe();
-    }
   }
 
   @override
@@ -181,20 +181,6 @@ class _SessionDrawerState extends State<SessionDrawer> {
     }
     _searchController.dispose();
     super.dispose();
-  }
-
-  Future<void> _resubscribe() async {
-    // 旧 scope 的种子随订阅一起作废:先清空,再按新 scope 重新播种 ——
-    // 否则上一个工作区的缓存会话会在新工作区名下展示且可点(终审修复)。
-    setState(() => _seed = const []);
-    unawaited(_seedFromCache());
-    final sub = _sub;
-    _sub = null;
-    if (sub != null) {
-      sub.state.removeListener(_onState);
-      await sub.dispose();
-    }
-    await _subscribe();
   }
 
   Future<void> _subscribe() async {
@@ -222,7 +208,23 @@ class _SessionDrawerState extends State<SessionDrawer> {
       _entries = sortSessions(sub.state.list);
       _ready = sub.state.ready;
     });
+    _notifyCurrentVanished();
     _syncCache(sub);
+  }
+
+  /// A4:当前内嵌会话曾出现在实时列表、后又消失(删除/归档)→ 回调宿主
+  /// 复位到 draft。仅以「见过再消失」为准,避免 draft 采纳瞬间列表尚未
+  /// 收录新会话被误判;订阅失败/未就绪不触发。
+  void _notifyCurrentVanished() {
+    final id = widget.currentSessionId;
+    if (id == null || id.isEmpty || !_ready) return;
+    final present = _entries.any((e) => e.sessionId == id);
+    if (present) {
+      _currentSeen = true;
+    } else if (_currentSeen) {
+      _currentSeen = false;
+      widget.onCurrentSessionVanished();
+    }
   }
 
   // ------------------------------------------------------- offline cache
@@ -239,12 +241,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
   }
 
   /// 订阅 ready 后 write(2c):把当前列表落盘,供下次打开时秒开。
-  /// 空列表不写(失败/清空不覆盖好数据,与旧实现一致)。
+  /// 空列表不写(失败/清空不覆盖好数据,与旧实现一致)。write 完成后才
+  /// 标记 _cacheSyncedSub:失败或被中断时标记未锁定,下个快照可重试。
   void _syncCache(SessionsIndexSubscription sub) {
     if (!sub.state.ready || _cacheSyncedSub == sub) return;
-    _cacheSyncedSub = sub;
     unawaited(_cache
-        .write(widget.scope, [for (final e in _entries) e.raw]));
+        .write(widget.scope, [for (final e in _entries) e.raw])
+        .whenComplete(() => _cacheSyncedSub = sub));
   }
 
   List<SessionEntry> get _filtered => filterSessions(_entries, _query);
@@ -352,7 +355,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
   Widget _buildWorkspaceBar(BuildContext context) {
     final colors = EmberColors.of(context);
     return InkWell(
-      onTap: widget.onSwitchWorkspace,
+      onTap: () => widget.onSwitchWorkspace(_entries.length),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(EmberSpacing.page,
             EmberSpacing.gapM, EmberSpacing.page, EmberSpacing.gapM),
@@ -503,7 +506,18 @@ class _SessionDrawerState extends State<SessionDrawer> {
 
   Widget _buildListArea(BuildContext context) {
     final colors = EmberColors.of(context);
+    // A7:种子与实时列表共用同一搜索过滤语义。
+    final seed = filterSessions(_seed, _query);
     if (_error != null) {
+      // A3:订阅失败但离线种子可用 —— 展示种子列表兜底,横幅标记非最新。
+      if (seed.isNotEmpty) {
+        return Column(
+          children: [
+            _offlineBanner(context),
+            Expanded(child: _buildSessionList(seed)),
+          ],
+        );
+      }
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -522,15 +536,17 @@ class _SessionDrawerState extends State<SessionDrawer> {
       );
     }
     // 实时列表未到达时先展示离线种子(2c):仅当实时列表为空,数据到达即覆盖。
-    if (!_ready && _seed.isNotEmpty) return _buildSessionList(_seed);
     if (!_ready) {
-      return const Center(
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
+      if (_seed.isEmpty) {
+        return const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      }
+      return seed.isEmpty ? _noMatch(context) : _buildSessionList(seed);
     }
     if (_entries.isEmpty) {
       return Center(
@@ -540,14 +556,49 @@ class _SessionDrawerState extends State<SessionDrawer> {
       );
     }
     final filtered = _filtered;
-    if (filtered.isEmpty) {
-      return Center(
-        child: Text('没有匹配「$_query」的会话',
-            style: TextStyle(
-                fontSize: EmberType.caption, color: colors.textFaint)),
-      );
-    }
+    if (filtered.isEmpty) return _noMatch(context);
     return _buildSessionList(filtered);
+  }
+
+  Widget _noMatch(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return Center(
+      child: Text('没有匹配「$_query」的会话',
+          style:
+              TextStyle(fontSize: EmberType.caption, color: colors.textFaint)),
+    );
+  }
+
+  /// A3 离线横幅:订阅失败仍展示缓存种子时,顶部 muted 提示数据可能过期,
+  /// 并保留重试入口。
+  Widget _offlineBanner(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return Container(
+      width: double.infinity,
+      color: colors.raise.withValues(alpha: 0.6),
+      padding: const EdgeInsets.symmetric(
+          horizontal: EmberSpacing.page, vertical: 4),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_outlined, size: 14, color: colors.textMuted),
+          const SizedBox(width: EmberSpacing.gapS),
+          Expanded(
+            child: Text('离线数据 · 可能不是最新',
+                style: TextStyle(
+                    fontSize: EmberType.secondary, color: colors.textMuted)),
+          ),
+          TextButton(
+            onPressed: _subscribe,
+            style: TextButton.styleFrom(
+              foregroundColor: colors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+            ),
+            child: const Text('重试'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 分组会话列表(spec §7.1:今天/更早),实时列表与离线种子共用。

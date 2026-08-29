@@ -42,6 +42,8 @@ void main() {
   late BridgeSession bridge;
   final sent = <Uint8List>[];
   final picked = <String?>[];
+  final switchCounts = <int>[];
+  final vanishedCalls = <int>[];
 
   final now = DateTime.now();
   final entries = [
@@ -61,6 +63,21 @@ void main() {
     },
   ];
 
+  SessionDrawer buildDrawer(String workspacePath, {String? currentSessionId}) =>
+      SessionDrawer(
+        bridge: bridge,
+        scope: {'workspacePath': workspacePath},
+        workspaceName: 'WS',
+        workspacePath: workspacePath,
+        currentSessionId: currentSessionId,
+        onPick: picked.add,
+        onSwitchWorkspace: switchCounts.add,
+        onCurrentSessionVanished: () => vanishedCalls.add(1),
+        onManageDevices: () {},
+        deviceCount: 1,
+        deviceOnline: true,
+      );
+
   Future<void> pumpDrawer(WidgetTester tester) async {
     channels = ChannelClient(sendBody: (body) => sent.add(body));
     bridge = BridgeSession.detached(
@@ -68,20 +85,7 @@ void main() {
       channels: channels,
     );
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SessionDrawer(
-          bridge: bridge,
-          scope: const {'workspacePath': '/ws-t'},
-          workspaceName: 'WS',
-          workspacePath: '/ws-t',
-          currentSessionId: null,
-          onPick: picked.add,
-          onSwitchWorkspace: () {},
-          onManageDevices: () {},
-          deviceCount: 1,
-          deviceOnline: true,
-        ),
-      ),
+      home: Scaffold(body: buildDrawer('/ws-t')),
     ));
 
     // channel 初始化 + 按确定性顺序应答,随后推索引快照让列表渲染。
@@ -214,20 +218,7 @@ void main() {
       channels: channels,
     );
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SessionDrawer(
-          bridge: bridge,
-          scope: const {'workspacePath': '/ws-t'},
-          workspaceName: 'WS',
-          workspacePath: '/ws-t',
-          currentSessionId: null,
-          onPick: picked.add,
-          onSwitchWorkspace: () {},
-          onManageDevices: () {},
-          deviceCount: 1,
-          deviceOnline: true,
-        ),
-      ),
+      home: Scaffold(body: buildDrawer('/ws-t')),
     ));
 
     // channel 初始化应答,但不推实时快照 —— 抽屉停留在「实时未到达」态。
@@ -279,10 +270,13 @@ void main() {
     await tester.pump(const Duration(seconds: 40));
   });
 
-  /// 以 [workspacePath] 为 scope 挂抽屉并完成 channel 握手,但不推实时
-  /// 快照 —— 抽屉停留在「实时未到达」态(种子可见)。
-  Future<void> pumpDrawerWithoutSnapshot(
-      WidgetTester tester, String workspacePath) async {
+  /// 以 [workspacePath] 为 scope 挂抽屉并完成 channel 握手(id0-id2),
+  /// 不应答订阅请求 —— 由调用方决定订阅成功(ack)还是失败(error)。
+  Future<void> pumpDrawerHandshake(
+    WidgetTester tester,
+    String workspacePath, {
+    String? currentSessionId,
+  }) async {
     channels = ChannelClient(sendBody: (body) => sent.add(body));
     bridge = BridgeSession.detached(
       {'workspaceKey': workspacePath},
@@ -290,18 +284,7 @@ void main() {
     );
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: SessionDrawer(
-          bridge: bridge,
-          scope: {'workspacePath': workspacePath},
-          workspaceName: workspacePath,
-          workspacePath: workspacePath,
-          currentSessionId: null,
-          onPick: picked.add,
-          onSwitchWorkspace: () {},
-          onManageDevices: () {},
-          deviceCount: 1,
-          deviceOnline: true,
-        ),
+        body: buildDrawer(workspacePath, currentSessionId: currentSessionId),
       ),
     ));
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
@@ -310,52 +293,200 @@ void main() {
     await tester.pump();
     _respond(channels, 1, <String, dynamic>{});
     await tester.pump();
+  }
+
+  /// 握手 + 订阅 ack,但不推实时快照 —— 抽屉停留在「实时未到达」态(种子可见)。
+  Future<void> pumpDrawerWithoutSnapshot(
+    WidgetTester tester,
+    String workspacePath, {
+    String? currentSessionId,
+  }) async {
+    await pumpDrawerHandshake(
+      tester,
+      workspacePath,
+      currentSessionId: currentSessionId,
+    );
     _respond(channels, 3, {
       'ack': {'subscriptionId': 'sub-test'},
     });
     await tester.pump();
   }
 
-  testWidgets('切工作区后旧 scope 的离线种子消失', (tester) async {
-    // 缓存只喂 /ws-t;/ws-2 无缓存。
+  /// 推一张 sessions-index 快照(逐帧走真实 wire 路径)。
+  void pushSnapshot(List<Object?> sessions) {
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+      'kind': 'complete',
+      'topic': 'sessions-index//ws-t',
+      'subscriptionId': 'sub-test',
+      'frame': {
+        'subscriptionId': 'sub-test',
+        'toSeq': 1,
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {'sessions': sessions},
+        },
+      },
+    }));
+  }
+
+  testWidgets('订阅失败但有离线种子:展示种子列表 + 离线横幅 + 重试', (tester) async {
     SharedPreferences.setMockInitialValues({
       const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
           jsonEncode([
             {
               'sessionId': 'cached-1',
               'title': '离线缓存会话',
-              'phase': 'running',
+              'phase': '',
               'lastActivityAt': now.millisecondsSinceEpoch,
               'createdAt': 1,
             },
           ]),
     });
-
-    await pumpDrawerWithoutSnapshot(tester, '/ws-t');
-    expect(find.text('离线缓存会话'), findsOneWidget); // 旧 scope 种子在展示
-
-    // 宿主切工作区:同一 bridge,scope 换成 /ws-2(didUpdateWidget → 重挂订阅)。
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SessionDrawer(
-          bridge: bridge,
-          scope: const {'workspacePath': '/ws-2'},
-          workspaceName: 'WS-2',
-          workspacePath: '/ws-2',
-          currentSessionId: null,
-          onPick: picked.add,
-          onSwitchWorkspace: () {},
-          onManageDevices: () {},
-          deviceCount: 1,
-          deviceOnline: true,
-        ),
-      ),
-    ));
+    await pumpDrawerHandshake(tester, '/ws-t');
+    // 订阅请求(id3)应答错误 → _error 态。
+    channels.handleMessage(_inFrame(
+        [ChannelClient.resPromiseError, 3], {'message': 'sub exploded'}));
+    await tester.pump();
+    // 订阅失败路径含订阅对象回收(异步多跳),两次 pump 保证错误上屏。
     await tester.pump();
 
-    // 旧 scope 的种子不得在新工作区名下展示(数据正确性:可点即错会话)。
+    // 不再只显示错误页:种子列表兜底,横幅标记离线数据,重试保留。
+    expect(find.text('离线缓存会话'), findsOneWidget);
+    expect(find.text('离线数据 · 可能不是最新'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.textContaining('会话列表加载失败'), findsNothing);
+
+    // 重试成功 → 错误横幅消失,回到「实时未到达」种子态。
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    _respond(channels, 5, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+    expect(find.text('离线数据 · 可能不是最新'), findsNothing);
+    expect(find.text('离线缓存会话'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('订阅失败且无种子:仍显示错误页', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await pumpDrawerHandshake(tester, '/ws-t');
+    channels.handleMessage(_inFrame(
+        [ChannelClient.resPromiseError, 3], {'message': 'sub exploded'}));
+    await tester.pump();
+
+    expect(find.textContaining('会话列表加载失败'), findsOneWidget);
+    expect(find.text('离线数据 · 可能不是最新'), findsNothing);
+    expect(find.text('重试'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('种子列表同样过搜索过滤', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
+          jsonEncode([
+            {
+              'sessionId': 'cached-1',
+              'title': '离线缓存会话',
+              'phase': '',
+              'lastActivityAt': now.millisecondsSinceEpoch,
+              'createdAt': 1,
+            },
+          ]),
+    });
+    await pumpDrawerWithoutSnapshot(tester, '/ws-t');
+    expect(find.text('离线缓存会话'), findsOneWidget);
+
+    // 命中查询:种子保留。
+    await tester.enterText(find.byType(TextField), '离线');
+    await tester.pump();
+    expect(find.text('离线缓存会话'), findsOneWidget);
+
+    // 未命中:种子被过滤,显示无匹配占位。
+    await tester.enterText(find.byType(TextField), '重构');
+    await tester.pump();
     expect(find.text('离线缓存会话'), findsNothing);
-    expect(find.text('WS-2'), findsOneWidget);
+    expect(find.text('没有匹配「重构」的会话'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('当前会话从索引消失时回调宿主复位;未收录过的会话消失不误报', (tester) async {
+    switchCounts.clear();
+    vanishedCalls.clear();
+    await pumpDrawerHandshake(tester, '/ws-t', currentSessionId: 's1');
+    _respond(channels, 3, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+
+    // 订阅刚就绪、当前会话已在列表(见过)。
+    pushSnapshot(entries);
+    await tester.pump();
+    expect(vanishedCalls, isEmpty);
+    expect(switchCounts, isEmpty);
+
+    // s1 被删除/归档:增量推送把它从索引移除 → 回调宿主一次。
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+      'kind': 'complete',
+      'topic': 'sessions-index//ws-t',
+      'subscriptionId': 'sub-test',
+      'frame': {
+        'subscriptionId': 'sub-test',
+        'toSeq': 2,
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {'op': 'session.removed', 'sessionId': 's1'},
+          ],
+        },
+      },
+    }));
+    await tester.pump();
+    expect(find.text('修复登录'), findsNothing);
+    expect(vanishedCalls.length, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('draft 采纳后列表尚未收录该会话:不算消失,不误报复位', (tester) async {
+    switchCounts.clear();
+    vanishedCalls.clear();
+    await pumpDrawerHandshake(tester, '/ws-t', currentSessionId: 's-new');
+    _respond(channels, 3, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+
+    // 快照里没有 s-new(draft 采纳瞬间的常态):从未「见过」不触发回调。
+    pushSnapshot([entries[1]]);
+    await tester.pump();
+    expect(find.text('重构 API'), findsOneWidget);
+    expect(vanishedCalls, isEmpty);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('工作区条回调携带当前工作区实时会话数', (tester) async {
+    switchCounts.clear();
+    await pumpDrawer(tester);
+    expect(switchCounts, isEmpty);
+
+    await tester.tap(find.text('WS')); // 工作区条
+    await tester.pump();
+    expect(switchCounts, [2]); // 实时列表两条
 
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();
