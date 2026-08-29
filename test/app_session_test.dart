@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zemote/protocol/connection_params.dart';
 import 'package:zemote/protocol/zemote_client.dart';
 import 'package:zemote/state/account_store.dart';
 import 'package:zemote/state/app_session.dart';
@@ -58,7 +57,7 @@ void main() {
     final gateA = Completer<void>();
     final clients = <String, _FakeClient>{};
     final session = AppSession(
-      clientFactory: (params, onLog) => clients[params.deviceSid!] =
+      clientFactory: (params, onLog) => clients[params.deviceSid] =
           _FakeClient(params, gate: params.deviceSid == 'a' ? gateA : null),
     );
     final a = _account('a');
