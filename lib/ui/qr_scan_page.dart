@@ -154,7 +154,7 @@ String? decodeQrFromImageBytes(Uint8List bytes) {
   try {
     final result = QRCodeReader().decode(bitmap);
     final text = result.text;
-    if (ZemoteConnectionParams.parse(text) != null) return text;
+    if (ZflowConnectionParams.parse(text) != null) return text;
     return text.isEmpty ? null : text;
   } catch (_) {
     return null;

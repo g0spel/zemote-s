@@ -111,7 +111,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       builder: (context) => AlertDialog(
         title: const Text('需要安装权限'),
         content: const Text('Android 8+ 要求先允许「安装未知应用」。'
-            '将打开系统设置，请为 Zemote 开启后回来继续。'),
+            '将打开系统设置，请为 Zflow 开启后回来继续。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -223,13 +223,13 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                   ),
                 )
               else
-                const Text('有新的 Zemote 版本可用。',
+                const Text('有新的 Zflow 版本可用。',
                     style: TextStyle(fontSize: 13)),
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text('$_error',
-                    style: const TextStyle(
-                        fontSize: 12, color: ZColors.danger)),
+                    style: TextStyle(
+                        fontSize: 12, color: EmberColors.of(context).err)),
               ],
             ] else if (_phase == _Phase.downloading) ...[
               Text('正在下载 APK … ${(_progress * 100).toStringAsFixed(0)}%',

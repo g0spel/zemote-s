@@ -472,7 +472,7 @@ void main() {
   });
 
 
-  group('arrival stamps (_zemoteTs)', () {
+  group('arrival stamps (_zflowTs)', () {
     late ConversationState state;
 
     setUp(() {
@@ -491,7 +491,7 @@ void main() {
         'fromSeq': 1,
         'toSeq': 2,
       }, onGap: () => fail('no gap'));
-      final ts = state.rows.single['_zemoteTs'];
+      final ts = state.rows.single['_zflowTs'];
       expect(ts, isA<int>());
       expect(ts, greaterThan(0));
     });
@@ -508,7 +508,7 @@ void main() {
         'fromSeq': 1,
         'toSeq': 2,
       }, onGap: () => fail('no gap'));
-      final stamped = state.rows.single['_zemoteTs'];
+      final stamped = state.rows.single['_zflowTs'];
 
       // Server resyncs with a fresh snapshot containing the same row.
       state.applyFrame({
@@ -529,8 +529,8 @@ void main() {
       }, onGap: () => fail('no gap'));
 
       final byId = {for (final r in state.rows) r['rowId']: r};
-      expect(byId[7]!['_zemoteTs'], stamped); // carried over
-      expect(byId[1]!.containsKey('_zemoteTs'), isFalse); // history unstamped
+      expect(byId[7]!['_zflowTs'], stamped); // carried over
+      expect(byId[1]!.containsKey('_zflowTs'), isFalse); // history unstamped
     });
 
     test('resync snapshot keeps rows older than the tail window', () {
@@ -603,7 +603,7 @@ void main() {
         'toSeq': 6,
       }, onGap: () => fail('no gap'));
       expect(state.rows.single['text'], 'updated');
-      expect(state.rows.single.containsKey('_zemoteTs'), isFalse);
+      expect(state.rows.single.containsKey('_zflowTs'), isFalse);
     });
   });
 

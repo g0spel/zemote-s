@@ -13,7 +13,7 @@ void main() {
     final probeUrl = Platform.environment['ZEMOTE_PROBE_URL'] ??
         const String.fromEnvironment('ZEMOTE_PROBE_URL', defaultValue: '');
     final params =
-        probeUrl.isEmpty ? null : ZemoteConnectionParams.parse(probeUrl);
+        probeUrl.isEmpty ? null : ZflowConnectionParams.parse(probeUrl);
     if (params == null) {
       // ignore: avoid_print
       print('SKIP');
@@ -29,7 +29,7 @@ void main() {
       return m.length > 260 ? m.substring(0, 260) : m;
     }
 
-    final client = ZemoteClient(params);
+    final client = ZflowClient(params);
     await client.connect();
     await client.waitPaired(timeout: const Duration(seconds: 60));
     final bootstrap = await client.bootstrap();

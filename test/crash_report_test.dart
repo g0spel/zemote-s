@@ -6,7 +6,7 @@ import 'package:zflow/state/crash_report.dart';
 
 void main() {
   test('record → read round-trip, clear removes', () async {
-    final dir = await Directory.systemTemp.createTemp('zemote_crash');
+    final dir = await Directory.systemTemp.createTemp('zflow_crash');
     addTearDown(() => dir.delete(recursive: true));
     final store = CrashStore(File('${dir.path}/last_crash.json'));
 
@@ -27,7 +27,7 @@ void main() {
   });
 
   test('oversized error/stack are truncated, not dropped', () async {
-    final dir = await Directory.systemTemp.createTemp('zemote_crash');
+    final dir = await Directory.systemTemp.createTemp('zflow_crash');
     addTearDown(() => dir.delete(recursive: true));
     final store = CrashStore(File('${dir.path}/last_crash.json'));
 
@@ -42,7 +42,7 @@ void main() {
   });
 
   test('read tolerates a corrupted file', () async {
-    final dir = await Directory.systemTemp.createTemp('zemote_crash');
+    final dir = await Directory.systemTemp.createTemp('zflow_crash');
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/last_crash.json');
     file.writeAsStringSync('not json{');

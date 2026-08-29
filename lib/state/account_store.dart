@@ -22,7 +22,7 @@ class Account {
   });
 
   factory Account.fromUrl(String url) {
-    final params = ZemoteConnectionParams.parse(url);
+    final params = ZflowConnectionParams.parse(url);
     final label = params?.deviceName ??
         (params != null ? params.source.host : '未命名设备');
     return Account(
@@ -33,7 +33,7 @@ class Account {
     );
   }
 
-  ZemoteConnectionParams? get params => ZemoteConnectionParams.parse(url);
+  ZflowConnectionParams? get params => ZflowConnectionParams.parse(url);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -131,7 +131,7 @@ class AccountStore extends ChangeNotifier {
   /// backup / transfer. Note: URLs contain credentials — treat the export
   /// like a password file.
   String exportJson() => jsonEncode({
-        'app': 'zemote',
+        'app': 'zflow',
         'format': 'devices',
         'version': 1,
         'exportedAt': DateTime.now().toIso8601String(),
@@ -151,7 +151,7 @@ class AccountStore extends ChangeNotifier {
       if (item is! Map) continue;
       final account = Account.fromJson(item.cast<String, dynamic>());
       if (account.url.isEmpty) continue;
-      if (ZemoteConnectionParams.parse(account.url) == null) continue;
+      if (ZflowConnectionParams.parse(account.url) == null) continue;
       if (_accounts.any((a) => a.url == account.url)) continue;
       _accounts.add(account);
       added++;

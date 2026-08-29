@@ -14,8 +14,8 @@ String _reqId(String prefix) => generateRequestId(prefix);
 
 /// High-level facade replicating the web client's `otn()` flow:
 /// relay connect -> pair -> bootstrap -> workspace bridge -> channel RPC.
-class ZemoteClient {
-  final ZemoteConnectionParams params;
+class ZflowClient {
+  final ZflowConnectionParams params;
   final void Function(String line)? onLog;
 
   late final RelayClient relay;
@@ -31,7 +31,7 @@ class ZemoteClient {
   Stream<dynamic> get workspaceListUpdated =>
       _workspaceListUpdatedController.stream;
 
-  ZemoteClient(this.params, {this.onLog}) {
+  ZflowClient(this.params, {this.onLog}) {
     relay = RelayClient(params, onLog: onLog);
     _payloadSub = relay.payloads.listen(_dispatchPayload);
     relay.stateListenable.addListener(_onRelayState);
@@ -411,9 +411,9 @@ class ZemoteClient {
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       },
       'deviceInfo': {
-        'platform': zemotePlatformName(),
+        'platform': zflowPlatformName(),
         'version': params.appVersion ?? 'web',
-        'name': zemoteAppName,
+        'name': zflowAppName,
       },
     });
   }

@@ -52,7 +52,7 @@ String? relayCloseReason(int code) {
 /// Reimplementation of the relay terminal socket (`pen` class in the web
 /// client). JSON text frames over `wss://<host>/ws`.
 class RelayClient {
-  final ZemoteConnectionParams params;
+  final ZflowConnectionParams params;
   final void Function(String line)? onLog;
 
   static const heartbeatInterval = Duration(seconds: 10);
@@ -153,9 +153,9 @@ class RelayClient {
       'role': 'terminal',
       'device_sid': params.deviceSid,
       'meta': {
-        'platform': zemotePlatformName(),
+        'platform': zflowPlatformName(),
         'version': params.appVersion ?? 'web',
-        'name': zemoteAppName,
+        'name': zflowAppName,
       },
       'client_ts': DateTime.now().millisecondsSinceEpoch,
     });

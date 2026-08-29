@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 final notificationsService = Notifications();
 
 /// Thin wrapper over the Android notification/nav platform channels
-/// (`zemote/notifications`, `zemote/nav`). Non-Android platforms no-op.
+/// (`zflow/notifications`, `zflow/nav`). Non-Android platforms no-op.
 class Notifications {
   static const _channel = MethodChannel('zflow/notifications');
   static const _nav = MethodChannel('zflow/nav');

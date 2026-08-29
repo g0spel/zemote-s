@@ -18,7 +18,7 @@ void main() {
     final probeUrl = Platform.environment['ZEMOTE_PROBE_URL'] ??
         const String.fromEnvironment('ZEMOTE_PROBE_URL', defaultValue: '');
     final params =
-        probeUrl.isEmpty ? null : ZemoteConnectionParams.parse(probeUrl);
+        probeUrl.isEmpty ? null : ZflowConnectionParams.parse(probeUrl);
     if (params == null) {
       // ignore: avoid_print
       print('SKIP: ZEMOTE_PROBE_URL not set.');
@@ -34,7 +34,7 @@ void main() {
         ? 'ChannelRpcError message="${e.message}" data=${enc(e.data, 800)}'
         : '$e';
 
-    final client = ZemoteClient(params);
+    final client = ZflowClient(params);
     await client.connect();
     await client.waitPaired(timeout: const Duration(seconds: 60));
     // ignore: avoid_print

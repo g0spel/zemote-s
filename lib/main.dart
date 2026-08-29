@@ -47,17 +47,17 @@ Future<void> main() async {
       // Crash evidence is best-effort; never block startup.
     }
   }
-  runApp(const ZemoteApp());
+  runApp(const ZflowApp());
 }
 
-class ZemoteApp extends StatefulWidget {
-  const ZemoteApp({super.key});
+class ZflowApp extends StatefulWidget {
+  const ZflowApp({super.key});
 
   @override
-  State<ZemoteApp> createState() => _ZemoteAppState();
+  State<ZflowApp> createState() => _ZflowAppState();
 }
 
-class _ZemoteAppState extends State<ZemoteApp> {
+class _ZflowAppState extends State<ZflowApp> {
   final AccountStore _store = AccountStore();
   final AppSession _session = AppSession();
   final ThemeController _theme = ThemeController();

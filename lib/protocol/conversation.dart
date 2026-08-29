@@ -1440,7 +1440,7 @@ class ConversationState extends ChangeNotifier {
         final keepOld = <Map<String, dynamic>>[];
         for (final r in rows) {
           final id = r['rowId'];
-          if (id != null) prev['$id'] = r['_zemoteTs'];
+          if (id != null) prev['$id'] = r['_zflowTs'];
           final rowId = (id as num?)?.toInt();
           if (rowId != null &&
               windowHeadRowId != null &&
@@ -1452,7 +1452,7 @@ class ConversationState extends ChangeNotifier {
         for (final e in windowList) {
           final row = e.cast<String, dynamic>();
           final ts = prev['${row['rowId']}'];
-          if (ts != null) row['_zemoteTs'] = ts;
+          if (ts != null) row['_zflowTs'] = ts;
           list.add(row);
         }
         rows = [...keepOld, ...list];
@@ -1475,7 +1475,7 @@ class ConversationState extends ChangeNotifier {
         // View-layer arrival stamp (ms since epoch). The wire rows carry no
         // timestamps, so the UI can only show times for rows observed live;
         // history loaded from snapshots stays unstamped. Never sent back.
-        row['_zemoteTs'] = DateTime.now().millisecondsSinceEpoch;
+        row['_zflowTs'] = DateTime.now().millisecondsSinceEpoch;
         rows.add(row);
         totalCount += 1;
         firstRowId ??= (row['rowId'] as num?)?.toInt();
@@ -1490,8 +1490,8 @@ class ConversationState extends ChangeNotifier {
           // so streaming edits don't reset the bubble's displayed time.
           // (Guarded write: the wire map may be typed with non-nullable
           // values, which rejects a null assignment.)
-          final prev = rows[index]['_zemoteTs'];
-          if (prev != null) row['_zemoteTs'] = prev;
+          final prev = rows[index]['_zflowTs'];
+          if (prev != null) row['_zflowTs'] = prev;
           rows[index] = row;
         }
         break;

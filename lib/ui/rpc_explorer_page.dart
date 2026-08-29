@@ -8,7 +8,7 @@ import 'theme.dart';
 /// Raw relay payload explorer: send arbitrary `zcode_type` payloads and
 /// inspect the matching response (by requestId).
 class RpcExplorerPage extends StatefulWidget {
-  final ZemoteClient client;
+  final ZflowClient client;
 
   const RpcExplorerPage({super.key, required this.client});
 

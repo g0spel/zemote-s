@@ -2,13 +2,13 @@ import 'package:flutter/foundation.dart';
 
 /// Device identity sent during relay auth and mobile-view-state updates.
 ///
-/// The web client reports itself as a browser; Zemote identifies itself
+/// The web client reports itself as a browser; Zflow identifies itself
 /// honestly so the desktop can show the real connected client.
-const zemoteAppName = 'zemote';
+const zflowAppName = 'zemote';
 
 /// Real runtime platform (android / web / windows / ...), defaults to `web`
 /// when unknown so the handshake stays valid on exotic targets.
-String zemotePlatformName() {
+String zflowPlatformName() {
   if (kIsWeb) return 'web';
   switch (defaultTargetPlatform) {
     case TargetPlatform.android:

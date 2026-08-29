@@ -11,14 +11,14 @@ void main() {
         defaultValue: '');
     final params = probeUrl.isEmpty
         ? null
-        : ZemoteConnectionParams.parse(probeUrl);
+        : ZflowConnectionParams.parse(probeUrl);
     if (params == null) {
       // ignore: avoid_print
       print('SKIP: ZEMOTE_PROBE_URL not set.');
       return;
     }
 
-    final client = ZemoteClient(params);
+    final client = ZflowClient(params);
     await client.connect();
     await client.waitPaired(timeout: const Duration(seconds: 60));
     // ignore: avoid_print

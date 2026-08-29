@@ -34,15 +34,6 @@ class ThemeController extends ChangeNotifier {
   }
 }
 
-/// 旧色板残留:仅剩仍被页面引用的状态色;主题层已改走 [EmberColors]。
-class ZColors {
-  static const primary = Color(0xFF3B82F6);
-  static const success = Color(0xFF22C55E);
-  static const warning = Color(0xFFF59E0B);
-  static const danger = Color(0xFFEF4444);
-  static const running = Color(0xFF38BDF8);
-}
-
 /// 全局主题接线 Ember 色板(spec §2):ColorScheme 直构、组件主题取同一
 /// 色板,页面无需再做局部覆盖。slot → token 映射:
 ///   primary / onPrimary              = Ember primary / 白字

@@ -34,7 +34,7 @@ const _chevron = Icon(Icons.chevron_right, size: 20);
 /// 设置页(spec §7.3):外观 / 设备与连接 / 模型 / 关于 四组行组,
 /// 控制区规范:card 底 + hairline + 小圆角,分组小标题间距字。
 class SettingsPage extends StatelessWidget {
-  final ZemoteClient? client;
+  final ZflowClient? client;
   final BridgeSession? bridge;
   final AccountStore store;
   final AppSession session;
@@ -318,11 +318,11 @@ class SettingsPage extends StatelessWidget {
         title: const Text('Zflow'),
         content: Text(
             'Zflow (Flutter) v$appVersion · 协议复刻版\n\n'
-            'GitHub: https://github.com/g0spel/zemote-s'),
+            'GitHub: https://github.com/g0spel/zflow'),
         actions: [
           TextButton(
             onPressed: () => _copyUrl(
-                context, 'https://github.com/g0spel/zemote-s'),
+                context, 'https://github.com/g0spel/zflow'),
             child: const Text('复制链接'),
           ),
           FilledButton(
@@ -452,7 +452,7 @@ class _VerboseFramesTileState extends State<_VerboseFramesTile> {
 /// 诊断与日志二级页(spec §7.4 诊断中心):上次崩溃摘要前置,
 /// 二级列表:诊断日志 / 协议日志 / RPC 调试器 / 信道浏览器。
 class _DiagnosticsPage extends StatelessWidget {
-  final ZemoteClient? client;
+  final ZflowClient? client;
   final BridgeSession? bridge;
 
   const _DiagnosticsPage({this.client, this.bridge});

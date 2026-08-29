@@ -156,7 +156,7 @@ void main() {
       for (final themeData in [buildDarkTheme(), buildLightTheme()]) {
         await tester.pumpWidget(MaterialApp(
           theme: themeData,
-          home: const ZemoteMarkdown('hello'),
+          home: const ZflowMarkdown('hello'),
         ));
         final p = tester
             .widget<MarkdownBody>(find.byType(MarkdownBody))

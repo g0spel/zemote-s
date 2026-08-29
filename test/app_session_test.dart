@@ -12,9 +12,9 @@ String _url(String sid) =>
 Account _account(String sid) =>
     Account(id: 'acc-$sid', label: 'D$sid', url: _url(sid), addedAt: 0);
 
-/// Fake [ZemoteClient]: no sockets. [gate] (when uncompleted) holds
+/// Fake [ZflowClient]: no sockets. [gate] (when uncompleted) holds
 /// connect() open so tests can stage mid-flight disconnects.
-class _FakeClient extends ZemoteClient {
+class _FakeClient extends ZflowClient {
   final Completer<void> connectGate;
   bool disposed = false;
 
@@ -123,7 +123,7 @@ void main() {
   });
 }
 
-class _FailingClient extends ZemoteClient {
+class _FailingClient extends ZflowClient {
   _FailingClient(super.params);
 
   @override

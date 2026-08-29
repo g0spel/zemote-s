@@ -5,10 +5,10 @@ import '../protocol/zflow_client.dart';
 import '../state/log_store.dart';
 import 'account_store.dart';
 
-/// Creates the [ZemoteClient] for one device. Production builds the real
+/// Creates the [ZflowClient] for one device. Production builds the real
 /// relay client; tests inject fakes through [AppSession.clientFactory].
-typedef ZemoteClientFactory = ZemoteClient Function(
-    ZemoteConnectionParams params, void Function(String line)? onLog);
+typedef ZflowClientFactory = ZflowClient Function(
+    ZflowConnectionParams params, void Function(String line)? onLog);
 
 /// Translates low-level connect failures into an actionable Chinese
 /// explanation shown in the device list. Unknown reasons pass through.
@@ -50,12 +50,12 @@ String describeConnectFailure(Object e) {
 /// reconnect, and the last connect/switch request always wins activation —
 /// a slow in-flight connect never yanks the active device back.
 class AppSession extends ChangeNotifier {
-  final Map<String, ZemoteClient> _connections = {};
+  final Map<String, ZflowClient> _connections = {};
   final Set<String> _connecting = {};
 
   /// 在途 connect 的 future(按账号):同账号重复 connect 复用同一个,
   /// 防止二次建连覆盖 `_connections[id]` 后旧 socket 泄漏。
-  final Map<String, Future<ZemoteClient>> _inFlight = {};
+  final Map<String, Future<ZflowClient>> _inFlight = {};
 
   /// 连接意图(按账号):connect 发起时登记,disconnect/disconnectAll
   /// 撤销。connect 完成时意图已不在 → 该账号在连接期间被断开/移除,
@@ -71,12 +71,12 @@ class AppSession extends ChangeNotifier {
   /// the user switched to another device — the last request wins.
   int _activationEpoch = 0;
 
-  final ZemoteClientFactory? clientFactory;
+  final ZflowClientFactory? clientFactory;
 
   AppSession({@visibleForTesting this.clientFactory});
 
   /// Currently active device client (drives the shell).
-  ZemoteClient? get client => _connections[_activeId];
+  ZflowClient? get client => _connections[_activeId];
 
   /// Currently active device account.
   Account? get current => _activeAccount;
@@ -91,7 +91,7 @@ class AppSession extends ChangeNotifier {
   String? errorOf(String accountId) => _errors[accountId];
 
   /// Client for a specific (possibly non-active) device.
-  ZemoteClient? clientOf(String accountId) => _connections[accountId];
+  ZflowClient? clientOf(String accountId) => _connections[accountId];
 
   /// True while any device is connecting (disables global add actions).
   bool get connectingAny => _connecting.isNotEmpty;
@@ -104,7 +104,7 @@ class AppSession extends ChangeNotifier {
   /// account was disconnected (or removed) mid-flight, the connection is
   /// discarded — a device the user just cut off never comes back through
   /// a stale connect.
-  Future<ZemoteClient> connect(Account account) async {
+  Future<ZflowClient> connect(Account account) async {
     final existing = _connections[account.id];
     if (existing != null) {
       _activate(account);
@@ -123,7 +123,7 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  Future<ZemoteClient> _connect(Account account) async {
+  Future<ZflowClient> _connect(Account account) async {
     _connectIntents.add(account.id);
     _connecting.add(account.id);
     _errors.remove(account.id);
@@ -140,7 +140,7 @@ class AppSession extends ChangeNotifier {
     final factory = clientFactory;
     final c = factory != null
         ? factory(params, log)
-        : ZemoteClient(params, onLog: log);
+        : ZflowClient(params, onLog: log);
     try {
       await c.connect();
       await c.waitPaired(timeout: const Duration(seconds: 90));

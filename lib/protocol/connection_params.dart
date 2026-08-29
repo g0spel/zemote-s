@@ -4,7 +4,7 @@
 /// Mirrors `zC()` in the web client bundle. Only `https`/`wss` sources are
 /// accepted: a cleartext source would downgrade the relay link to `ws://`,
 /// exposing the whole session (including RPC traffic) to a network MITM.
-class ZemoteConnectionParams {
+class ZflowConnectionParams {
   final String deviceSid;
   final String passHash;
   final int timestamp;
@@ -14,7 +14,7 @@ class ZemoteConnectionParams {
   final String? theme;
   final Uri source;
 
-  const ZemoteConnectionParams({
+  const ZflowConnectionParams({
     required this.deviceSid,
     required this.passHash,
     required this.timestamp,
@@ -30,7 +30,7 @@ class ZemoteConnectionParams {
     return v == null || v.isEmpty ? null : v;
   }
 
-  static ZemoteConnectionParams? parse(String raw) {
+  static ZflowConnectionParams? parse(String raw) {
     Uri uri;
     try {
       uri = Uri.parse(raw.trim());
@@ -43,7 +43,7 @@ class ZemoteConnectionParams {
     final hash = _get(uri, 'hash');
     final t = int.tryParse(_get(uri, 't') ?? '');
     if (sid == null || hash == null || t == null) return null;
-    return ZemoteConnectionParams(
+    return ZflowConnectionParams(
       deviceSid: sid,
       passHash: hash,
       timestamp: t,

@@ -233,7 +233,7 @@ class _RootShellState extends State<RootShell> {
     _activeWorkspace = null;
   }
 
-  void _resubscribe(ZemoteClient client) {
+  void _resubscribe(ZflowClient client) {
     _updatedSub?.cancel();
     _updatedSub = client.workspaceListUpdated.listen((result) {
       if (!mounted || result is! Map) return;
@@ -1256,7 +1256,7 @@ class _DeviceSwitchSheet extends StatelessWidget {
 }
 
 class _ConnectionBanner extends StatelessWidget {
-  final ZemoteClient client;
+  final ZflowClient client;
 
   const _ConnectionBanner({required this.client});
 

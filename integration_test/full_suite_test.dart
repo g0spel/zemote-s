@@ -16,7 +16,7 @@ void main() {
         defaultValue: '');
     final params = probeUrl.isEmpty
         ? null
-        : ZemoteConnectionParams.parse(probeUrl);
+        : ZflowConnectionParams.parse(probeUrl);
     if (params == null) {
       // ignore: avoid_print
       print('SKIP: ZEMOTE_PROBE_URL not set or invalid — integration '
@@ -50,7 +50,7 @@ void main() {
             res['status'] == 'noop' ||
             res['status'] == 'duplicate');
 
-    final client = ZemoteClient(params, onLog: log);
+    final client = ZflowClient(params, onLog: log);
 
     // 1. relay connect + pair
     await client.connect();

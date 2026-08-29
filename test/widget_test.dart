@@ -6,8 +6,8 @@ import 'package:zflow/protocol/ipc_codec.dart';
 import 'package:zflow/protocol/proof.dart';
 
 void main() {
-  test('parse zemote connection url', () {
-    final params = ZemoteConnectionParams.parse(
+  test('parse zflow connection url', () {
+    final params = ZflowConnectionParams.parse(
       'https://zcode.z.ai/remote/v4?sid=SID123&hash=HASH%3D&t=1785734607338'
       '&mid=MID-1&name=DESKTOP&app_version=3.6.5',
     );
@@ -23,8 +23,8 @@ void main() {
   });
 
   test('reject invalid url', () {
-    expect(ZemoteConnectionParams.parse('https://zcode.z.ai/remote/v4'), isNull);
-    expect(ZemoteConnectionParams.parse('not a url'), isNull);
+    expect(ZflowConnectionParams.parse('https://zcode.z.ai/remote/v4'), isNull);
+    expect(ZflowConnectionParams.parse('not a url'), isNull);
   });
 
   test('proof is hmac-sha256 base64url', () {

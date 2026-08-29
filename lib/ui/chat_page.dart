@@ -880,8 +880,8 @@ class _ChatPageState extends State<ChatPage> {
               animation: state,
               builder: (context, _) => state.isRunning
                   ? IconButton(
-                      icon: const Icon(Icons.stop_circle_outlined,
-                          color: ZColors.danger),
+                      icon: Icon(Icons.stop_circle_outlined,
+                      color: EmberColors.of(context).err),
                       tooltip: '停止',
                       onPressed: () =>
                           _run('停止失败', () => _transport.stop(_sessionId!)),
@@ -1143,7 +1143,7 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           if (_error != null)
             Material(
-              color: ZColors.danger.withValues(alpha: 0.15),
+              color: EmberColors.of(context).err.withValues(alpha: 0.15),
               child: ListTile(
                 dense: true,
                 title: Text('订阅失败: $_error',
@@ -1212,7 +1212,7 @@ class _ChatPageState extends State<ChatPage> {
                                   row: {
                                     'kind': 'userInput',
                                     'text': e['text'],
-                                    '_zemoteTs': e['ts'],
+                                    '_zflowTs': e['ts'],
                                     if (e['attachments'] != null)
                                       'attachments': e['attachments'],
                                   },
@@ -1400,7 +1400,7 @@ class _ReconnectBanner extends StatelessWidget {
           builder: (context) => Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            color: ZColors.warning.withValues(alpha: 0.15),
+            color: EmberColors.of(context).warn.withValues(alpha: 0.15),
             child: Row(
               children: [
                 const SizedBox(
@@ -1559,10 +1559,10 @@ class _TurnGroupWidget extends StatelessWidget {
     return null;
   }
 
-  /// `HH:mm` for rows observed live (view-layer `_zemoteTs` stamp). History
+  /// `HH:mm` for rows observed live (view-layer `_zflowTs` stamp). History
   /// rows carry no timestamp on the wire, so they show none.
   Widget? _timeLabel(BuildContext context) {
-    final ts = rows.first['_zemoteTs'] as int?;
+    final ts = rows.first['_zflowTs'] as int?;
     if (ts == null) return null;
     final d = DateTime.fromMillisecondsSinceEpoch(ts);
     final text =
@@ -2151,7 +2151,7 @@ class _AssistantBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ZemoteMarkdown(text, fontSize: 13),
+          ZflowMarkdown(text, fontSize: 13),
           if (showFeedback)
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -2270,7 +2270,7 @@ class _ReasoningTileState extends State<_ReasoningTile> {
             if (_open)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: ZemoteMarkdown(widget.text, fontSize: 12),
+                child: ZflowMarkdown(widget.text, fontSize: 12),
               ),
           ],
         ),
@@ -2592,9 +2592,9 @@ class _TurnHeaderState extends State<_TurnHeader> {
     };
     if (label.isEmpty) return const SizedBox.shrink();
     final color = switch (state) {
-      'running' => ZColors.running,
-      'failed' => ZColors.danger,
-      'completedInterrupted' => ZColors.warning,
+      'running' => EmberColors.of(context).run,
+      'failed' => EmberColors.of(context).err,
+      'completedInterrupted' => EmberColors.of(context).warn,
       _ => EmberColors.of(context).textFaint,
     };
     return Padding(
@@ -2653,22 +2653,22 @@ class _TimelineMarkerWidget extends StatelessWidget {
       'modelChange' => (
           Icons.swap_horiz,
           '模型切换 ${marker['fromModel'] ?? ''} → ${marker['toModel'] ?? ''}',
-          ZColors.warning
+          EmberColors.of(context).warn
         ),
       'goalSet' => (
           Icons.flag_outlined,
           '设定目标: ${marker['objective'] ?? ''}',
-          ZColors.success
+          EmberColors.of(context).ok
         ),
       'goalVerify' => (
           Icons.fact_check_outlined,
           '目标验证 第${marker['iteration'] ?? '?'}轮 · ${marker['outcome'] ?? ''}',
-          ZColors.success
+          EmberColors.of(context).ok
         ),
       'retryNotice' => (
           Icons.refresh,
           '自动重试 第${marker['attempt'] ?? '?'}次 (${marker['reasonCode'] ?? ''})',
-          ZColors.warning
+          EmberColors.of(context).warn
         ),
       'checkpointRestored' => (
           Icons.restore,
@@ -2766,7 +2766,7 @@ class _ContextUsageBar extends StatelessWidget {
     }
     final ratio = (used / max).clamp(0.0, 1.0);
     final color =
-        ratio > 0.8 ? ZColors.warning : EmberColors.of(context).primary;
+        ratio > 0.8 ? EmberColors.of(context).warn : EmberColors.of(context).primary;
     String fmt(int v) =>
         v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
     return Padding(
@@ -3313,7 +3313,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('加载失败: $error',
-            style: TextStyle(fontSize: 11, color: ZColors.danger),
+            style: TextStyle(fontSize: 11, color: EmberColors.of(context).err),
             maxLines: 2,
             overflow: TextOverflow.ellipsis),
         TextButton(onPressed: onRetry, child: const Text('重试')),
@@ -3382,7 +3382,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                           : Icons.radio_button_unchecked,
                   size: 14,
                   color: s.completed
-                      ? ZColors.success
+                      ? EmberColors.of(context).ok
                       : s.inProgress
                           ? EmberColors.of(context).primary
                           : EmberColors.of(context).textFaint,
@@ -3441,7 +3441,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                           : Icons.radio_button_unchecked,
                   size: 14,
                   color: completed
-                      ? ZColors.success
+                      ? EmberColors.of(context).ok
                       : inProgress
                           ? EmberColors.of(context).primary
                           : EmberColors.of(context).textFaint,
@@ -3692,10 +3692,10 @@ class _InsightsSheetState extends State<InsightsSheet> {
       leading = const SizedBox(
           width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5));
     } else if (status == 'failed') {
-      leading = Icon(Icons.error_outline, size: 13, color: ZColors.danger);
+      leading = Icon(Icons.error_outline, size: 13, color: EmberColors.of(context).err);
       suffix = ' · 失败';
     } else if (status == 'cancelled') {
-      leading = Icon(Icons.block, size: 13, color: ZColors.warning);
+      leading = Icon(Icons.block, size: 13, color: EmberColors.of(context).warn);
       suffix = ' · 已取消';
     } else {
       leading = Icon(Icons.hourglass_bottom,
@@ -3741,7 +3741,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       leading = const SizedBox(
           width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5));
     } else if (status == 'blocked') {
-      leading = const Icon(Icons.lock_outline, size: 13, color: ZColors.warning);
+      leading = Icon(Icons.lock_outline, size: 13, color: EmberColors.of(context).warn);
     } else {
       leading = Icon(Icons.hourglass_bottom,
           size: 13, color: EmberColors.of(context).textFaint); // waiting
@@ -3778,16 +3778,16 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final status = '${r['status']}';
     final (leading, suffix) = switch (status) {
       'success' => (
-        const Icon(Icons.check_circle_outline,
-            size: 13, color: ZColors.success),
+        Icon(Icons.check_circle_outline,
+            size: 13, color: EmberColors.of(context).ok),
         ' · 已完成'
       ),
       'failed' => (
-        const Icon(Icons.error_outline, size: 13, color: ZColors.danger),
+        Icon(Icons.error_outline, size: 13, color: EmberColors.of(context).err),
         ' · 失败'
       ),
       'cancelled' => (
-        const Icon(Icons.block, size: 13, color: ZColors.warning),
+        Icon(Icons.block, size: 13, color: EmberColors.of(context).warn),
         ' · 已取消'
       ),
       _ => (
@@ -3936,15 +3936,15 @@ class _GoalBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(14, 4, 14, 0),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: ZColors.success.withValues(alpha: 0.08),
+        color: EmberColors.of(context).ok.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
         border:
-            Border.all(color: ZColors.success.withValues(alpha: 0.25)),
+            Border.all(color: EmberColors.of(context).ok.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.flag_outlined,
-              size: 14, color: ZColors.success),
+          Icon(Icons.flag_outlined,
+              size: 14, color: EmberColors.of(context).ok),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -3957,8 +3957,8 @@ class _GoalBanner extends StatelessWidget {
           ),
           if (status.isNotEmpty)
             Text(status,
-                style: const TextStyle(
-                    fontSize: 11, color: ZColors.success)),
+                style: TextStyle(
+                    fontSize: 11, color: EmberColors.of(context).ok)),
         ],
       ),
     );
@@ -4105,7 +4105,7 @@ class _QueueBar extends StatelessWidget {
                                 child: const Text('取消')),
                             FilledButton(
                               style: FilledButton.styleFrom(
-                                  backgroundColor: ZColors.danger),
+                                  backgroundColor: EmberColors.of(context).err),
                               onPressed: () =>
                                   Navigator.pop(context, true),
                               child: const Text('删除'),
@@ -5162,7 +5162,7 @@ class _SlashCommandBar extends StatelessWidget {
                         : Icons.bolt),
                 size: 16,
                 color: command.isSkill
-                    ? ZColors.warning
+                    ? EmberColors.of(context).warn
                     : EmberColors.of(context).primary,
               ),
               title: Text(
@@ -5243,8 +5243,8 @@ class _SkillsPickerSheet extends StatelessWidget {
                     for (final s in list)
                       ListTile(
                         dense: true,
-                        leading: const Icon(Icons.auto_awesome_outlined,
-                            size: 18, color: ZColors.warning),
+                        leading: Icon(Icons.auto_awesome_outlined,
+                            size: 18, color: EmberColors.of(context).warn),
                         title: Text('\$${s.name}',
                             style: const TextStyle(
                                 fontSize: 14, fontFamily: 'monospace')),

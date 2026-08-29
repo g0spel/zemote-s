@@ -8,12 +8,12 @@ import 'ui_settings.dart';
 
 /// Markdown renderer matching the official client look:
 /// selectable body text + code blocks with language tag and copy button.
-class ZemoteMarkdown extends StatelessWidget {
+class ZflowMarkdown extends StatelessWidget {
   final String data;
   final bool selectable;
   final double fontSize;
 
-  const ZemoteMarkdown(
+  const ZflowMarkdown(
     this.data, {
     super.key,
     this.selectable = true,

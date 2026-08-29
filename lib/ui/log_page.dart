@@ -60,7 +60,7 @@ class _LogPageState extends State<LogPage> {
     try {
       final path = await FilePicker.saveFile(
         dialogTitle: '导出协议日志',
-        fileName: 'zemote-logs.txt',
+        fileName: 'zflow-logs.txt',
         bytes: utf8.encode(text),
       );
       if (path == null) return; // cancelled

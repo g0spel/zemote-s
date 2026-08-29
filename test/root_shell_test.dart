@@ -23,10 +23,10 @@ const _deviceUrl =
 String _url(String sid, String name) =>
     'https://zcode.z.ai/remote/v4?sid=$sid&hash=h&t=1&name=$name';
 
-/// Fake [ZemoteClient]: no sockets. [gate] (when uncompleted) holds
+/// Fake [ZflowClient]: no sockets. [gate] (when uncompleted) holds
 /// connect() open so tests can stage in-flight chains; bootstrap/openBridge
 /// answer from [workspaces] with detached bridge sessions.
-class _FakeClient extends ZemoteClient {
+class _FakeClient extends ZflowClient {
   final Completer<void> connectGate;
   final List<Map<String, dynamic>> workspaces;
 
@@ -70,7 +70,7 @@ Future<AccountStore> _pumpShell(
   WidgetTester tester, {
   List<String> urls = const [],
   bool autoConnect = true,
-  ZemoteClient Function(ZemoteConnectionParams params,
+  ZflowClient Function(ZflowConnectionParams params,
           void Function(String line)? onLog)?
       clientFactory,
 }) async {

@@ -29,7 +29,7 @@ void main() {
     await store.addUrl(
         'https://zcode.z.ai/remote/v4?sid=abc&hash=def&t=123&name=桌面1');
     final count = await store.importJson(jsonEncode({
-      'app': 'zemote',
+      'app': 'zflow',
       'accounts': [
         {'id': 'x1', 'label': 'dup', 'url': 'https://zcode.z.ai/remote/v4?sid=abc&hash=def&t=123&name=桌面1'},
         {'id': 'x2', 'label': 'bad', 'url': 'not a url'},

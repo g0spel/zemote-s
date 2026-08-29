@@ -69,7 +69,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     try {
       final path = await FilePicker.saveFile(
         dialogTitle: '导出设备',
-        fileName: 'zemote-devices.json',
+        fileName: 'zflow-devices.json',
         bytes: utf8.encode(json),
       );
       if (path == null) return; // cancelled
@@ -114,7 +114,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
   /// sends. Confirm before saving so a swapped QR code can't silently
   /// redirect conversations to an attacker's server.
   Future<bool> _confirmUnofficialUrl(String url) async {
-    final params = ZemoteConnectionParams.parse(url);
+    final params = ZflowConnectionParams.parse(url);
     if (params == null || params.isOfficialHost) return true;
     if (!mounted) return false;
     final go = await showDialog<bool>(
@@ -171,7 +171,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     );
     controller.dispose();
     if (url == null || url.isEmpty) return;
-    if (ZemoteConnectionParams.parse(url) == null) {
+    if (ZflowConnectionParams.parse(url) == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -189,7 +189,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
       MaterialPageRoute(builder: (_) => const QrScanPage()),
     );
     if (url == null || url.isEmpty) return;
-    if (ZemoteConnectionParams.parse(url) == null) {
+    if (ZflowConnectionParams.parse(url) == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
