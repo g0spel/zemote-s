@@ -7,6 +7,7 @@ import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
 import '../protocol/zemote_client.dart';
 import '../state/log_store.dart';
+import '../state/session_list_cache.dart';
 import 'theme.dart';
 
 /// Conversation list primitives shared by the session drawer (Ember shell):
@@ -129,6 +130,8 @@ class SessionDrawer extends StatefulWidget {
 }
 
 class _SessionDrawerState extends State<SessionDrawer> {
+  static const _cache = SessionListCache();
+
   final _searchController = TextEditingController();
 
   String _query = '';
@@ -144,11 +147,18 @@ class _SessionDrawerState extends State<SessionDrawer> {
   bool _ready = false;
   String? _error;
 
+  /// 离线种子(2c):打开抽屉先展示上次缓存,实时数据到达即覆盖。
+  List<SessionEntry> _seed = const [];
+
+  /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照)。
+  SessionsIndexSubscription? _cacheSyncedSub;
+
   @override
   void initState() {
     super.initState();
     _transport = widget.bridge.conversation(widget.scope, onLog: log);
     _subscribe();
+    _seedFromCache();
   }
 
   @override
@@ -206,6 +216,29 @@ class _SessionDrawerState extends State<SessionDrawer> {
       _entries = sortSessions(sub.state.list);
       _ready = sub.state.ready;
     });
+    _syncCache(sub);
+  }
+
+  // ------------------------------------------------------- offline cache
+
+  /// 打开抽屉先 read 播种(2c):仅当实时列表未到达(!ready)时展示,
+  /// 真实数据到达即覆盖。种子条目 phase 清空 —— 状态点以实时为准(裁决),
+  /// 缓存里的 running/waiting 可能早已过期。
+  Future<void> _seedFromCache() async {
+    final raw = await _cache.read(widget.scope);
+    if (!mounted || raw.isEmpty) return;
+    setState(() {
+      _seed = [for (final m in raw) SessionEntry({...m, 'phase': ''})];
+    });
+  }
+
+  /// 订阅 ready 后 write(2c):把当前列表落盘,供下次打开时秒开。
+  /// 空列表不写(失败/清空不覆盖好数据,与旧实现一致)。
+  void _syncCache(SessionsIndexSubscription sub) {
+    if (!sub.state.ready || _cacheSyncedSub == sub) return;
+    _cacheSyncedSub = sub;
+    unawaited(_cache
+        .write(widget.scope, [for (final e in _entries) e.raw]));
   }
 
   List<SessionEntry> get _filtered => filterSessions(_entries, _query);
@@ -482,6 +515,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
         ),
       );
     }
+    // 实时列表未到达时先展示离线种子(2c):仅当实时列表为空,数据到达即覆盖。
+    if (!_ready && _seed.isNotEmpty) return _buildSessionList(_seed);
     if (!_ready) {
       return const Center(
         child: SizedBox(
@@ -506,11 +541,17 @@ class _SessionDrawerState extends State<SessionDrawer> {
                 fontSize: EmberType.caption, color: colors.textFaint)),
       );
     }
+    return _buildSessionList(filtered);
+  }
+
+  /// 分组会话列表(spec §7.1:今天/更早),实时列表与离线种子共用。
+  Widget _buildSessionList(List<SessionEntry> entries) {
+    final colors = EmberColors.of(context);
     return ListView(
       padding: const EdgeInsets.symmetric(
           horizontal: EmberSpacing.page, vertical: EmberSpacing.gapS),
       children: [
-        for (final group in groupSessions(filtered).entries) ...[
+        for (final group in groupSessions(entries).entries) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 EmberSpacing.cardPad, EmberSpacing.gapS, 0, 4),

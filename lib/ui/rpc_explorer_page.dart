@@ -95,14 +95,17 @@ class _RpcExplorerPageState extends State<RpcExplorerPage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  border: Border.all(color: ZInk.ghost(context)),
+                  border: Border.all(
+                      color: EmberColors.of(context).hairline),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: SingleChildScrollView(
                   child: SelectableText(
                     _output,
-                    style:
-                        const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                    style: TextStyle(
+                        fontFamily: EmberFonts.term,
+                        fontSize: EmberType.caption,
+                        color: EmberColors.of(context).textSolid),
                   ),
                 ),
               ),

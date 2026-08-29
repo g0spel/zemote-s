@@ -8,7 +8,7 @@ import 'package:zemote/protocol/zemote_client.dart';
 import 'package:zemote/ui/chat_page.dart';
 import 'package:zemote/state/account_store.dart';
 import 'package:zemote/state/app_session.dart';
-import 'package:zemote/ui/conversation_list_page.dart';
+import 'package:zemote/ui/session_drawer.dart';
 import 'package:zemote/ui/device_management_page.dart';
 import 'package:zemote/ui/root_shell.dart';
 import 'package:zemote/ui/settings_page.dart';

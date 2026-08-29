@@ -7,6 +7,7 @@ import '../protocol/zemote_client.dart';
 import '../state/account_store.dart';
 import '../state/app_session.dart';
 import '../state/crash_report.dart';
+import '../state/log_store.dart';
 import '../update/app_version.dart';
 import '../update/update_checker.dart';
 import '../update/update_dialog.dart';
@@ -456,6 +457,30 @@ class _DiagnosticsPage extends StatelessWidget {
 
   const _DiagnosticsPage({this.client, this.bridge});
 
+  /// 诊断计数前置(spec §7.4):有 [诊断] 条目时在行尾显示计数徽。
+  Widget _diagCountTrailing(BuildContext context) {
+    final count = LogStore.instance.entries
+        .where((e) => e.isDiagnostic)
+        .length;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (count > 0) ...[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: EmberColors.of(context).warn.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text('$count',
+              style: TextStyle(
+                  fontSize: EmberType.caption,
+                  color: EmberColors.of(context).warn)),
+        ),
+        const SizedBox(width: EmberSpacing.gapS),
+      ],
+      _chevron,
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -471,7 +496,7 @@ class _DiagnosticsPage extends StatelessWidget {
                 leading: const Icon(Icons.bug_report_outlined, size: 20),
                 title: const Text('诊断日志'),
                 subtitle: const Text('故障原因与协议失配提示'),
-                trailing: _chevron,
+                trailing: _diagCountTrailing(context),
                 onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                         builder: (_) =>

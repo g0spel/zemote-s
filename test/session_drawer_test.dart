@@ -1,12 +1,15 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:zemote/protocol/channel_client.dart';
 import 'package:zemote/protocol/ipc_codec.dart';
 import 'package:zemote/protocol/zemote_client.dart';
-import 'package:zemote/ui/conversation_list_page.dart';
+import 'package:zemote/state/session_list_cache.dart';
+import 'package:zemote/ui/session_drawer.dart';
 
 /// 真实协议驱动的抽屉测试。裸 SessionDrawer 在全新 detached bridge 上的
 /// channel 取号是确定性的(FIFO):id0 hello、id1 initialize、id2 索引帧
@@ -179,6 +182,97 @@ void main() {
     _respond(channels, 6, <String, dynamic>{});
     await tester.pump();
     expect(find.text('已选 1 项'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('打开抽屉先播种离线缓存;实时数据到达即覆盖;状态点以实时为准',
+      (tester) async {
+    // 状态点 = 会话行内 8×8 且非空的 SizedBox(种子条目 child 为 null)。
+    final statusDotFinder = find.byWidgetPredicate((w) =>
+        w is SizedBox && w.width == 8 && w.height == 8 && w.child != null);
+    SharedPreferences.setMockInitialValues({
+      const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
+          jsonEncode([
+            {
+              'sessionId': 'cached-1',
+              'title': '离线缓存会话',
+              // 缓存里的过期运行态:种子显示,但状态点以实时为准(裁决)。
+              'phase': 'running',
+              'lastActivityAt':
+                  now.subtract(const Duration(days: 1)).millisecondsSinceEpoch,
+              'createdAt': 1,
+            },
+          ]),
+    });
+
+    channels = ChannelClient(sendBody: (body) => sent.add(body));
+    bridge = BridgeSession.detached(
+      {'workspaceKey': '/ws-t'},
+      channels: channels,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SessionDrawer(
+          bridge: bridge,
+          scope: const {'workspacePath': '/ws-t'},
+          workspaceName: 'WS',
+          workspacePath: '/ws-t',
+          currentSessionId: null,
+          onPick: picked.add,
+          onSwitchWorkspace: () {},
+          onManageDevices: () {},
+          deviceCount: 1,
+          deviceOnline: true,
+        ),
+      ),
+    ));
+
+    // channel 初始化应答,但不推实时快照 —— 抽屉停留在「实时未到达」态。
+    channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
+    await tester.pump();
+    _respond(channels, 0, <String, dynamic>{});
+    await tester.pump();
+    _respond(channels, 1, <String, dynamic>{});
+    await tester.pump();
+    _respond(channels, 3, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+
+    // 种子显示:订阅未 ready、实时列表为空时,先展示缓存列表。
+    expect(find.text('离线缓存会话'), findsOneWidget);
+    // 状态点以实时为准:种子条目不渲染状态点(即便缓存 phase=running)。
+    expect(statusDotFinder, findsNothing);
+
+    // 实时快照到达 → 覆盖种子;running 条目恢复状态点。
+    channels.handleMessage(_inFrame([ChannelClient.resEventFire, 2], {
+      'kind': 'complete',
+      'topic': 'sessions-index//ws-t',
+      'subscriptionId': 'sub-test',
+      'frame': {
+        'subscriptionId': 'sub-test',
+        'toSeq': 1,
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {'sessions': entries},
+        },
+      },
+    }));
+    await tester.pump();
+    expect(find.text('离线缓存会话'), findsNothing);
+    expect(find.text('修复登录'), findsOneWidget);
+    expect(statusDotFinder, findsOneWidget);
+
+    // 订阅 ready 后 write-through:缓存被实时列表覆盖。
+    await tester.pump();
+    final prefs = await SharedPreferences.getInstance();
+    final stored = jsonDecode(prefs.getString(
+        const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}))!)
+        as List;
+    expect(stored.first['sessionId'], 's1');
 
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();

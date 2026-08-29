@@ -10,7 +10,7 @@ import '../state/account_store.dart';
 import '../state/app_session.dart';
 import 'automation_page.dart';
 import 'chat_page.dart';
-import 'conversation_list_page.dart';
+import 'session_drawer.dart';
 import 'delayed_banner.dart';
 import 'device_management_page.dart';
 import 'settings_page.dart';
