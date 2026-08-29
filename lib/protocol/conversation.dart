@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'channel_client.dart';
 import 'id.dart';
+import '../state/log_store.dart' show diagLogEnabled;
 import 'zflow_client.dart';
 
 /// Conversation V4 protocol over the `zcode-agent` channel.
@@ -272,10 +273,10 @@ class ConversationTransport {
         if (mcpServers != null && mcpServers.isNotEmpty)
           'mcpServers': mcpServers,
     };
-    debugPrint('[chat] createSession req: $payload');
+    if (diagLogEnabled.value) debugPrint('[chat] createSession req: $payload');
     final res = await sendCommand(null, 'createSession', payload,
         timeout: timeout);
-    debugPrint('[chat] createSession res: $res');
+    if (diagLogEnabled.value) debugPrint('[chat] createSession res: $res');
     final map = res is Map ? res.cast<String, dynamic>() : null;
     final status = map?['status'];
     if (status != 'accepted') {

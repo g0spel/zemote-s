@@ -205,6 +205,8 @@ class SettingsPage extends StatelessWidget {
             ),
             const Divider(indent: 52),
             const _VerboseFramesTile(),
+            const Divider(indent: 52),
+            const _DiagLogTile(),
           ],
         ),
         if (bridge != null) ...[
@@ -445,6 +447,32 @@ class _VerboseFramesTileState extends State<_VerboseFramesTile> {
           await prefs.setBool('relayVerboseFrames', v);
         } catch (_) {}
       },
+    );
+  }
+}
+
+/// 诊断日志开关:开 = [wire]/[chat]/[zflow] 探针同时写 logcat
+/// (release 真机取证:连接/桥/订阅/发送的时序与降级-恢复循环只在
+/// wire 层可见);关 = 仅应用内协议日志页。
+class _DiagLogTile extends StatefulWidget {
+  const _DiagLogTile();
+
+  @override
+  State<_DiagLogTile> createState() => _DiagLogTileState();
+}
+
+class _DiagLogTileState extends State<_DiagLogTile> {
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: diagLogEnabled,
+      builder: (context, value, _) => SwitchListTile(
+        secondary: const Icon(Icons.bug_report_outlined, size: 20),
+        title: const Text('诊断日志（logcat）'),
+        subtitle: const Text('连接/订阅/发送时序探针输出到系统日志，排查故障时开启'),
+        value: value,
+        onChanged: (v) => setDiagLogEnabled(v),
+      ),
     );
   }
 }

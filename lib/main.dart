@@ -72,6 +72,7 @@ class _ZflowAppState extends State<ZflowApp> {
     _store.load();
     _theme.load();
     _uiSettings.load();
+    loadDiagLogPref();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());
   }
 

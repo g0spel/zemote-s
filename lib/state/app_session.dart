@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../protocol/connection_params.dart';
 import '../protocol/zflow_client.dart';
-import '../state/log_store.dart';
 import 'account_store.dart';
+import 'log_store.dart';
 
 /// Creates the [ZflowClient] for one device. Production builds the real
 /// relay client; tests inject fakes through [AppSession.clientFactory].
@@ -141,9 +141,9 @@ class AppSession extends ChangeNotifier {
     final c = factory != null
         ? factory(params, log)
         : ZflowClient(params, onLog: (line) {
-            // 协议日志双写:诊断页(LogStore)+ logcat(release 实测;
+            // 协议日志双写:诊断页(LogStore)+ logcat(诊断开关开启时;
             // rpc/bridge 层的降级-恢复循环只在 wire 层可见)。
-            debugPrint('[wire] $line');
+            if (diagLogEnabled.value) debugPrint('[wire] $line');
             log(line);
           });
     try {

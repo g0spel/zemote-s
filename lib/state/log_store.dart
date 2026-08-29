@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// One protocol log entry. Lines prefixed with `[诊断]` are human-readable
 /// failure explanations (actionable causes, suspected protocol drift); the
@@ -85,3 +86,20 @@ class LogStore extends ChangeNotifier {
 }
 
 void log(String line) => LogStore.instance.add(line);
+
+/// 诊断日志开关(设置页):开 = [wire]/[chat]/[zflow] 探针同时写
+/// logcat(release 真机取证:桥降级-恢复循环只在 wire 层可见);关 =
+/// 仅应用内协议日志页。SharedPreferences 持久化,main 启动时加载。
+const _diagLogKey = 'zflow_diag_log';
+final ValueNotifier<bool> diagLogEnabled = ValueNotifier<bool>(false);
+
+Future<void> loadDiagLogPref() async {
+  final prefs = await SharedPreferences.getInstance();
+  diagLogEnabled.value = prefs.getBool(_diagLogKey) ?? false;
+}
+
+Future<void> setDiagLogEnabled(bool value) async {
+  diagLogEnabled.value = value;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool(_diagLogKey, value);
+}

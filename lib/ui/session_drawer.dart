@@ -8,6 +8,7 @@ import '../protocol/zflow_client.dart';
 import '../state/log_store.dart';
 import '../state/session_list_cache.dart';
 import 'ember_pressable.dart';
+import 'task_detail_page.dart';
 import 'theme.dart';
 
 /// Conversation list primitives shared by the session drawer (Ember shell):
@@ -220,7 +221,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
   @override
   void initState() {
     super.initState();
-    debugPrint('[zflow] SessionDrawer initState #$hashCode');
+    if (diagLogEnabled.value) {
+      debugPrint('[zflow] SessionDrawer initState #$hashCode');
+    }
     _transport = widget.bridge.conversation(widget.scope, onLog: log);
     _subscribe();
     _seedFromCache();
@@ -288,9 +291,11 @@ class _SessionDrawerState extends State<SessionDrawer> {
     final sub = _sub;
     if (sub == null || !mounted) return;
     final list = sortSessions(sub.state.list);
-    debugPrint('[zflow] _onState ready=${sub.state.ready} n=${list.length}');
+    if (diagLogEnabled.value) {
+      debugPrint('[zflow] _onState ready=${sub.state.ready} n=${list.length}');
+    }
     final prevIds = _entries.map((e) => e.sessionId).toSet();
-    if (list.isNotEmpty && !_idxProbed) {
+    if (diagLogEnabled.value && list.isNotEmpty && !_idxProbed) {
       _idxProbed = true;
       final raw = list.first.raw;
       final ids = list.map((e) => e.sessionId).toSet();
@@ -376,7 +381,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 缓存里的 running/waiting 可能早已过期。
   Future<void> _seedFromCache() async {
     final raw = await _cache.read(widget.scope);
-    debugPrint('[zflow] seed: ${raw.length} entries');
+    if (diagLogEnabled.value) debugPrint('[zflow] seed: ${raw.length} entries');
     if (!mounted || raw.isEmpty) return;
     setState(() {
       _seed = [for (final m in raw) SessionEntry({...m, 'phase': ''})];
@@ -434,10 +439,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
           active.add(e);
         }
       }
-      debugPrint('[zflow] _loadTasks total=${list.length} '
-          'active=${active.length} archived=${archived.length} '
-          'sampleKeys=${list.isEmpty ? '-' : '${(list.first as Map).keys.toList()}'}');
-      {
+      if (diagLogEnabled.value) {
+        debugPrint('[zflow] _loadTasks total=${list.length} '
+            'active=${active.length} archived=${archived.length} '
+            'sampleKeys=${list.isEmpty ? '-' : '${(list.first as Map).keys.toList()}'}');
         final actIds = {for (final e in active) e.sessionId};
         final archIds = {for (final e in archived) e.sessionId};
         final idxIds = _entries.map((e) => e.sessionId).toSet();
@@ -551,6 +556,178 @@ class _SessionDrawerState extends State<SessionDrawer> {
     );
     if (confirmed != true) return;
     await _applySelection('deleteTask', '删除失败');
+  }
+
+  // ---------------------------------------------------- single-item actions
+
+  /// 长按单条操作(UI 大改前的单条能力恢复;RPC 与旧版 task_home 同源):
+  /// 活跃条目 = 置顶/重命名/归档/删除/查看原始快照;归档条目 =
+  /// 取消归档/删除/查看原始快照。批量多选仍走「管理」。
+  Future<void> _showItemActions(SessionEntry entry) async {
+    final colors = EmberColors.of(context);
+    final pinned = _pinnedIds.contains(entry.sessionId);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  EmberSpacing.page, 0, EmberSpacing.page, EmberSpacing.gapS),
+              child: Text(
+                entry.title.isEmpty ? '会话操作' : entry.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: EmberType.body,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textSolid),
+              ),
+            ),
+            if (!entry.isArchived) ...[
+              ListTile(
+                dense: true,
+                leading: Icon(
+                    pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                    size: 20),
+                title: Text(pinned ? '取消置顶' : '置顶'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _itemAction(
+                      'setTaskPinned', entry, '置顶失败',
+                      args: _taskArgs(entry.sessionId, pinned: !pinned));
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.edit_outlined, size: 20),
+                title: const Text('重命名'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _renameEntry(entry);
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.archive_outlined, size: 20),
+                title: const Text('归档'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _itemAction('archiveTask', entry, '归档失败');
+                },
+              ),
+            ] else
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.unarchive_outlined, size: 20),
+                title: const Text('取消归档'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _itemAction('unarchiveTask', entry, '取消归档失败');
+                },
+              ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.code, size: 20),
+              title: const Text('查看原始快照'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => TaskDetailPage(
+                    taskId: entry.sessionId,
+                    title: entry.title.isEmpty ? '任务详情' : entry.title,
+                    scope: widget.scope,
+                    session: widget.bridge,
+                  ),
+                ));
+              },
+            ),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.delete_outline, size: 20, color: colors.err),
+              title:
+                  Text('删除', style: TextStyle(color: colors.err)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _deleteEntry(entry);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 单条 zcode-task RPC + 失败提示 + 归属刷新。
+  Future<void> _itemAction(
+    String method,
+    SessionEntry entry,
+    String errorPrefix, {
+    Map<String, dynamic>? args,
+  }) async {
+    try {
+      await widget.bridge.channels.call(
+          Channels.zcodeTask, method, [args ?? _taskArgs(entry.sessionId)]);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$errorPrefix: $e')));
+      return;
+    }
+    unawaited(_loadPinned());
+    unawaited(_loadTasks());
+  }
+
+  Future<void> _renameEntry(SessionEntry entry) async {
+    final controller = TextEditingController(text: entry.title);
+    final title = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重命名会话'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (title == null || title.isEmpty) return;
+    await _itemAction('renameTask', entry, '重命名失败',
+        args: {..._taskArgs(entry.sessionId), 'title': title});
+  }
+
+  Future<void> _deleteEntry(SessionEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除会话？'),
+        content: Text('将删除「${entry.title.isEmpty ? entry.sessionId : entry.title}」，此操作不可恢复'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: EmberColors.of(context).err),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _itemAction('deleteTask', entry, '删除失败');
   }
 
   // -------------------------------------------------------------- build
@@ -885,12 +1062,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
         widget.onPick(entry.sessionId);
       },
       onLongPress: () {
-        // 长按快捷进入多选,并选中该条。
         if (_managing) return;
-        setState(() {
-          _managing = true;
-          _selected.add(entry.sessionId);
-        });
+        _showItemActions(entry);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(

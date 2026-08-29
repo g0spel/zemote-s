@@ -317,9 +317,11 @@ class _RootShellState extends State<RootShell> {
         final picked = recent;
         log('[v4] 最近会话:ready=${sub.state.ready} '
             '列表=${sub.state.list.length} 选中=${picked?.sessionId ?? '无'}');
-        debugPrint('[zflow] recent-session: ready=${sub.state.ready} '
-            'list=${sub.state.list.length} '
-            'picked=${picked?.sessionId ?? 'none'}');
+        if (diagLogEnabled.value) {
+          debugPrint('[zflow] recent-session: ready=${sub.state.ready} '
+              'list=${sub.state.list.length} '
+              'picked=${picked?.sessionId ?? 'none'}');
+        }
         await sub.dispose();
         if (picked != null && mounted && _isCurrentChain(gen)) {
           _sessionEpoch++;
