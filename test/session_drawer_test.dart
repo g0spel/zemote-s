@@ -234,8 +234,9 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '置顶'));
     await tester.pump();
     final (pinHeader, pinArgs) = _decodeRequest(sent.last);
-    expect((pinHeader as List)[2], 'zcode-task');
-    expect((pinHeader as List)[3], 'setTaskPinned');
+    final h = pinHeader as List;
+    expect(h[2], 'zcode-task');
+    expect(h[3], 'setTaskPinned');
     expect(pinArgs, [
       {'taskId': 's1', 'workspacePath': '/ws-t', 'pinned': true},
     ]);
@@ -662,17 +663,14 @@ void main() {
       {'workspacePath': '/ws-t'},
     ]);
 
-    // 三档分组:s2 进置顶组,更早组因空被剔除。
-    expect(find.text('置顶'), findsOneWidget);
-    expect(find.text('今天'), findsOneWidget);
-    expect(find.text('更早'), findsNothing);
+    // 两档分组:置顶的 s2 在活跃组内排最前。
+    expect(find.text('活跃'), findsOneWidget);
+    expect(find.text('归档'), findsNothing);
     expect(find.text('重构 API'), findsOneWidget);
 
-    // 组序与行序:置顶 → s2 → 今天 → s1。
     double dy(Finder f) => tester.getTopLeft(f).dy;
-    expect(dy(find.text('置顶')), lessThan(dy(find.text('重构 API'))));
-    expect(dy(find.text('重构 API')), lessThan(dy(find.text('今天'))));
-    expect(dy(find.text('今天')), lessThan(dy(find.text('修复登录'))));
+    expect(dy(find.text('活跃')), lessThan(dy(find.text('重构 API'))));
+    expect(dy(find.text('重构 API')), lessThan(dy(find.text('修复登录'))));
 
     await drainPending(channels, sent, tester);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -680,7 +678,7 @@ void main() {
     await tester.pump(const Duration(seconds: 40));
   });
 
-  testWidgets('listPinnedTasks 失败容错为空集:列表照常 今天/更早 两档',
+  testWidgets('listPinnedTasks 失败容错为空集:列表照常活跃组渲染',
       (tester) async {
     await pumpDrawerHandshake(tester, '/ws-t');
     channels.handleMessage(_inFrame(
@@ -692,9 +690,7 @@ void main() {
     pushSnapshot(entries);
     await tester.pump();
 
-    expect(find.text('置顶'), findsNothing);
-    expect(find.text('今天'), findsOneWidget);
-    expect(find.text('更早'), findsOneWidget);
+    expect(find.text('活跃'), findsOneWidget);
     expect(find.text('修复登录'), findsOneWidget);
     expect(find.text('重构 API'), findsOneWidget);
 
@@ -706,7 +702,7 @@ void main() {
 
   testWidgets('置顶操作完成后重拉置顶集,条目随即进置顶组', (tester) async {
     await pumpDrawer(tester); // 初始置顶集为空
-    expect(find.text('置顶'), findsNothing);
+    expect(find.text('活跃'), findsOneWidget);
 
     await selectRow(tester); // 选中 s1
     await tester.tap(find.widgetWithText(OutlinedButton, '置顶'));
@@ -746,11 +742,10 @@ void main() {
     await tester.pump();
 
     expect(find.text('已选 1 项'), findsNothing); // 已退出多选
-    expect(find.text('置顶'), findsOneWidget);
+    expect(find.text('活跃'), findsOneWidget);
     double dy(Finder f) => tester.getTopLeft(f).dy;
-    expect(dy(find.text('置顶')), lessThan(dy(find.text('修复登录'))));
-    expect(find.text('今天'), findsNothing); // s1 移入置顶,今天组空
-    expect(find.text('更早'), findsOneWidget);
+    expect(dy(find.text('活跃')), lessThan(dy(find.text('修复登录'))));
+    expect(find.text('归档'), findsNothing);
 
     await drainPending(channels, sent, tester);
     await drainPending(channels, sent, tester);

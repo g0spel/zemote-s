@@ -39,37 +39,27 @@ List<SessionEntry> filterSessions(List<SessionEntry> entries, String query) {
       .toList(growable: false);
 }
 
-/// 四档分组(置顶/今天/更早/归档;键序即展示序)。[sorted] 需为
-/// sortSessions 的降序输出。归档条目(isArchived)单独成组且优先于
-/// 置顶判定——归档会话不再混入今天/更早(桌面端归档后远端增量即
-/// 分流,列表状态与宿主一致)。空组剔除,展示文案由调用方按键映射。
+/// 两档分组(活跃/归档;键序即展示序)。[sorted] 需为 sortSessions 的
+/// 降序输出;归档条目(isArchived)单独成组,其余全入活跃组(置顶项在
+/// 活跃组内排最前,保持 sorted 顺序)。空组剔除,展示文案由调用方按键
+/// 映射。
 Map<String, List<SessionEntry>> groupSessions(
   List<SessionEntry> sorted,
   Set<String> pinnedIds,
 ) {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
   final pinned = <SessionEntry>[];
-  final todayList = <SessionEntry>[];
-  final earlier = <SessionEntry>[];
+  final active = <SessionEntry>[];
   final archived = <SessionEntry>[];
   for (final e in sorted) {
     if (e.isArchived) {
       archived.add(e);
-      continue;
-    }
-    if (pinnedIds.contains(e.sessionId)) {
+    } else if (pinnedIds.contains(e.sessionId)) {
       pinned.add(e);
-      continue;
+    } else {
+      active.add(e);
     }
-    final t = DateTime.fromMillisecondsSinceEpoch(e.lastActivityAt);
-    (DateTime(t.year, t.month, t.day).isAtSameMomentAs(today)
-            ? todayList
-            : earlier)
-        .add(e);
   }
-  return {'pinned': pinned, 'today': todayList, 'older': earlier,
-          'archived': archived}
+  return {'active': [...pinned, ...active], 'archived': archived}
     ..removeWhere((_, v) => v.isEmpty);
 }
 
@@ -686,12 +676,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
   }
 
   /// 分组会话列表(spec §7.1:置顶/今天/更早),实时列表与离线种子共用。
-  static const _groupLabels = {
-    'pinned': '置顶',
-    'today': '今天',
-    'older': '更早',
-    'archived': '归档',
-  };
+  static const _groupLabels = {'active': '活跃', 'archived': '归档'};
 
   Widget _buildSessionList(List<SessionEntry> entries) {
     final colors = EmberColors.of(context);

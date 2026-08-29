@@ -3,10 +3,12 @@ import 'package:zflow/protocol/conversation.dart';
 import 'package:zflow/ui/session_drawer.dart';
 import 'package:zflow/ui/theme.dart';
 
-SessionEntry _e(String id, String phase, int at, {String? title}) =>
+SessionEntry _e(String id, String phase, int at,
+        {String? title, bool archived = false}) =>
     SessionEntry({
       'sessionId': id, 'title': title ?? 'T-$id', 'phase': phase,
       'lastActivityAt': at, 'createdAt': 0,
+      if (archived) 'archived': 1,
     });
 
 void main() {
@@ -43,36 +45,19 @@ void main() {
     });
   });
   group('groupSessions', () {
-    // 相对 now 构造,避免依赖固定日期(today/older 分界用 DateTime.now)。
-    final now = DateTime.now();
-    final todayMs = now.millisecondsSinceEpoch;
-    final oldMs =
-        now.subtract(const Duration(days: 2)).millisecondsSinceEpoch;
-
-    test('置顶组最前且保持 sorted 顺序,其余按 今天/更早 两档', () {
-      // sorted 输入按最近活动降序;pinned 命中项原序进入置顶组。
+    test('两档:置顶在活跃组内最前,归档单独成组', () {
       final groups = groupSessions([
-        _e('pin-today', 'idle', todayMs),
-        _e('today', 'idle', todayMs - 1),
-        _e('old', 'idle', oldMs),
-        _e('pin-old', 'idle', oldMs - 1),
-      ], {'pin-old', 'pin-today'});
-      expect(groups.keys, ['pinned', 'today', 'older']);
-      expect(groups['pinned']!.map((e) => e.sessionId),
-          ['pin-today', 'pin-old']);
-      expect(groups['today']!.map((e) => e.sessionId), ['today']);
-      expect(groups['older']!.map((e) => e.sessionId), ['old']);
+        _e('pin', 'idle', 300),
+        _e('a', 'idle', 200),
+        _e('arch', 'idle', 100, archived: true),
+        _e('b', 'idle', 50),
+      ], {'pin'});
+      expect(groups.keys, ['active', 'archived']);
+      expect(groups['active']!.map((e) => e.sessionId), ['pin', 'a', 'b']);
+      expect(groups['archived']!.map((e) => e.sessionId), ['arch']);
     });
-    test('空置顶集退化为 今天/更早 两档,键序即展示序', () {
-      final groups = groupSessions(
-          [_e('today', 'idle', todayMs), _e('old', 'idle', oldMs)], {});
-      expect(groups.keys, ['today', 'older']);
-      expect(groups['today']!.map((e) => e.sessionId), ['today']);
-      expect(groups['older']!.map((e) => e.sessionId), ['old']);
-    });
-    test('空列表返回空分组;lastActivityAt=0 落入更早', () {
+    test('空列表返回空分组', () {
       expect(groupSessions([], {}), isEmpty);
-      expect(groupSessions([_e('zero', 'idle', 0)], {}).keys, ['older']);
     });
   });
 }
