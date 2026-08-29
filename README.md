@@ -6,8 +6,8 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.5%2B-blue.svg?logo=flutter)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.5%2B-0175C2.svg?logo=dart)](https://dart.dev)
-[![CI](https://github.com/g0spel/zemote-s/actions/workflows/ci.yml/badge.svg)](https://github.com/g0spel/zemote-s/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/g0spel/zemote-s)](https://github.com/g0spel/zemote-s/releases)
+[![CI](https://github.com/g0spel/zflow/actions/workflows/ci.yml/badge.svg)](https://github.com/g0spel/zflow/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/g0spel/zflow)](https://github.com/g0spel/zflow/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Web-lightgrey.svg)](#平台)
 
@@ -66,7 +66,7 @@ Zflow 在手机上管理你的桌面 ZCode:扫码添加设备 → 连接 → 任
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/g0spel/zemote-s/releases) 下载 APK 安装;
+1. 从 [Releases](https://github.com/g0spel/zflow/releases) 下载 APK 安装;
 2. 桌面 ZCode → 远程控制 → 生成二维码;
 3. 应用内 **添加设备** → 扫码 → 连接。
 

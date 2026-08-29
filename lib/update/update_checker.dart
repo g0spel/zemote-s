@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'app_version.dart';
 
 /// Release repository this fork checks for updates against.
-const updateRepo = 'g0spel/zemote-s';
+const updateRepo = 'g0spel/zflow';
 
 /// Result of an update check against the GitHub latest release.
 class UpdateInfo {
@@ -28,7 +28,7 @@ class UpdateInfo {
   });
 }
 
-/// Queries `https://api.github.com/repos/g0spel/zemote-s/releases/latest`
+/// Queries `https://api.github.com/repos/g0spel/zflow/releases/latest`
 /// and compares the release tag with [currentVersion]. The release tag is
 /// `vX.Y.Z`; the CI (`build-apk.yml`) uploads `Zflow-vX.Y.Z-arm64.apk` and
 /// its `.sha256` as assets.
