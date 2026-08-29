@@ -341,7 +341,7 @@ class EmberColors {
   static const _lBg = Color(0xFFF7F3EC);
   static const _lCard = Color(0xFFFFFFFF);
   static const _lRaise = Color(0xFFEFE9DF);
-  // AA:主色 onPrimary 白字 ≥ 4.5:1(实测 4.56);旧值 #C25E3A 仅 3.55。
+  // AA:主色 onPrimary 白字 ≥ 4.5:1(实测 4.56);旧值 #C25E3A 实测 4.24(原记录 3.55 系笔误)。
   static const _lPrimary = Color(0xFFBA5A37);
   static const _lSolid = Color(0xFF2A241E);
   static const _lSoft = Color(0xFF4A4238);
