@@ -8,6 +8,7 @@ import '../protocol/conversation.dart' show SessionEntry;
 import '../protocol/relay_client.dart';
 import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
+import '../state/log_store.dart';
 import '../state/app_session.dart';
 import 'automation_page.dart';
 import 'chat_page.dart';
@@ -271,6 +272,7 @@ class _RootShellState extends State<RootShell> {
       // draft)。订阅首个快照取最近条目;无会话/失败/测试用 detached
       // bridge(handshake 即抛)保持 draft。
       try {
+        log('[v4] 打开工作区:订阅索引取最近会话…');
         final sub = await session
             .conversation(_scopeOf(workspace))
             .subscribeSessionsIndex();
@@ -290,11 +292,16 @@ class _RootShellState extends State<RootShell> {
         }
         await sub.dispose();
         final picked = recent;
+        log('[v4] 最近会话:ready=${sub.state.ready} '
+            '列表=${sub.state.list.length} 选中=${picked?.sessionId ?? '无'}');
+        await sub.dispose();
         if (picked != null && mounted && _isCurrentChain(gen)) {
           _sessionEpoch++;
           setState(() => _activeSessionId.value = picked.sessionId);
         }
-      } catch (_) {}
+      } catch (e) {
+        log('[诊断] 最近会话打开失败: $e');
+      }
     } catch (e) {
       if (!mounted || !_isCurrentChain(gen)) return;
       ScaffoldMessenger.of(context)
