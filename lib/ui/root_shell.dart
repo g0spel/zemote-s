@@ -523,11 +523,16 @@ class _RootShellState extends State<RootShell> {
 
   /// 设备管理页(home 挂载下 push,无可 pop 回的设备页)。
   void _openDeviceManagement() {
+    final workspace = _activeWorkspace;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DeviceManagementPage(
           store: widget.store,
           session: widget.session,
+          // 当前活跃设备已打开的工作区(spec §7.3 设备卡字段);
+          // 未打开工作区时为 null,卡片不显示该行。
+          activeWorkspaceTitle:
+              workspace == null ? null : workspaceTitle(workspace),
         ),
       ),
     );
