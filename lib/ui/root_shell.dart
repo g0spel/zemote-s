@@ -626,6 +626,7 @@ class _RootShellState extends State<RootShell> {
                 onTap: _showDeviceSwitcher,
               ),
               headerTitle: _activeSessionTitle,
+              headerWorkspace: workspaceTitle(workspace),
               onOpenDrawer: _openDrawer,
             ),
           );

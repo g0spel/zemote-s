@@ -16,6 +16,25 @@ import 'diff_view.dart';
 import 'markdown_view.dart';
 import 'theme.dart';
 
+/// 由模型 option value 解析 (provider, model)。provider 必须用宿主
+/// 显式给的 modelProviderId——value 的 "builtin:x/Model" 前缀不是
+/// 注册表 id,直接拆分会得到 "provider not in registry"。
+(String, String) providerModelOf(WorkspacePrep? prep, String value) {
+  final model =
+      value.contains('/') ? value.substring(value.lastIndexOf('/') + 1) : value;
+  for (final v in prep?.option('model')?.options ?? const <ConfigOptionValue>[]) {
+    if (v.value == value) {
+      final fallbackProvider =
+          value.contains('/') ? value.substring(0, value.lastIndexOf('/')) : value;
+      return (v.modelProviderId ?? fallbackProvider, model);
+    }
+  }
+  final idx = value.lastIndexOf('/');
+  if (idx <= 0) return (value, value);
+  return (value.substring(0, idx), model);
+}
+
+
 class ChatPage extends StatefulWidget {
   final BridgeSession session;
   final Map<String, dynamic> scope;
@@ -50,6 +69,9 @@ class ChatPage extends StatefulWidget {
   /// land without rebuilding the shell. All ignored in Scaffold mode.
   final Widget? headerLeading;
   final ValueListenable<String?>? headerTitle;
+
+  /// 所属工作区展示名(顶栏第一行,会话标题下方小字;可空)。
+  final String? headerWorkspace;
   final VoidCallback? onOpenDrawer;
 
   const ChatPage({
@@ -64,6 +86,7 @@ class ChatPage extends StatefulWidget {
     this.sessionEpoch = 0,
     this.headerLeading,
     this.headerTitle,
+    this.headerWorkspace,
     this.onOpenDrawer,
   });
 
@@ -676,11 +699,9 @@ class _ChatPageState extends State<ChatPage> {
     final config = <String, dynamic>{};
     final modelValue = _draftConfig['model'];
     if (modelValue != null && modelValue.isNotEmpty) {
-      final idx = modelValue.lastIndexOf('/');
-      if (idx > 0) {
-        config['provider'] = modelValue.substring(0, idx);
-        config['model'] = modelValue.substring(idx + 1);
-      }
+      final (provider, model) = providerModelOf(_prep, modelValue);
+      config['provider'] = provider;
+      config['model'] = model;
     }
     if (_draftConfig['thought'] != null) {
       config['thought'] = _draftConfig['thought'];
@@ -819,12 +840,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// Dedicated skill picker so skills are one tap away (no `/` guessing).
-  /// 当前协作模式展示名(U2 输入框模式按钮):活动会话用现场值,
-  /// 草稿用草稿选择,展示名优先取 prepareWorkspace 选项的命名。
-  String get _currentModeLabel {
-    final mode = _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
-    return _optionLabel(_prep?.option('mode'), mode) ?? mode;
-  }
+  /// 当前协作模式 value(U2 输入框模式按钮):活动会话用现场值,
+  /// 草稿用草稿选择。
+  String get _currentModeLabel =>
+      _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
 
   /// 协作模式菜单(U2):与模型面板的模式区同源,选择即时生效。
   void _showModeMenu() {
@@ -1045,19 +1064,48 @@ class _ChatPageState extends State<ChatPage> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(EmberSpacing.page, EmberSpacing.gapS,
           EmberSpacing.page, EmberSpacing.gapS),
-      child: Row(
-        children: [
-          if (widget.headerLeading != null) widget.headerLeading!,
-          const SizedBox(width: EmberSpacing.gapM),
-          Expanded(child: _embeddedTitle(context)),
-          _headerActions(context, state, colors),
-          if (widget.onOpenDrawer != null)
-            IconButton(
-              icon: const Icon(Icons.menu, size: 22),
-              tooltip: '会话列表',
-              onPressed: widget.onOpenDrawer,
-            ),
-        ],
+      child: Column(children: [
+        // 第一行:设备胶囊 | 会话标题 + 所属工作区。
+        Row(
+          children: [
+            if (widget.headerLeading != null) widget.headerLeading!,
+            const SizedBox(width: EmberSpacing.gapM),
+            Expanded(child: _embeddedTitle(context)),
+          ],
+        ),
+        // 第二行:会话状态 | 模型 pill | 溢出菜单 | 会话列表。
+        Row(
+          children: [
+            _sessionStatusIcon(context, state),
+            const SizedBox(width: EmberSpacing.gapS),
+            Expanded(child: _headerActions(context, state, colors)),
+            if (widget.onOpenDrawer != null)
+              IconButton(
+                icon: const Icon(Icons.menu, size: 22),
+                tooltip: '会话列表',
+                onPressed: widget.onOpenDrawer,
+              ),
+          ],
+        ),
+      ]),
+    );
+  }
+
+  /// 会话流工作状态图标(UX 反馈:第二行加状态显示)。运行中 = 旋转
+  /// 箭头(primary),空闲 = 空心圆(textFaint);draft 无订阅时同样按
+  /// 空闲处理。
+  Widget _sessionStatusIcon(BuildContext context, ConversationState? state) {
+    final colors = EmberColors.of(context);
+    final running = state != null && state.isRunning;
+    return Padding(
+      padding: const EdgeInsets.only(left: 2),
+      child: Tooltip(
+        message: running ? '工作中' : '空闲',
+        child: Icon(
+          running ? Icons.motion_photos_on : Icons.radio_button_unchecked,
+          size: 15,
+          color: running ? colors.primary : colors.textFaint,
+        ),
       ),
     );
   }
@@ -4740,13 +4788,6 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
     return options.where((o) => !known.contains(o.id)).toList();
   }
 
-  /// 'builtin:zai-coding-plan/GLM-5.2' → (provider, model)
-  (String, String) _splitModelValue(String value) {
-    final idx = value.lastIndexOf('/');
-    if (idx <= 0) return (value, value);
-    return (value.substring(0, idx), value.substring(idx + 1));
-  }
-
   @override
   Widget build(BuildContext context) {
     // 会话态驱动(乐观补丁/宿主确认)时整面板跟随重建;draft 态由
@@ -4811,13 +4852,12 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
                           _setDraft('thought', v.value);
                         } else {
                           final modelValue = currentModelValue;
-                          final (provider, model) =
-                              modelValue.isNotEmpty
-                                  ? _splitModelValue(modelValue)
-                                  : (
-                                      '${config['provider'] ?? ''}',
-                                      '${config['model'] ?? ''}'
-                                    );
+                          final (provider, model) = modelValue.isNotEmpty
+                              ? providerModelOf(widget.prep, modelValue)
+                              : (
+                                  '${config['provider'] ?? ''}',
+                                  '${config['model'] ?? ''}'
+                                );
                           _apply(
                             context,
                             () => widget.transport.switchModelConfig(
@@ -4891,7 +4931,7 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
                       _setDraft('model', v.value);
                     } else {
                       final (provider, model) =
-                          _splitModelValue(v.value);
+                          providerModelOf(widget.prep, v.value);
                       // thought must be valid for the target model:
                       // keep current if supported, else fall back to the
                       // thought option's currentValue (Turbo: enabled/off)
@@ -5244,44 +5284,57 @@ class _SlashCommandBar extends StatelessWidget {
   }
 }
 
-/// 输入框左侧的协作模式按钮(U2):紧凑胶囊,展示当前模式名,
-/// 点击弹出模式菜单。modeLabel 为空时不渲染。
+/// 输入框左侧的协作模式按钮(U2):上图标下简称的紧凑两行,点击弹出
+/// 模式菜单。宿主模式名往往很长(如 "Ask before changes"),此处用
+/// 简称映射;未知模式回退 value 前 4 字符。modeValue 为空不渲染。
 class _ModeButton extends StatelessWidget {
-  final String? label;
+  final String? modeValue;
   final VoidCallback? onTap;
 
-  const _ModeButton({this.label, this.onTap});
+  const _ModeButton({this.modeValue, this.onTap});
+
+  static const _abbr = {
+    'build': ('构建', Icons.build),
+    'edit': ('编辑', Icons.edit_note),
+    'plan': ('计划', Icons.checklist),
+    'yolo': ('自主', Icons.bolt),
+  };
 
   @override
   Widget build(BuildContext context) {
-    if (label == null || label!.isEmpty) return const SizedBox.shrink();
+    final v = modeValue;
+    if (v == null || v.isEmpty) return const SizedBox.shrink();
     final colors = EmberColors.of(context);
+    final (name, icon) = _abbr[v] ??
+        (v.length > 4 ? v.substring(0, 4) : v, Icons.tune);
     return InkWell(
       borderRadius: BorderRadius.circular(EmberRadius.control),
       onTap: onTap,
       child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        width: 44,
+        height: 40,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(EmberRadius.control),
           border: Border.all(color: colors.hairline),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.bolt, size: 15, color: colors.primary),
-          const SizedBox(width: 3),
-          Text(label!,
-              style: TextStyle(
-                  fontSize: EmberType.caption,
-                  fontWeight: FontWeight.w600,
-                  color: colors.textMuted)),
-        ]),
+        child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: colors.primary),
+              Text(name,
+                  style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textMuted)),
+            ]),
       ),
     );
   }
 }
 
-/// "+"面板(U2):斜杠命令 / Skills / 附件 三段合一。
-class _PlusSheet extends StatelessWidget {
+/// "+"面板(U2):先出分类入口(Skills/斜杠命令/附件/添加上下文),
+/// 点进分类再列明细,避免一打开就是一整面列表。
+class _PlusSheet extends StatefulWidget {
   final List<_SlashItem> slashItems;
   final bool loading;
   final void Function(String insert) onSelect;
@@ -5297,23 +5350,24 @@ class _PlusSheet extends StatelessWidget {
   });
 
   @override
+  State<_PlusSheet> createState() => _PlusSheetState();
+}
+
+class _PlusSheetState extends State<_PlusSheet> {
+  /// null = 分类首页;'skills' / 'commands' = 对应明细列表。
+  String? _section;
+
+  @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
     final commands =
-        slashItems.where((i) => !i.isSkill).toList(growable: false);
+        widget.slashItems.where((i) => !i.isSkill).toList(growable: false);
     final skills =
-        slashItems.where((i) => i.isSkill).toList(growable: false);
+        widget.slashItems.where((i) => i.isSkill).toList(growable: false);
+
     Widget section(String title, List<_SlashItem> items) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-              child: Text(title,
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: colors.textMuted)),
-            ),
             if (items.isEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
@@ -5340,10 +5394,31 @@ class _PlusSheet extends StatelessWidget {
                           style: TextStyle(
                               fontSize: 11, color: colors.textFaint))
                       : null,
-                  onTap: () => onSelect(item.insert),
+                  onTap: () => widget.onSelect(item.insert),
                 ),
           ],
         );
+
+    Widget body;
+    if (_section == 'skills' || _section == 'commands') {
+      body = section(_section == 'skills' ? 'Skills' : '斜杠命令',
+          _section == 'skills' ? skills : commands);
+    } else {
+      body = Column(children: [
+        _plusCategory(context, Icons.auto_awesome_outlined, 'Skills',
+            '${skills.length} 项', () => setState(() => _section = 'skills')),
+        _plusCategory(
+            context,
+            Icons.terminal,
+            '斜杠命令',
+            '${commands.length} 项',
+            () => setState(() => _section = 'commands')),
+        _plusCategory(context, Icons.attach_file, '附件', '选择文件上传',
+            () => widget.onAttach()),
+        _plusCategory(context, Icons.data_object_outlined, '添加上下文',
+            '选择文件并插入引用', () => widget.onAttach()),
+      ]);
+    }
 
     return SafeArea(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -5352,44 +5427,66 @@ class _PlusSheet extends StatelessWidget {
           child: Align(
             alignment: Alignment.centerLeft,
             child: Row(children: [
-              const Text('插入',
-                  style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              if (_section != null)
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  tooltip: '返回',
+                  onPressed: () => setState(() => _section = null),
+                )
+              else
+                const SizedBox(width: 40),
+              Text(
+                  _section == 'skills'
+                      ? 'Skills'
+                      : _section == 'commands'
+                          ? '斜杠命令'
+                          : '插入',
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600)),
               const Spacer(),
-              IconButton(
-                icon: Icon(Icons.refresh,
-                    size: 18, color: colors.textMuted),
-                tooltip: '刷新',
-                onPressed: onRefresh,
-              ),
+              if (widget.loading)
+                const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child:
+                        CircularProgressIndicator(strokeWidth: 2))
+              else
+                IconButton(
+                  icon: Icon(Icons.refresh,
+                      size: 18, color: colors.textMuted),
+                  tooltip: '刷新',
+                  onPressed: widget.onRefresh,
+                ),
             ]),
           ),
         ),
-        if (loading)
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          )
-        else ...[
-          Flexible(
-            child: SingleChildScrollView(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    section('斜杠命令', commands),
-                    section('Skills', skills),
-                  ]),
-            ),
-          ),
-          ListTile(
-            leading: Icon(Icons.attach_file, size: 20, color: colors.textMuted),
-            title: const Text('附件',
-                style: TextStyle(fontSize: 13)),
-            onTap: onAttach,
-          ),
-          const SizedBox(height: 8),
-        ],
+        Flexible(
+          child: SingleChildScrollView(child: body),
+        ),
+        const SizedBox(height: 8),
       ]),
+    );
+  }
+
+  Widget _plusCategory(BuildContext context, IconData icon, String title,
+      String subtitle, VoidCallback onTap) {
+    final colors = EmberColors.of(context);
+    return ListTile(
+      leading: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: colors.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+        ),
+        child: Icon(icon, size: 18, color: colors.primary),
+      ),
+      title: Text(title, style: const TextStyle(fontSize: 14)),
+      subtitle: Text(subtitle,
+          style: TextStyle(fontSize: 11, color: colors.textFaint)),
+      trailing: Icon(Icons.chevron_right,
+          size: 18, color: colors.textFaint),
+      onTap: onTap,
     );
   }
 }
@@ -5401,7 +5498,7 @@ class _InputBar extends StatefulWidget {
   final VoidCallback onAttach;
   final VoidCallback onPlusMenu;
 
-  /// 当前协作模式展示名(空则不渲染模式按钮)与菜单回调(U2)。
+  /// 当前协作模式 value(空则不渲染模式按钮)与菜单回调(U2)。
   final String? modeLabel;
   final VoidCallback? onPickMode;
 
@@ -5429,7 +5526,7 @@ class _InputBarState extends State<_InputBar> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             _ModeButton(
-              label: widget.modeLabel,
+              modeValue: widget.modeLabel,
               onTap: widget.sending ? null : widget.onPickMode,
             ),
             IconButton(

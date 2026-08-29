@@ -1186,11 +1186,21 @@ class ConfigOptionValue {
   final String? description;
   final String? modelProviderName;
 
+  /// 宿主注册表里的 provider id(switchModelConfig 的 provider 参数必须
+  /// 用它,value 前缀里的 "builtin:x" 不是注册表 id)。
+  final String? modelProviderId;
+  final List<String> modelThoughtLevels;
+
   ConfigOptionValue._(Map raw)
       : value = '${raw['value'] ?? ''}',
         name = '${raw['name'] ?? raw['value'] ?? ''}',
         description = raw['description'] as String?,
-        modelProviderName = raw['modelProviderName'] as String?;
+        modelProviderName = raw['modelProviderName'] as String?,
+        modelProviderId = raw['modelProviderId'] as String?,
+        modelThoughtLevels = [
+          if (raw['modelThoughtLevels'] is List)
+            for (final v in raw['modelThoughtLevels'] as List) '$v',
+        ];
 }
 
 class SlashCommand {
@@ -1245,6 +1255,12 @@ class SessionEntry {
   final Map<String, dynamic>? pendingInteraction;
   final Map<String, dynamic> raw;
 
+  /// 归档时间戳(宿主 time_archived);0/缺省 = 未归档。桌面端归档后
+  /// sessions-index 增量会带上该字段,列表据此分流到「归档」组。
+  final int archivedAt;
+
+  bool get isArchived => archivedAt > 0;
+
   SessionEntry(this.raw)
       : sessionId = '${raw['sessionId'] ?? ''}',
         parentSessionId = raw['parentSessionId'] as String?,
@@ -1254,6 +1270,7 @@ class SessionEntry {
         lastActivityAt = (raw['lastActivityAt'] as num?)?.toInt() ?? 0,
         createdAt = (raw['createdAt'] as num?)?.toInt() ?? 0,
         hasBackgroundWork = raw['hasBackgroundWork'] == true,
+        archivedAt = (raw['archived'] as num?)?.toInt() ?? 0,
         pendingInteraction =
             (raw['pendingInteraction'] as Map?)?.cast<String, dynamic>();
 }
