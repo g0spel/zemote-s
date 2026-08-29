@@ -96,6 +96,7 @@ void main() {
       expect(theme.colorScheme.secondary, c.primary);
       expect(theme.colorScheme.secondaryContainer, c.raise);
       expect(theme.colorScheme.onSecondaryContainer, c.textSolid);
+      expect(theme.colorScheme.error, c.err);
       expect(theme.colorScheme.surface, c.card);
       expect(theme.colorScheme.surfaceContainerHighest, c.card);
       expect(theme.colorScheme.outline, c.hairline);
@@ -109,6 +110,7 @@ void main() {
       expect(theme.colorScheme.secondary, c.primary);
       expect(theme.colorScheme.secondaryContainer, c.raise);
       expect(theme.colorScheme.onSecondaryContainer, c.textSolid);
+      expect(theme.colorScheme.error, c.err);
       expect(theme.colorScheme.surface, c.card);
       expect(theme.colorScheme.surfaceContainerHighest, c.card);
       expect(theme.colorScheme.outline, c.hairline);

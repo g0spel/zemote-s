@@ -2184,7 +2184,7 @@ class _FeedbackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       icon: Icon(icon,
-          size: 15, color: active ? ZColors.primary : ZInk.ghost(context)),
+          size: 15, color: active ? EmberColors.of(context).primary : ZInk.ghost(context)),
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
     );
@@ -2625,7 +2625,7 @@ class _TimelineMarkerWidget extends StatelessWidget {
           Icons.compress,
           '压缩上下文 · ${marker['status'] ?? ''}'
               '${marker['tokensBefore'] != null ? ' · ${marker['tokensBefore']}→${marker['tokensAfter'] ?? '?'} tokens' : ''}',
-          ZColors.primary
+          EmberColors.of(context).primary
         ),
       'forkNotice' => (
           Icons.fork_right,
@@ -2753,7 +2753,7 @@ class _ContextUsageBar extends StatelessWidget {
     }
     final ratio = (used / max).clamp(0.0, 1.0);
     final color =
-        ratio > 0.8 ? ZColors.warning : ZColors.primary;
+        ratio > 0.8 ? ZColors.warning : EmberColors.of(context).primary;
     String fmt(int v) =>
         v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
     return Padding(
@@ -3243,7 +3243,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
             color: selected
-                ? ZColors.primary.withValues(alpha: 0.14)
+                ? EmberColors.of(context).primary.withValues(alpha: 0.14)
                 : ZInk.tile(context),
             borderRadius: BorderRadius.circular(10),
           ),
@@ -3252,13 +3252,13 @@ class _InsightsSheetState extends State<InsightsSheet> {
             children: [
               Icon(icon,
                   size: 14,
-                  color: selected ? ZColors.primary : ZInk.soft(context)),
+                  color: selected ? EmberColors.of(context).primary : ZInk.soft(context)),
               const SizedBox(width: 4),
               Text(
                 count != null ? '$label $count' : label,
                 style: TextStyle(
                   fontSize: 11.5,
-                  color: selected ? ZColors.primary : ZInk.soft(context),
+                  color: selected ? EmberColors.of(context).primary : ZInk.soft(context),
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
@@ -3365,7 +3365,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   color: s.completed
                       ? ZColors.success
                       : s.inProgress
-                          ? ZColors.primary
+                          ? EmberColors.of(context).primary
                           : ZInk.faint(context),
                 ),
                 const SizedBox(width: 6),
@@ -3395,7 +3395,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
               child: Row(
                 children: [
                   Icon(Icons.flag_outlined,
-                      size: 12, color: ZColors.primary),
+                      size: 12, color: EmberColors.of(context).primary),
                   const SizedBox(width: 5),
                   Text('计划进度 · $done / ${planItems.length}',
                       style: TextStyle(
@@ -3424,7 +3424,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   color: completed
                       ? ZColors.success
                       : inProgress
-                          ? ZColors.primary
+                          ? EmberColors.of(context).primary
                           : ZInk.faint(context),
                 ),
                 const SizedBox(width: 6),
@@ -4001,22 +4001,23 @@ class _QueueBar extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(14, 4, 14, 0),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: ZColors.primary.withValues(alpha: 0.08),
+        color: EmberColors.of(context).primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
         border:
-            Border.all(color: ZColors.primary.withValues(alpha: 0.25)),
+            Border.all(color: EmberColors.of(context).primary.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.queue_outlined,
-                  size: 14, color: ZColors.primary),
+              Icon(Icons.queue_outlined,
+                  size: 14, color: EmberColors.of(context).primary),
               const SizedBox(width: 6),
               Text('排队消息 ${items.length}',
-                  style: const TextStyle(
-                      fontSize: 12, color: ZColors.primary)),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: EmberColors.of(context).primary)),
               const Spacer(),
               InkWell(
                 onTap: () {
@@ -4660,7 +4661,7 @@ class _ModelModeSheet extends StatelessWidget {
                         : Icons.radio_button_off,
                     size: 18,
                     color: currentModeValue == v.value
-                        ? ZColors.primary
+                        ? EmberColors.of(context).primary
                         : ZInk.ghost(context),
                   ),
                   title: Text(v.name,
@@ -4794,7 +4795,7 @@ class _ModelModeSheet extends StatelessWidget {
                         : Icons.radio_button_off,
                     size: 18,
                     color: currentModelValue == v.value
-                        ? ZColors.primary
+                        ? EmberColors.of(context).primary
                         : ZInk.ghost(context),
                   ),
                   title: Text(v.name,
@@ -5141,7 +5142,7 @@ class _SlashCommandBar extends StatelessWidget {
                 size: 16,
                 color: command.isSkill
                     ? ZColors.warning
-                    : ZColors.primary,
+                    : EmberColors.of(context).primary,
               ),
               title: Text(
                 command.isSkill ? '\$${command.name}' : '/${command.name}',
@@ -5300,8 +5301,8 @@ class _InputBarState extends State<_InputBar> {
             ),
             const SizedBox(width: 10),
             Container(
-              decoration: const BoxDecoration(
-                color: ZColors.primary,
+              decoration: BoxDecoration(
+                color: EmberColors.of(context).primary,
                 shape: BoxShape.circle,
               ),
               child: IconButton(

@@ -278,4 +278,87 @@ void main() {
     bridge.dispose();
     await tester.pump(const Duration(seconds: 40));
   });
+
+  /// 以 [workspacePath] 为 scope 挂抽屉并完成 channel 握手,但不推实时
+  /// 快照 —— 抽屉停留在「实时未到达」态(种子可见)。
+  Future<void> pumpDrawerWithoutSnapshot(
+      WidgetTester tester, String workspacePath) async {
+    channels = ChannelClient(sendBody: (body) => sent.add(body));
+    bridge = BridgeSession.detached(
+      {'workspaceKey': workspacePath},
+      channels: channels,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SessionDrawer(
+          bridge: bridge,
+          scope: {'workspacePath': workspacePath},
+          workspaceName: workspacePath,
+          workspacePath: workspacePath,
+          currentSessionId: null,
+          onPick: picked.add,
+          onSwitchWorkspace: () {},
+          onManageDevices: () {},
+          deviceCount: 1,
+          deviceOnline: true,
+        ),
+      ),
+    ));
+    channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
+    await tester.pump();
+    _respond(channels, 0, <String, dynamic>{});
+    await tester.pump();
+    _respond(channels, 1, <String, dynamic>{});
+    await tester.pump();
+    _respond(channels, 3, {
+      'ack': {'subscriptionId': 'sub-test'},
+    });
+    await tester.pump();
+  }
+
+  testWidgets('切工作区后旧 scope 的离线种子消失', (tester) async {
+    // 缓存只喂 /ws-t;/ws-2 无缓存。
+    SharedPreferences.setMockInitialValues({
+      const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
+          jsonEncode([
+            {
+              'sessionId': 'cached-1',
+              'title': '离线缓存会话',
+              'phase': 'running',
+              'lastActivityAt': now.millisecondsSinceEpoch,
+              'createdAt': 1,
+            },
+          ]),
+    });
+
+    await pumpDrawerWithoutSnapshot(tester, '/ws-t');
+    expect(find.text('离线缓存会话'), findsOneWidget); // 旧 scope 种子在展示
+
+    // 宿主切工作区:同一 bridge,scope 换成 /ws-2(didUpdateWidget → 重挂订阅)。
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SessionDrawer(
+          bridge: bridge,
+          scope: const {'workspacePath': '/ws-2'},
+          workspaceName: 'WS-2',
+          workspacePath: '/ws-2',
+          currentSessionId: null,
+          onPick: picked.add,
+          onSwitchWorkspace: () {},
+          onManageDevices: () {},
+          deviceCount: 1,
+          deviceOnline: true,
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // 旧 scope 的种子不得在新工作区名下展示(数据正确性:可点即错会话)。
+    expect(find.text('离线缓存会话'), findsNothing);
+    expect(find.text('WS-2'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
 }

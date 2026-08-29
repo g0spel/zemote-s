@@ -184,6 +184,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
   }
 
   Future<void> _resubscribe() async {
+    // 旧 scope 的种子随订阅一起作废:先清空,再按新 scope 重新播种 ——
+    // 否则上一个工作区的缓存会话会在新工作区名下展示且可点(终审修复)。
+    setState(() => _seed = const []);
+    unawaited(_seedFromCache());
     final sub = _sub;
     _sub = null;
     if (sub != null) {
@@ -194,6 +198,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
   }
 
   Future<void> _subscribe() async {
+    // 重挂路径异步到达时组件可能已卸载(旧订阅 dispose 要等 unsubscribe 应答)。
+    if (!mounted) return;
     setState(() => _error = null);
     try {
       final sub = await _transport.subscribeSessionsIndex();

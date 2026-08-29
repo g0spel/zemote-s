@@ -49,7 +49,10 @@ class ZemoteMarkdown extends StatelessWidget {
       blockquoteDecoration: BoxDecoration(
         border: Border(
           left: BorderSide(
-              color: ZColors.primary.withValues(alpha: 0.5), width: 3),
+              color: EmberColors.of(context)
+                  .primary
+                  .withValues(alpha: 0.5),
+              width: 3),
         ),
       ),
       blockquotePadding: const EdgeInsets.only(left: 12),
@@ -66,8 +69,8 @@ class ZemoteMarkdown extends StatelessWidget {
             top: BorderSide(
                 color: ZInk.hairline(context))),
       ),
-      a: const TextStyle(
-          color: ZColors.running,
+      a: TextStyle(
+          color: EmberColors.of(context).primary,
           decoration: TextDecoration.underline),
     );
 

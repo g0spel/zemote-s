@@ -151,6 +151,7 @@ class _SkillsTabState extends State<_SkillsTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final colors = EmberColors.of(context);
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
       return Center(
@@ -158,7 +159,7 @@ class _SkillsTabState extends State<_SkillsTab>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('加载失败: $_error',
-                style: TextStyle(color: ZColors.danger, fontSize: 12)),
+                style: TextStyle(color: colors.err, fontSize: 12)),
             const SizedBox(height: 8),
             OutlinedButton(onPressed: _load, child: const Text('重试')),
           ],
@@ -174,19 +175,19 @@ class _SkillsTabState extends State<_SkillsTab>
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: ZInk.tile(context),
+              color: colors.raise,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(Icons.extension_outlined,
-                    size: 16, color: ZInk.faint(context)),
+                    size: 16, color: colors.textFaint),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     '远程协议未提供 MCP 服务器读取接口（仅支持同步写入），请在桌面端 设置 → MCP 管理。',
                     style:
-                        TextStyle(fontSize: 11.5, color: ZInk.soft(context)),
+                        TextStyle(fontSize: 11.5, color: colors.textSoft),
                   ),
                 ),
               ],
@@ -197,7 +198,8 @@ class _SkillsTabState extends State<_SkillsTab>
               '技能 (${_skills.length} · 已启用 ${_skills.where((s) => s['enabled'] == true).length})'),
           if (_skills.isEmpty)
             Text('暂无技能',
-                style: TextStyle(fontSize: 11.5, color: ZInk.faint(context)))
+                style:
+                    TextStyle(fontSize: 11.5, color: colors.textFaint))
           else
             for (final s in _skills)
               Card(
@@ -221,7 +223,7 @@ class _SkillsTabState extends State<_SkillsTab>
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style:
-                        TextStyle(fontSize: 11, color: ZInk.faint(context)),
+                        TextStyle(fontSize: 11, color: colors.textFaint),
                   ),
                   children: [
                     Padding(
@@ -250,7 +252,8 @@ class _SkillsTabState extends State<_SkillsTab>
           _sectionHeader('命令 (${_commands.length})'),
           if (_commands.isEmpty)
             Text('暂无自定义命令',
-                style: TextStyle(fontSize: 11.5, color: ZInk.faint(context)))
+                style:
+                    TextStyle(fontSize: 11.5, color: colors.textFaint))
           else
             for (final c in _commands)
               Card(
@@ -373,6 +376,7 @@ class _ServiceListState extends State<_ServiceList>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final colors = EmberColors.of(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -409,7 +413,7 @@ class _ServiceListState extends State<_ServiceList>
                 style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 11,
-                    color: ZInk.muted(context)),
+                    color: colors.textMuted),
               ),
             ),
           ],
@@ -439,7 +443,7 @@ class _ServiceListState extends State<_ServiceList>
               ),
               subtitle: Text(widget.subtitleOf(item),
                   style: TextStyle(
-                      fontSize: 11, color: ZInk.faint(context))),
+                      fontSize: 11, color: colors.textFaint)),
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12),
@@ -467,7 +471,8 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = enabled ? ZColors.success : ZInk.faint(context);
+    final colors = EmberColors.of(context);
+    final color = enabled ? colors.ok : colors.textFaint;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
