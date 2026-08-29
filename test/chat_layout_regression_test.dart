@@ -324,4 +324,101 @@ void main() {
     bridge.dispose();
     await tester.pump(const Duration(seconds: 40));
   });
+
+  testWidgets('长模型名不把会话列表按钮挤出屏(pill 省略,☰ 在界内)',
+      (tester) async {
+    tester.view.physicalSize = const Size(1080, 2280);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+
+    final listeners = <int, String>{};
+    final pending = <int, Object?>{};
+    final channels = ChannelClient(sendBody: (body) {
+      final r = ValueReader(body);
+      final h = decodeValue(r) as List;
+      if (h[0] == ChannelClient.reqPromise) {
+        pending[h[1] as int] = _autoReply(h[3] as String);
+      } else if (h[0] == ChannelClient.reqEventListen) {
+        listeners[h[1] as int] = h[3] as String;
+      }
+    });
+    final bridge = BridgeSession.detached({'workspaceKey': '/ws'},
+        channels: channels);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ChatPage(
+          session: bridge,
+          scope: const {'workspacePath': '/ws'},
+          workspaceKey: '/ws',
+          sessionId: null,
+          title: '新会话',
+          embedded: true,
+          onOpenDrawer: () {},
+        ),
+      ),
+    ));
+
+    bridge.channels
+        .handleMessage(_frame(const [ChannelClient.resInitialize, 0]));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'hi');
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    for (var i = 0; i < 12 &&
+        !listeners.containsValue('onDynamicConversationFrame'); i++) {
+      for (final id in pending.keys.toList()) {
+        _respond(bridge, id, pending.remove(id));
+      }
+      await tester.pump(const Duration(milliseconds: 150));
+    }
+    for (final id in pending.keys.toList()) {
+      _respond(bridge, id, pending.remove(id));
+    }
+    await tester.pump();
+    final convListener = listeners.entries
+        .singleWhere((e) => e.value == 'onDynamicConversationFrame')
+        .key;
+
+    // 运行中(停止按钮在场)+ 超长模型名:顶栏第二行最挤的形态。
+    // RenderFlex 溢出会直接抛异常判失败;☰ 必须完整落在界内。
+    _fire(bridge, convListener, {
+      'kind': 'complete',
+      'topic': 'conversation/s1',
+      'subscriptionId': 'conv-sub',
+      'frame': {
+        'subscriptionId': 'conv-sub',
+        'toSeq': 2,
+        'payload': {
+          'kind': 'snapshot',
+          'snapshot': {
+            'revision': 1,
+            'logEpoch': 'e1',
+            'control': {'phase': 'running'},
+            'config': {
+              'provider': 'builtin:bigmodel-coding-plan',
+              'model': 'claude-sonnet-4-5-20250929-very-long-name',
+            },
+            'rows': {
+              'totalCount': 1,
+              'firstRowId': 1,
+              'window': [
+                {'rowId': 1, 'kind': 'userInput', 'text': 'hi'},
+              ],
+            },
+          },
+        },
+      },
+    });
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(find.byIcon(Icons.menu), findsOneWidget);
+    final rect = tester.getRect(find.byIcon(Icons.menu));
+    expect(rect.right, lessThanOrEqualTo(360), // 1080/3 逻辑宽
+        reason: '会话列表按钮被长模型名挤出屏幕(真机三杠出界形态)');
+    expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    bridge.dispose();
+    await tester.pump(const Duration(seconds: 40));
+  });
 }

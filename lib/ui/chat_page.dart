@@ -1145,7 +1145,10 @@ class _ChatPageState extends State<ChatPage> {
                 builder: (context, _) => _sessionStatusChip(context, state),
               ),
             const Spacer(),
-            _headerActions(context, state, colors),
+            // 右侧操作簇用 Flexible 包住:长模型名(claude-sonnet-4-5-
+            // 20250929 之类)会把 pill 撑到超宽,把会话列表按钮挤出屏
+            // (真机 RenderFlex 溢出)。约束传到 pill 内部做省略。
+            Flexible(child: _headerActions(context, state, colors)),
             if (widget.onOpenDrawer != null)
               IconButton(
                 icon: const Icon(Icons.menu, size: 22),
@@ -1242,7 +1245,7 @@ class _ChatPageState extends State<ChatPage> {
               onPressed: () =>
                   _run('停止失败', () => _transport.stop(_sessionId!)),
             ),
-          _modelPill(context, state),
+          Flexible(child: _modelPill(context, state)),
           // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
           // 右侧会话列表入口挤出屏幕。
           PopupMenuButton<String>(
@@ -1311,11 +1314,16 @@ class _ChatPageState extends State<ChatPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(model,
-                style: TextStyle(
-                    fontSize: EmberType.body,
-                    fontWeight: FontWeight.w600,
-                    color: colors.textSolid)),
+            // 长模型名在约束内省略(思考档段保留);无约束时自然宽度。
+            Flexible(
+              child: Text(model,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: EmberType.body,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textSolid)),
+            ),
             if (thought != null) ...[
               const SizedBox(width: 6),
               Text('|',
