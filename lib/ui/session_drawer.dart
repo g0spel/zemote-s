@@ -345,7 +345,15 @@ class _SessionDrawerState extends State<SessionDrawer> {
     if (!_tasksLoaded) return;
     var fresh = false;
     for (final e in list) {
-      if (_seenIndexIds.add(e.sessionId)) fresh = true;
+      if (!_seenIndexIds.add(e.sessionId)) continue;
+      // 首拉在快照前完成的常态:索引"新面孔"其实已在首拉的任务集里
+      // (宿主建任务先于索引收录),归属已知,无需重拉——省掉挂载期的
+      // 双份 listTasks/listArchivedTasks。真正未知(本端/桌面新建)才刷。
+      if (_activeTaskIds.contains(e.sessionId) ||
+          _archivedIds.contains(e.sessionId)) {
+        continue;
+      }
+      fresh = true;
     }
     if (fresh) {
       _loadTasks();

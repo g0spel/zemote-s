@@ -24,55 +24,8 @@ class ZflowMarkdown extends StatelessWidget {
   Widget build(BuildContext context) {
     final codeFont =
         UiSettingsProvider.of(context)?.codeFontSize ?? fontSize - 1.5;
-    final styleSheet = MarkdownStyleSheet(
-      p: TextStyle(
-          fontSize: fontSize,
-          height: 1.6,
-          color: EmberColors.of(context).textSolid),
-      h1: const TextStyle(
-          fontSize: 20, fontWeight: FontWeight.w700, height: 1.6),
-      h2: const TextStyle(
-          fontSize: 18, fontWeight: FontWeight.w700, height: 1.6),
-      h3: const TextStyle(
-          fontSize: 16, fontWeight: FontWeight.w600, height: 1.6),
-      h4: const TextStyle(
-          fontSize: 15, fontWeight: FontWeight.w600, height: 1.6),
-      code: TextStyle(
-        fontFamily: EmberFonts.term,
-        fontSize: codeFont,
-        backgroundColor: EmberColors.of(context).codeInlineBg,
-        color: EmberColors.of(context).codeText,
-      ),
-      codeblockDecoration: const BoxDecoration(),
-      blockquote: TextStyle(
-          fontSize: fontSize, color: EmberColors.of(context).textSoft, height: 1.6),
-      blockquoteDecoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-              color: EmberColors.of(context)
-                  .primary
-                  .withValues(alpha: 0.5),
-              width: 3),
-        ),
-      ),
-      blockquotePadding: const EdgeInsets.only(left: 12),
-      listBullet: TextStyle(fontSize: fontSize, height: 1.6),
-      tableBody: TextStyle(fontSize: fontSize - 1),
-      tableHead: TextStyle(
-          fontSize: fontSize - 1, fontWeight: FontWeight.w600),
-      tableBorder: TableBorder.all(
-          color: EmberColors.of(context).hairline, width: 1),
-      tableCellsPadding: const EdgeInsets.symmetric(
-          horizontal: 8, vertical: 4),
-      horizontalRuleDecoration: BoxDecoration(
-        border: Border(
-            top: BorderSide(
-                color: EmberColors.of(context).hairline)),
-      ),
-      a: TextStyle(
-          color: EmberColors.of(context).primary,
-          decoration: TextDecoration.underline),
-    );
+    final styleSheet =
+        _StyleSheetCache.of(EmberColors.of(context), fontSize, codeFont);
 
     final body = MarkdownBody(
       data: data,
@@ -84,6 +37,73 @@ class ZflowMarkdown extends StatelessWidget {
       softLineBreak: true,
     );
     return body;
+  }
+}
+
+/// styleSheet 实例复用缓存。包内守卫(MarkdownWidget.didUpdateWidget):
+/// data 与 styleSheet 都未变时跳过重解析——此前每次 build 都 new 一个
+/// styleSheet,守卫恒失效,流式期间(100ms 一次全列表重建)所有未变的
+/// markdown 行都会整篇重解析。EmberColors.of 返回 const 实例,键稳定;
+/// 上限 16(字号 × 主题组合有限),超限整体清空即可。
+class _StyleSheetCache {
+  static final _cache = <Object, MarkdownStyleSheet>{};
+  static const _max = 16;
+
+  static MarkdownStyleSheet of(
+      EmberColors c, double fontSize, double codeFont) {
+    if (_cache.length >= _max) _cache.clear();
+    final key = Object.hash(c, fontSize, codeFont);
+    return _cache.putIfAbsent(key, () => _build(c, fontSize, codeFont));
+  }
+
+  static MarkdownStyleSheet _build(
+      EmberColors colors, double fontSize, double codeFont) {
+    return MarkdownStyleSheet(
+      p: TextStyle(
+          fontSize: fontSize,
+          height: 1.6,
+          color: colors.textSolid),
+      h1: const TextStyle(
+          fontSize: 20, fontWeight: FontWeight.w700, height: 1.6),
+      h2: const TextStyle(
+          fontSize: 18, fontWeight: FontWeight.w700, height: 1.6),
+      h3: const TextStyle(
+          fontSize: 16, fontWeight: FontWeight.w600, height: 1.6),
+      h4: const TextStyle(
+          fontSize: 15, fontWeight: FontWeight.w600, height: 1.6),
+      code: TextStyle(
+        fontFamily: EmberFonts.term,
+        fontSize: codeFont,
+        backgroundColor: colors.codeInlineBg,
+        color: colors.codeText,
+      ),
+      codeblockDecoration: const BoxDecoration(),
+      blockquote: TextStyle(
+          fontSize: fontSize, color: colors.textSoft, height: 1.6),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+              color: colors.primary.withValues(alpha: 0.5),
+              width: 3),
+        ),
+      ),
+      blockquotePadding: const EdgeInsets.only(left: 12),
+      listBullet: TextStyle(fontSize: fontSize, height: 1.6),
+      tableBody: TextStyle(fontSize: fontSize - 1),
+      tableHead: TextStyle(
+          fontSize: fontSize - 1, fontWeight: FontWeight.w600),
+      tableBorder: TableBorder.all(
+          color: colors.hairline, width: 1),
+      tableCellsPadding: const EdgeInsets.symmetric(
+          horizontal: 8, vertical: 4),
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(
+            top: BorderSide(color: colors.hairline)),
+      ),
+      a: TextStyle(
+          color: colors.primary,
+          decoration: TextDecoration.underline),
+    );
   }
 }
 

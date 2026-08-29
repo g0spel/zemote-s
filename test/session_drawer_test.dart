@@ -81,6 +81,23 @@ int? respondLast(ChannelClient channels, List<Uint8List> sent, String method,
   return null;
 }
 
+/// 按方法应答**全部**历史请求(含已应答的——信道对重复应答幂等忽略,
+/// 天然免跟踪状态)。串行 await 的重拉分两拍:第一拍答在途请求,泵一拍
+/// 让下一拍请求发出再答。比按 id 精确应答简单且不惧请求序错位。
+int respondAllMethod(ChannelClient channels, List<Uint8List> sent,
+    String method, Object? result) {
+  var n = 0;
+  for (final body in sent) {
+    final (header, _) = _decodeRequest(body);
+    final h = header as List;
+    if (h[0] == ChannelClient.reqPromise && h[3] == method) {
+      _respond(channels, h[1] as int, result);
+      n++;
+    }
+  }
+  return n;
+}
+
 /// 找监听器(resEventListen)的 wire id:onDynamicSessionsIndexFrame。
 int listenerId(List<Uint8List> sent) {
   for (final body in sent) {

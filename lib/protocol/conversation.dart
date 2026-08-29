@@ -744,11 +744,28 @@ class ConversationTransport {
 
   WorkspacePrep? _prep;
 
+  /// prepareWorkspace 在途 future(仅并发去重:聊天页 init、模型面板、
+  /// 供应商页可能同时强刷,合走一个请求。刻意不做 TTL 陈旧窗——缓存
+  /// 一致性比省一个请求重要,见传输层缓存假刷新的教训)。
+  Future<WorkspacePrep>? _prepInFlight;
+
   /// `zcode-task.prepareWorkspace` — returns configOptions (model/mode/
   /// thought selects) and slashCommands (builtin + custom skills/MCP).
   Future<WorkspacePrep> prepareWorkspace({bool refresh = false}) async {
     final cached = _prep;
     if (cached != null && !refresh) return cached;
+    final inFlight = _prepInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _fetchPrep();
+    _prepInFlight = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_prepInFlight, future)) _prepInFlight = null;
+    }
+  }
+
+  Future<WorkspacePrep> _fetchPrep() async {
     final res = await _channels.call(
       Channels.zcodeTask,
       'prepareWorkspace',

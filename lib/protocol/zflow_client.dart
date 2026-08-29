@@ -41,6 +41,51 @@ class ZflowClient {
 
   Future<void> connect() => relay.start();
 
+  // ------------------------------------------------------ frame watchdog
+
+  /// 最近一次桥数据帧到达时刻。注意与 RelayClient 的断链检测分工:
+  /// 链路死(socket 断)由 RelayClient 心跳处理;这里的场景是**链路活、
+  /// 桥冻结**——pair_status_ack 每 10s 照常入站,但桌面桥的重放队列
+  /// 已超限降级,会话帧最长冻结到 45s 宽限+重建后才整体冲刷(真机实测
+  /// 模型 5s 答完、手机 27s 后才收到)。此时只有 rpc-frame 级静默可辨。
+  DateTime? _lastBridgeFrameAt;
+
+  /// 上次看门狗主动恢复时刻(限频:≥30s 一次)。
+  DateTime? _lastWatchdogRecoveryAt;
+
+  Timer? _frameWatchdogTimer;
+
+  /// 桥帧看门狗:有活动桥 + 配对在线 + rpc-frame 静默 ≥25s(正常时
+  /// 索引推送 ~10s 一跳,静默 25s 即异常)→ 主动 reconnectWorkspace
+  /// (廉价路径,重挂桥即触发积压冲刷),不等 bridge-degraded 通知
+  /// (通知本身可能被同一冻结拖延)。
+  /// 懒启动:首个桥打开才起定时器,桥全部关闭即停——空闲连接不占
+  /// 定时器(widget 测试也不留挂起 Timer)。
+  void _startFrameWatchdog() {
+    _frameWatchdogTimer ??= Timer.periodic(const Duration(seconds: 10), (_) {
+      if (_disposed || _activeBridges.isEmpty) return;
+      if (relay.state != RelayState.paired) return;
+      final last = _lastBridgeFrameAt;
+      if (last == null) return;
+      final silent = DateTime.now().difference(last);
+      if (silent < const Duration(seconds: 25)) return;
+      final lastRecovery = _lastWatchdogRecoveryAt;
+      if (lastRecovery != null &&
+          DateTime.now().difference(lastRecovery) <
+              const Duration(seconds: 30)) {
+        return;
+      }
+      _lastWatchdogRecoveryAt = DateTime.now();
+      // 取最新打开的桥所在工作区(多桥场景下逐个重连太重,最新即当前)。
+      final bridge = _activeBridges.last.bridge;
+      final workspaceKey = '${bridge['workspaceKey'] ?? ''}';
+      if (workspaceKey.isEmpty) return;
+      _log('[watchdog] 桥帧静默 ${silent.inSeconds}s,主动重连工作区 '
+          '$workspaceKey(不等 bridge-degraded)');
+      _recoverBridgeOnce(_activeBridges.last);
+    });
+  }
+
   bool _needsBridgeRecovery = false;
 
   /// Relay reconnects happen silently (heartbeat timeout, network switch,
@@ -180,6 +225,8 @@ class ZflowClient {
       return;
     }
     if (type == 'rpc-frame' || type == 'rpc-frame-ack') {
+      // 看门狗的活性信号:桥上有真实数据帧到达(见 _startFrameWatchdog)。
+      _lastBridgeFrameAt = DateTime.now();
       // Race: the desktop may push frames (e.g. IPC Initialize) before
       // openBridge's await continuation attaches the transport. Buffer
       // unknown-bridge frames and flush on registration.
@@ -313,10 +360,15 @@ class ZflowClient {
       onDispose: (s) {
         _activeBridges.remove(s);
         _frameRouters.remove(s.bridge['bridgeSessionId']);
+        if (_activeBridges.isEmpty) {
+          _frameWatchdogTimer?.cancel();
+          _frameWatchdogTimer = null;
+        }
       },
     );
     _attachStack(session, bridgeSessionId, bridge);
     _activeBridges.add(session);
+    _startFrameWatchdog();
 
     await sendMobileViewState(
       workspaceKey: (bridge['workspaceKey'] as String?) ?? workspaceKey,
@@ -434,7 +486,11 @@ class ZflowClient {
     );
   }
 
+  bool _disposed = false;
+
   Future<void> dispose() async {
+    _disposed = true;
+    _frameWatchdogTimer?.cancel();
     relay.stateListenable.removeListener(_onRelayState);
     await _payloadSub?.cancel();
     for (final s in List<BridgeSession>.from(_activeBridges)) {
