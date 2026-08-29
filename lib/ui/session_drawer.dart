@@ -67,17 +67,24 @@ const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '
 
 /// Today → `HH:mm`, yesterday → `昨天`, within the last week → `周X`,
 /// else `M月d日` (with year when it differs from today's).
+/// 会话最近活跃时间(对照桌面端 sidePane.time 阶梯):刚刚 / N 分钟前 /
+/// N 小时前 / N 天前;超过一周落回日期(昨天带时刻,本周内周X,更早
+/// M月d日 / 年月日)。
 String _relativeDayLabel(int millis) {
   if (millis <= 0) return '';
   final time = DateTime.fromMillisecondsSinceEpoch(millis);
   final now = DateTime.now();
+  final diff = now.difference(time);
+  if (diff.inMinutes < 1) return '刚刚';
+  if (diff.inHours < 1) return '${diff.inMinutes} 分钟前';
+  if (diff.inDays < 1) return '${diff.inHours} 小时前';
+  if (diff.inDays < 7) return '${diff.inDays} 天前';
   final today = DateTime(now.year, now.month, now.day);
   final day = DateTime(time.year, time.month, time.day);
   final hhmm =
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   final daysAgo = today.difference(day).inDays;
-  if (daysAgo <= 0) return hhmm;
-  if (daysAgo == 1) return '昨天';
+  if (daysAgo == 1) return '昨天 $hhmm';
   if (daysAgo < 7) return _weekdays[time.weekday - 1];
   if (time.year == now.year) return '${time.month}月${time.day}日';
   return '${time.year}年${time.month}月${time.day}日';
@@ -154,6 +161,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
   SessionsIndexSubscription? _sub;
   List<SessionEntry> _entries = const [];
   bool _ready = false;
+
+  /// 最近一次非空实时列表(粘性):快照重放(resync/gap)会把 state.list
+  /// 瞬时清空,直接 setState 会让抽屉闪一下空列表;重放完成前沿用旧列表。
+  List<SessionEntry> _lastNonEmpty = const [];
   String? _error;
 
   /// 离线种子(2c):打开抽屉先展示上次缓存,实时数据到达即覆盖。
@@ -238,8 +249,14 @@ class _SessionDrawerState extends State<SessionDrawer> {
   void _onState() {
     final sub = _sub;
     if (sub == null || !mounted) return;
+    final list = sortSessions(sub.state.list);
+    if (list.isEmpty && _lastNonEmpty.isNotEmpty && sub.state.ready) {
+      // 重放瞬间:沿用上次列表,等重放后的真实快照(非空或确认清空)。
+      return;
+    }
+    _lastNonEmpty = list;
     setState(() {
-      _entries = sortSessions(sub.state.list);
+      _entries = list;
       _ready = sub.state.ready;
     });
     _notifyCurrentVanished();

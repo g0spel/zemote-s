@@ -62,7 +62,15 @@ class AccountStore extends ChangeNotifier {
       : _storage = storage;
 
   final List<Account> _accounts = [];
-  List<Account> get accounts => List.unmodifiable(_accounts);
+  /// 最近使用的设备在前(autoConnect 据此连"上一次连接的设备")。
+  List<Account> get accounts {
+    final list = [..._accounts]..sort((a, b) {
+        final ua = a.lastUsedAt ?? 0;
+        final ub = b.lastUsedAt ?? 0;
+        return ub.compareTo(ua);
+      });
+    return List.unmodifiable(list);
+  }
 
   bool _loaded = false;
   bool get loaded => _loaded;

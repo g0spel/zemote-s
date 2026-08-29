@@ -239,12 +239,16 @@ class ConversationTransport {
   }
 
   /// Creates a new session (mirrors the composer's first-send path):
-  /// command `createSession` with `{workspaceId, firstInput:{text}}` and a
-  /// null envelope sessionId. Returns the new sessionId on `accepted`.
+  /// command `createSession` with a null envelope sessionId. Returns the
+  /// new sessionId on `accepted`.
+  ///
+  /// 宿主 schema(.strict())只收 sessionId/workspace/parentSessionId/
+  /// mode/model/thoughtLevel/mcpServers…——早期猜测的 `firstInput` 与
+  /// 嵌套 `config` 字段会被静默剥离:首条文本从未送达,草稿的模型/
+  /// 思考档也不生效(真机表现即"新会话第一条消息收不到回复")。文本
+  /// 一律在订阅建立后走 sendText;初始模型/思考档走顶层 model/thought。
   Future<String> createSession(
     String workspaceId, {
-    String? firstText,
-    List<Map<String, dynamic>>? attachments,
     Map<String, dynamic>? config,
     String? runtimeModel,
     List<String>? mcpServers,
@@ -254,14 +258,16 @@ class ConversationTransport {
       null,
       'createSession',
       {
-        'workspaceId': workspaceId,
-        if (firstText != null)
-          'firstInput': {
-            'text': firstText,
-            if (attachments != null && attachments.isNotEmpty)
-              'attachments': attachments,
-          },
-        if (config != null) 'config': config,
+        'workspace': {'workspacePath': workspaceId},
+        if (config != null) ...{
+          if (config['model'] != null)
+            'model': {
+              'providerId': config['provider'],
+              'modelId': config['model'],
+            },
+          if (config['thought'] != null) 'thoughtLevel': config['thought'],
+          if (config['mode'] != null) 'mode': config['mode'],
+        },
         if (runtimeModel != null) 'runtimeModel': runtimeModel,
         if (mcpServers != null && mcpServers.isNotEmpty)
           'mcpServers': mcpServers,

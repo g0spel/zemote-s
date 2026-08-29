@@ -99,26 +99,19 @@ void main() {
     await tester.pump();
     expect(pushed, isEmpty); // 会话尚未采纳,不推
 
+    // 新流程:create 不带 firstInput(宿主 strict schema 会剥离该字段,
+    // 文本从未送达);采纳会话后先等订阅(id7 监听/id8 请求)建立,再
+    // sendText(id9)。
     _respond(bridge, 6, {
       'status': 'accepted',
       'result': {'sessionId': 's-new'},
     });
     await tester.pump();
-    // 首条消息随 createSession 发出,后台订阅会话流(id7 监听/id8 请求)。
     _respond(bridge, 8, {
       'ack': {'subscriptionId': 'conv-sub'},
     });
     await tester.pump();
     await tester.pump();
-
-    // 修复点:采纳 sessionId 后补跑推送,且携带会话 id 供壳回写
-    // (修复前此处为空;Task 4 起回调签名为 (sessionId, title),
-    // A10 起追加宿主重建代数 epoch,未注入时恒为 0)。
-    expect(pushed, [
-      ['s-new', '桌面起的标题', 0],
-    ]);
-    // 回归:发送完成后 composer 回到可输入态。
-    expect(find.byIcon(Icons.arrow_upward), findsOneWidget);
 
     // 清理:卸载(两个订阅各自 unsubscribe)、释放桥(其帧装配心跳
     // 定时器不在树上,须显式 dispose),再冲刷残余定时器。

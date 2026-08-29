@@ -514,21 +514,16 @@ class _ChatPageState extends State<ChatPage> {
     try {
       var sessionId = _sessionId;
       if (sessionId == null) {
-        // 1) create the session (can take a while when the runtime warms)
+        // 1) create the session (can take a while when the runtime warms).
+        // 宿主 createSession schema(.strict())没有 firstInput/attachments
+        // 字段——早期版本把首条文本塞进 firstInput,被宿主静默剥离,文本
+        // 从未送达(表现为新会话首条大概率收不到回复)。create 只建会话
+        // 并应用草稿的模型/思考档/模式,文本在订阅建立后统一走 sendText。
         setState(() => _progress = '正在创建会话（首次可能需要预热）…');
         final sw = Stopwatch()..start();
-        // Plain text first message is sent WITH createSession (firstInput,
-        // mirrors the official composer). This avoids a send-before-subscribe
-        // race where the first command can be dropped on a fresh session.
-        final text = '${echo['text']}';
-        final canUseFirstInput = text.isNotEmpty &&
-            (echo['files'] as List).isEmpty &&
-            !text.startsWith('/goal ') &&
-            heldDisposition == null;
         try {
           sessionId = await _transport.createSession(
             widget.workspaceKey,
-            firstText: canUseFirstInput ? text : null,
             config: _buildDraftConfig(),
             timeout: const Duration(seconds: 90),
           );
@@ -542,17 +537,10 @@ class _ChatPageState extends State<ChatPage> {
         }
         log('[chat] createSession ok in ${sw.elapsedMilliseconds}ms');
         _adoptCreatedSession(sessionId);
-        // 2) subscribe in the background — must NOT block sending
         setState(() => _progress = null);
-        if (canUseFirstInput) {
-          // Message already sent with the session; the history snapshot
-          // will confirm it and retire the echo.
-          mark('sent');
-          _subscribe();
-          return;
-        }
-        // Attachments / goal commands: the follow-up command needs an active
-        // subscription, so wait for it before proceeding.
+        // 2) subscribe BEFORE sending: the fresh session's relay fanout
+        // only reaches this client once the index/conversation subscription
+        // is live, so any earlier send risks the reply never arriving.
         await _subscribe();
       }
       final text = '${echo['text']}';
@@ -2309,6 +2297,7 @@ class _AssistantBubble extends StatelessWidget {
     final text = row['text'] as String? ?? '';
     final streaming = row['state'] == 'streaming';
     final feedback = row['feedback'] as String?;
+    final rowTs = _rowTsOf(row);
     return Container(
       margin: const EdgeInsets.only(right: 24, top: 4, bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -2351,6 +2340,11 @@ class _AssistantBubble extends StatelessWidget {
                     onTap: () => _setFeedback(
                         feedback == 'dislike' ? null : 'dislike'),
                   ),
+                  // 回合时间戳(桌面端约定:行尾小字,今天只给时刻)。
+                  Text(_messageTimeLabel(rowTs),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: EmberColors.of(context).textFaint)),
                 ],
               ],
             ),
@@ -2358,6 +2352,30 @@ class _AssistantBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 行级时间戳:协议 ts 优先(历史行带真实时间),回落视图层到达戳。
+int? _rowTsOf(Map<String, dynamic> row) {
+  final ts = (row['ts'] as num?)?.toInt() ?? 0;
+  if (ts > 0) return ts;
+  return (row['_zflowTs'] as num?)?.toInt();
+}
+
+/// 消息时间标签(对照桌面 chat.message.time):今天 HH:mm,昨天带
+/// "昨天"前缀,同年 M月d日,跨年带年份。
+String _messageTimeLabel(int? millis) {
+  if (millis == null || millis <= 0) return '';
+  final t = DateTime.fromMillisecondsSinceEpoch(millis);
+  final now = DateTime.now();
+  final hhmm =
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  final day = DateTime(t.year, t.month, t.day);
+  final today = DateTime(now.year, now.month, now.day);
+  final daysAgo = today.difference(day).inDays;
+  if (daysAgo == 0) return hhmm;
+  if (daysAgo == 1) return '昨天 $hhmm';
+  if (t.year == now.year) return '${t.month}月${t.day}日 $hhmm';
+  return '${t.year}年${t.month}月${t.day}日 $hhmm';
 }
 
 class _FeedbackButton extends StatelessWidget {

@@ -210,6 +210,7 @@ class _RootShellState extends State<RootShell> {
   /// generation commits state, so a mid-flight switch always lands on the
   /// device the user asked for last.
   Future<void> _openAccount(Account account) async {
+    unawaited(widget.store.touch(account.id));
     final gen = ++_chainGeneration;
     _loadedAccountId = account.id;
     _teardownDeviceState();
@@ -540,7 +541,11 @@ class _RootShellState extends State<RootShell> {
                 child: switch (_tab) {
                   0 => _conversationsTab(context, bridge),
                   1 => bridge == null || workspace == null
-                      ? _mutedHint('连接设备后可用', colors)
+                      ? _mutedHint(
+                          session.client == null
+                              ? '连接设备后可用'
+                              : '选择工作区后可用',
+                          colors)
                       : AutomationPage(
                           key: ValueKey(
                               'auto-${workspaceKeyOf(workspace)}'),
