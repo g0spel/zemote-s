@@ -66,6 +66,21 @@ int? respondMethod(ChannelClient channels, List<Uint8List> sent, String method,
 }
 
 
+/// 按方法应答最新的一条请求(重拉产生的新 wire id 大于初次请求;
+/// respondMethod 总命中首条已应答的旧请求,答不到重拉)。
+int? respondLast(ChannelClient channels, List<Uint8List> sent, String method,
+    {Object? result = const <String, dynamic>{}}) {
+  for (final body in sent.reversed) {
+    final (header, _) = _decodeRequest(body);
+    final h = header as List;
+    if (h[0] == ChannelClient.reqPromise && h[3] == method) {
+      _respond(channels, h[1] as int, result);
+      return h[1] as int;
+    }
+  }
+  return null;
+}
+
 /// 找监听器(resEventListen)的 wire id:onDynamicSessionsIndexFrame。
 int listenerId(List<Uint8List> sent) {
   for (final body in sent) {
@@ -163,11 +178,18 @@ void main() {
     // channel 初始化 + 泵到稳定:循环应答已知方法(握手→任务列表→
     // initialize→订阅),直至不再产生新请求;最后应答订阅 ack。
     channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
+    // listTasks 按种子会话生成活跃任务(归属=任务列表;索引条目需在
+    // 活跃任务里才进活跃组,已删任务的孤儿被隐藏)。
+    final activeTasks = [
+      for (final e in entries)
+        if (e is Map && (e['archived'] as num? ?? 0) == 0)
+          {'taskId': e['sessionId'], 'title': e['title']},
+    ];
     final results = <String, Object?>{
       'helloConversationV4': <String, dynamic>{},
       'initializeConversationV4': <String, dynamic>{},
       'listPinnedTasks': pinned,
-      'listTasks': const [],
+      'listTasks': activeTasks,
       'listArchivedTasks': const [],
     };
     for (var round = 0; round < 6; round++) {
@@ -200,6 +222,11 @@ void main() {
     }));
     await tester.pump();
     expect(find.text('修复登录'), findsOneWidget); // 列表已渲染
+    // 快照带来未知 id → 抽屉重拉任务归属(串行 await,两波应答)。
+    respondLast(channels, sent, 'listTasks', result: activeTasks);
+    await tester.pump();
+    respondLast(channels, sent, 'listArchivedTasks', result: const []);
+    await tester.pump();
   }
 
   /// 选中一条并断言已进入多选。
@@ -342,7 +369,10 @@ void main() {
       'helloConversationV4': <String, dynamic>{},
       'initializeConversationV4': <String, dynamic>{},
       'listPinnedTasks': const [],
-      'listTasks': const [],
+      'listTasks': [
+        for (final e in entries)
+          {'taskId': e['sessionId'], 'title': e['title']},
+      ],
       'listArchivedTasks': const [],
     };
     for (var round = 0; round < 6; round++) {
@@ -419,7 +449,10 @@ void main() {
       'helloConversationV4': <String, dynamic>{},
       'initializeConversationV4': <String, dynamic>{},
       'listPinnedTasks': const [],
-      'listTasks': const [],
+      'listTasks': [
+        for (final e in entries)
+          {'taskId': e['sessionId'], 'title': e['title']},
+      ],
       'listArchivedTasks': const [],
     };
     for (var round = 0; round < 6; round++) {
@@ -587,7 +620,8 @@ void main() {
     expect(vanishedCalls, isEmpty);
     expect(switchCounts, isEmpty);
 
-    // s1 被删除/归档:增量推送把它从索引移除 → 回调宿主一次。
+    // s1 被删除/归档:增量推送把它从索引移除 → 触发归属重拉 → 复位回调。
+    // 宿主语义:删除后任务不再出现在 listTasks(deleted 排除)。
     channels.handleMessage(_inFrame([ChannelClient.resEventFire, listenerId(sent)], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
@@ -603,6 +637,12 @@ void main() {
         },
       },
     }));
+    await tester.pump();
+    respondLast(channels, sent, 'listTasks', result: [
+      {'taskId': 's2', 'title': '重构 API'},
+    ]);
+    await tester.pump(); // listArchivedTasks 请求此拍才发出(串行 await)
+    respondLast(channels, sent, 'listArchivedTasks', result: const []);
     await tester.pump();
     expect(find.text('修复登录'), findsNothing);
     expect(vanishedCalls.length, 1);
@@ -734,11 +774,14 @@ void main() {
     _respond(channels, refreshId, [
       {'taskId': 's1'},
     ]);
-    // 归档/任务列表刷新同轮发出,一并应答,避免悬挂。
-    respondMethod(channels, sent, 'listTasks',
-        result: const [], skip: {refreshId});
-    respondMethod(channels, sent, 'listArchivedTasks',
-        result: const [], skip: {refreshId});
+    // 归属刷新同轮发出(串行 await,两波应答;活跃集仍含 s1/s2,
+    // 空集会把索引条目全变成孤儿隐藏)。
+    respondLast(channels, sent, 'listTasks', result: [
+      {'taskId': 's1', 'title': '修复登录'},
+      {'taskId': 's2', 'title': '重构 API'},
+    ]);
+    await tester.pump();
+    respondLast(channels, sent, 'listArchivedTasks', result: const []);
     await tester.pump();
 
     expect(find.text('已选 1 项'), findsNothing); // 已退出多选

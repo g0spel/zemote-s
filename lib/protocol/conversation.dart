@@ -254,14 +254,11 @@ class ConversationTransport {
     List<String>? mcpServers,
     Duration timeout = const Duration(seconds: 90),
   }) async {
-    final res = await sendCommand(
-      null,
-      'createSession',
-      {
-        // zcode-agent 通道校验层要求顶层 workspaceId 字符串(真机
-        // Invalid input 实证;relay 桥的 workspace 对象在更内层由宿主
-        // 自行从 workspaceId 解析)。
-        'workspaceId': workspaceId,
+    final payload = {
+      // zcode-agent 通道校验层要求顶层 workspaceId 字符串(真机
+      // Invalid input 实证;relay 桥的 workspace 对象在更内层由宿主
+      // 自行从 workspaceId 解析)。
+      'workspaceId': workspaceId,
         if (config != null) ...{
           if (config['model'] != null)
             'model': {
@@ -274,9 +271,11 @@ class ConversationTransport {
         if (runtimeModel != null) 'runtimeModel': runtimeModel,
         if (mcpServers != null && mcpServers.isNotEmpty)
           'mcpServers': mcpServers,
-      },
-      timeout: timeout,
-    );
+    };
+    debugPrint('[chat] createSession req: $payload');
+    final res = await sendCommand(null, 'createSession', payload,
+        timeout: timeout);
+    debugPrint('[chat] createSession res: $res');
     final map = res is Map ? res.cast<String, dynamic>() : null;
     final status = map?['status'];
     if (status != 'accepted') {

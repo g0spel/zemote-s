@@ -126,6 +126,10 @@ class SessionDrawer extends StatefulWidget {
   final int deviceCount;
   final bool deviceOnline;
 
+  /// 抽屉是否展开(壳注入)。打开期间周期重拉任务归属,桌面端的归档/
+  /// 删除操作才能同步进分组;关闭时不刷。
+  final bool open;
+
   const SessionDrawer({
     super.key,
     required this.bridge,
@@ -139,6 +143,7 @@ class SessionDrawer extends StatefulWidget {
     required this.onManageDevices,
     required this.deviceCount,
     required this.deviceOnline,
+    this.open = false,
   });
 
   @override
@@ -196,6 +201,22 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 等场景下列表尚未收录该会话不算消失)。
   bool _currentSeen = false;
 
+  /// 索引条目键样本探针只打一次(诊断混入:索引 vs 任务列表的 id 交集)。
+  bool _idxProbed = false;
+
+  /// 索引里已见过的会话 id(_maybeRefreshTasksFor 的单调集合)。
+  final Set<String> _seenIndexIds = {};
+
+  /// _loadTasks 在途标志(周期刷新/未知 id 触发/管理操作可能并发);
+  /// 在途期间的再请求不丢弃,完成后续跑一次(最新归属优先)。
+  bool _loadingTasks = false;
+  bool _reloadQueued = false;
+
+  /// 上次任务归属拉取时刻(毫秒钟)。抽屉打开期间借索引推送(~10s 一跳)
+  /// 做刷新时钟:距上次 ≥15s 且抽屉展开 → 重拉。不另起 Timer,避免常驻
+  /// 定时器(widget 测试与后台功耗都不友好)。
+  int _lastTasksLoadMs = 0;
+
   @override
   void initState() {
     super.initState();
@@ -205,6 +226,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
     _seedFromCache();
     _loadPinned();
     _loadTasks();
+  }
+
+  @override
+  void didUpdateWidget(SessionDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 每次展开都拿最新归属(桌面端可能归档/删除过任务)。
+    if (widget.open && !oldWidget.open) _loadTasks();
   }
 
   @override
@@ -261,6 +289,21 @@ class _SessionDrawerState extends State<SessionDrawer> {
     if (sub == null || !mounted) return;
     final list = sortSessions(sub.state.list);
     debugPrint('[zflow] _onState ready=${sub.state.ready} n=${list.length}');
+    final prevIds = _entries.map((e) => e.sessionId).toSet();
+    if (list.isNotEmpty && !_idxProbed) {
+      _idxProbed = true;
+      final raw = list.first.raw;
+      final ids = list.map((e) => e.sessionId).toSet();
+      final orphan = ids
+          .where((id) =>
+              !_archivedIds.contains(id) && !_activeTaskIds.contains(id))
+          .length;
+      debugPrint('[zflow] idxSampleKeys=${raw.keys.toList()} '
+          'idxArchivedFlag=${raw['archived'] ?? raw['archivedAt'] ?? '-'} '
+          'overlapArch=${ids.where(_archivedIds.contains).length} '
+          'overlapAct=${ids.where(_activeTaskIds.contains).length} '
+          'orphan=$orphan');
+    }
     if (list.isEmpty && _lastNonEmpty.isNotEmpty && sub.state.ready) {
       // 重放瞬间:沿用上次列表,等重放后的真实快照(非空或确认清空)。
       return;
@@ -272,6 +315,35 @@ class _SessionDrawerState extends State<SessionDrawer> {
     });
     _notifyCurrentVanished();
     _syncCache(sub);
+    _maybeRefreshTasksFor(list);
+    // 索引移除了此前活跃的会话(桌面端删除/归档):归属集已过期,重拉
+    // 后由 _loadTasks 末尾的补判定决定是否复位(在途旧数据不误判存活)。
+    if (_tasksLoaded && prevIds.isNotEmpty) {
+      final gone =
+          prevIds.difference(list.map((e) => e.sessionId).toSet());
+      if (gone.any(_activeTaskIds.contains)) _loadTasks();
+    }
+  }
+
+  /// 索引出现未见过的会话(本端新建首条落地/桌面新建)→ 重拉任务归属,
+  /// 否则新会话要等下次开抽屉才出现在活跃组。_seenIndexIds 单调记录,
+  /// 已删任务的孤儿不会反复触发(它们不在任何任务列表里,但只刷新一次)。
+  void _maybeRefreshTasksFor(List<SessionEntry> list) {
+    if (!_tasksLoaded) return;
+    var fresh = false;
+    for (final e in list) {
+      if (_seenIndexIds.add(e.sessionId)) fresh = true;
+    }
+    if (fresh) {
+      _loadTasks();
+      return;
+    }
+    // 无新面孔时的节流刷新:抽屉展开期间(桌面端可能归档/删除过任务,
+    // 索引条目无归档标志,只能重拉归属),距上次拉取 ≥15s 才动手。
+    if (widget.open &&
+        DateTime.now().millisecondsSinceEpoch - _lastTasksLoadMs >= 15000) {
+      _loadTasks();
+    }
   }
 
   /// A4:当前内嵌会话曾出现在实时列表、后又消失(删除/归档)→ 回调宿主
@@ -315,6 +387,12 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 一次拉取即得权威的活跃/归档分流——替代此前"索引猜 + listArchived
   /// 补"的组合(存量种子混入活跃、归档不同步均源于此)。
   Future<void> _loadTasks() async {
+    if (_loadingTasks) {
+      _reloadQueued = true;
+      return;
+    }
+    _loadingTasks = true;
+    _lastTasksLoadMs = DateTime.now().millisecondsSinceEpoch;
     try {
       Future<(bool, dynamic)> call(String method) => widget.bridge.channels
           .call(Channels.zcodeTask, method, [widget.scope])
@@ -359,6 +437,17 @@ class _SessionDrawerState extends State<SessionDrawer> {
       debugPrint('[zflow] _loadTasks total=${list.length} '
           'active=${active.length} archived=${archived.length} '
           'sampleKeys=${list.isEmpty ? '-' : '${(list.first as Map).keys.toList()}'}');
+      {
+        final actIds = {for (final e in active) e.sessionId};
+        final archIds = {for (final e in archived) e.sessionId};
+        final idxIds = _entries.map((e) => e.sessionId).toSet();
+        if (idxIds.isNotEmpty) {
+          debugPrint('[zflow] _loadTasks x-index: idx=${idxIds.length} '
+              'inAct=${idxIds.where(actIds.contains).length} '
+              'inArch=${idxIds.where(archIds.contains).length} '
+              'orphan=${idxIds.where((id) => !actIds.contains(id) && !archIds.contains(id)).length}');
+        }
+      }
       // 归档归属以任务列表为准;活跃显示沿用索引条目(带 preview/实时
       // phase),_activeTaskIds 供 vanished 三重确认。
       setState(() {
@@ -367,8 +456,17 @@ class _SessionDrawerState extends State<SessionDrawer> {
         _archivedIds = {for (final e in archived) e.sessionId};
         _tasksLoaded = true;
       });
+      // 归属更新后再判一次消失:索引移除触发的重拉在此拿到新任务集,
+      // 已删除的当前会话此刻才能正确复位(旧集会误判"仍存活")。
+      _notifyCurrentVanished();
     } catch (e) {
       log('[诊断] listTasks 拉取失败: $e');
+    } finally {
+      _loadingTasks = false;
+      if (_reloadQueued) {
+        _reloadQueued = false;
+        scheduleMicrotask(_loadTasks);
+      }
     }
   }
 
@@ -382,8 +480,12 @@ class _SessionDrawerState extends State<SessionDrawer> {
         .whenComplete(() => _cacheSyncedSub = sub));
   }
 
+  /// 活跃组 = 索引 ∩ 活跃任务。sessions-index 会广播已归档与已删任务
+  /// 的会话且条目无归档标志;归属只能以任务列表为准——不在活跃任务里
+  /// 的索引条目(归档走 _archived 组,已删任务的孤儿直接隐藏,与桌面
+  /// 端任务列表行为一致)。任务未载回前(!ready 阶段)仍按索引展示。
   List<SessionEntry> get _filtered => filterSessions(_entries, _query)
-      .where((e) => !_tasksLoaded || !_archivedIds.contains(e.sessionId))
+      .where((e) => !_tasksLoaded || _activeTaskIds.contains(e.sessionId))
       .toList();
 
   // ------------------------------------------------------- manage actions

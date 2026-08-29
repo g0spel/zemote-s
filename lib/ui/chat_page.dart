@@ -153,9 +153,21 @@ class _ChatPageState extends State<ChatPage> {
   /// protocol rows/revisions.
   final List<Map<String, dynamic>> _echoes = [];
 
+  /// 发送已被宿主接受、但订阅侧行数据尚未到达的窗口。此间最新的已发送
+  /// 气泡与状态胶囊按「处理中/工作中」乐观显示——工作区桥降级冻结时,
+  /// 订阅行可能数十秒后才整体冲刷,反馈不能干等(真机实测)。
+  bool _turnPending = false;
+
   void _dedupeEchoes() {
     final state = _state;
-    if (state == null || _echoes.isEmpty) return;
+    if (state == null) return;
+    if (_turnPending &&
+        (state.rows.isNotEmpty ||
+            (state.phase.isNotEmpty && state.phase != 'draft'))) {
+      // 轮次已在订阅侧物化(行到达或相位离开 draft),乐观窗口结束。
+      setState(() => _turnPending = false);
+    }
+    if (_echoes.isEmpty) return;
     final kept = removeEchoedTexts(_echoes, state.rows);
     if (kept.length != _echoes.length) {
       setState(() => _echoes
@@ -295,9 +307,22 @@ class _ChatPageState extends State<ChatPage> {
     final sessionId = _sessionId;
     if (sessionId == null) return;
     try {
+      final sw = Stopwatch()..start();
       final sub = await _transport
           .subscribe(sessionId)
           .timeout(const Duration(seconds: 60));
+      debugPrint('[chat] subscribe ack in ${sw.elapsedMilliseconds}ms '
+          'rows=${sub.state.rows.length} '
+          'thought=${sub.state.currentThought} cfg=${sub.state.config}');
+      var deltaCount = 0;
+      sub.state.addListener(() {
+        deltaCount++;
+        if (deltaCount <= 25) {
+          debugPrint('[chat] delta#$deltaCount +${sw.elapsedMilliseconds}ms '
+              'rows=${sub.state.rows.length} '
+              'running=${sub.state.isRunning} phase=${sub.state.phase}');
+        }
+      });
       if (!mounted) {
         await sub.dispose();
         return;
@@ -505,6 +530,7 @@ class _ChatPageState extends State<ChatPage> {
   }) async {
     void mark(String status, [String? error]) {
       if (!mounted) return;
+      debugPrint('[chat] echo → $status${error == null ? '' : ' ($error)'}');
       setState(() {
         echo['status'] = status;
         if (error != null) echo['error'] = error;
@@ -522,11 +548,13 @@ class _ChatPageState extends State<ChatPage> {
         setState(() => _progress = '正在创建会话（首次可能需要预热）…');
         final sw = Stopwatch()..start();
         try {
-          sessionId = await _transport.createSession(
-            widget.workspaceKey,
-            config: _buildDraftConfig(),
-            timeout: const Duration(seconds: 90),
-          );
+        sessionId = await _transport.createSession(
+          widget.workspaceKey,
+          config: _buildDraftConfig(),
+          timeout: const Duration(seconds: 90),
+        );
+        debugPrint('[chat] createSession total ${sw.elapsedMilliseconds}ms'
+            ' → $sessionId');
           if (!mounted) return;
         } catch (e) {
           log('[chat] createSession failed after '
@@ -538,6 +566,29 @@ class _ChatPageState extends State<ChatPage> {
         log('[chat] createSession ok in ${sw.elapsedMilliseconds}ms');
         _adoptCreatedSession(sessionId);
         setState(() => _progress = null);
+        // 思考档补丁:宿主 createSession 的 thoughtLevel 不落地(真机
+        // 实证:请求带 thoughtLevel:max,任务 meta thoughtLevel 仍为空,
+        // 会话 config 回读 thought='')。桌面端自身建会话后用
+        // switchModelConfig 应用;此处对齐——建完先应用草稿的模型+
+        // 思考档,再发首条文本。
+        final draft = _buildDraftConfig();
+        final provider = draft?['provider'] as String?;
+        final model = draft?['model'] as String?;
+        final thought = draft?['thought'] as String?;
+        if (provider != null &&
+            model != null &&
+            thought != null &&
+            thought.isNotEmpty) {
+          try {
+            final swSwitch = Stopwatch()..start();
+            await _transport.switchModelConfig(sessionId,
+                provider: provider, model: model, thought: thought);
+            debugPrint('[chat] switchModelConfig after create '
+                '${swSwitch.elapsedMilliseconds}ms');
+          } catch (e) {
+            debugPrint('[chat] switchModelConfig after create failed: $e');
+          }
+        }
         // 2) 订阅与发送并行:sendText 是 RPC 直达宿主,不依赖本端订阅;
         // 回复经订阅推送,await 订阅只会白等(真机实测首条慢 ~10s)。
         // 订阅在后台补上,回复从建立完成那一刻开始照收。
@@ -570,17 +621,21 @@ class _ChatPageState extends State<ChatPage> {
         echo['attachments'] = attachments;
         setState(() => _progress = null);
       }
+      final swSend = Stopwatch()..start();
       final res = await _transport.sendText(
         sessionId,
         text,
         attachments: attachments,
         heldQueueDisposition: heldDisposition,
       );
+      debugPrint('[chat] sendText ack in ${swSend.elapsedMilliseconds}ms '
+          'res=$res');
       if (_ackRejected(res)) {
         mark('failed', _ackReason(res));
         _toast('发送失败: ${_ackReason(res)}');
         return;
       }
+      _turnPending = true;
       mark('sent');
     } catch (e) {
       mark('failed', '$e');
@@ -1084,10 +1139,11 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 会话流工作状态胶囊(UX 反馈:文字+图标)。运行中 = 旋转箭头 +
   /// 「工作中」(primary),空闲 = 空心圆 + 「空闲」(textFaint);draft
-  /// 无订阅时同样按空闲处理。
+  /// 无订阅时同样按空闲处理。发送已接受、订阅行未到的乐观窗口
+  /// ([_turnPending])同样按工作中显示。
   Widget _sessionStatusChip(BuildContext context, ConversationState? state) {
     final colors = EmberColors.of(context);
-    final running = state != null && state.isRunning;
+    final running = _turnPending || (state != null && state.isRunning);
     final color = running ? colors.primary : colors.textFaint;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1369,7 +1425,12 @@ class _ChatPageState extends State<ChatPage> {
                                     _echoes[echoCount - 1 - index];
                                 // Same bubble as a confirmed user row, so
                                 // retiring the echo (real row takes over)
-                                // is visually seamless.
+                                // is visually seamless. 已发送 + 轮次在途
+                                // → 乐观升为「处理中」(见 _turnPending)。
+                                final badge =
+                                    e['status'] == 'sent' && _turnPending
+                                        ? 'processing'
+                                        : '${e['status']}';
                                 return _UserBubble(
                                   row: {
                                     'kind': 'userInput',
@@ -1380,7 +1441,7 @@ class _ChatPageState extends State<ChatPage> {
                                   },
                                   transport: _transport,
                                   sessionId: _sessionId ?? '',
-                                  badge: '${e['status']}',
+                                  badge: badge,
                                   onRetry:
                                       e['status'] == 'failed'
                                           ? () => _retryEcho(e)

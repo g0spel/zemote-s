@@ -140,7 +140,12 @@ class AppSession extends ChangeNotifier {
     final factory = clientFactory;
     final c = factory != null
         ? factory(params, log)
-        : ZflowClient(params, onLog: log);
+        : ZflowClient(params, onLog: (line) {
+            // 协议日志双写:诊断页(LogStore)+ logcat(release 实测;
+            // rpc/bridge 层的降级-恢复循环只在 wire 层可见)。
+            debugPrint('[wire] $line');
+            log(line);
+          });
     try {
       await c.connect();
       await c.waitPaired(timeout: const Duration(seconds: 90));

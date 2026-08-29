@@ -674,6 +674,7 @@ class _RootShellState extends State<RootShell> {
             onOpen: _openDrawer,
             onDismiss: _closeDrawer,
             drawer: SessionDrawer(
+              open: _drawerOpen,
               bridge: bridge,
               scope: _scopeOf(workspace),
               workspaceName: workspaceTitle(workspace),
