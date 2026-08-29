@@ -231,7 +231,8 @@ class _ChatPageState extends State<ChatPage> {
     _stickToBottom = _scrollController.position.pixels <= 40;
   }
 
-  Future<void> _loadPrep() async {
+  /// 只刷 prepareWorkspace(模型/思考档/模式可选项的实时来源)。
+  Future<void> _refreshPrep() async {
     try {
       final prep = await _transport.prepareWorkspace();
       if (mounted) {
@@ -239,6 +240,10 @@ class _ChatPageState extends State<ChatPage> {
         _validateDraftAgainstPrep();
       }
     } catch (_) {}
+  }
+
+  Future<void> _loadPrep() async {
+    await _refreshPrep();
     if (mounted) setState(() => _skillsLoading = true);
     try {
       final skills = await _transport.skills();
@@ -856,7 +861,14 @@ class _ChatPageState extends State<ChatPage> {
 
   // ------------------------------------------------------------ sheets
 
-  void _showModelSheet() {
+  Future<void> _showModelSheet() async {
+    // 面板数据源是 prepareWorkspace(进页时缓存)——模型增删后缓存会
+    // 保留已删模型。打开前强制刷新一次(3s 上限,失败/超时退缓存;
+    // 健康链路上 ~200ms 无感)。
+    await _refreshPrep()
+        .timeout(const Duration(seconds: 3), onTimeout: () {})
+        .catchError((_) {});
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1000,23 +1012,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// 会话的结构化执行计划(Plan 工具产出的计划记录,conversationPlansV4
-  /// 原始 JSON 视图)。
-  Future<void> _showPlansSheet() async {
-    final sessionId = _sessionId;
-    if (sessionId == null) return;
-    try {
-      final plans = await _transport.plans(sessionId);
-      if (!mounted) return;
-      showModalBottomSheet(
-        context: context,
-        builder: (context) => _JsonSheet(title: '执行计划', data: plans),
-      );
-    } catch (e) {
-      _toast('获取执行计划失败: $e');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = _state;
@@ -1090,8 +1085,6 @@ class _ChatPageState extends State<ChatPage> {
                             () => _transport.compact(_sessionId!));
                       case 'usage':
                         _showUsageSheet();
-                      case 'plans':
-                        _showPlansSheet();
                     }
                   },
             itemBuilder: (context) => [
@@ -1103,10 +1096,6 @@ class _ChatPageState extends State<ChatPage> {
                   value: 'usage',
                   enabled: _sessionId != null,
                   child: Text('用量统计')),
-              PopupMenuItem(
-                  value: 'plans',
-                  enabled: _sessionId != null,
-                  child: Text('执行计划')),
             ],
           ),
         ],
@@ -1270,8 +1259,6 @@ class _ChatPageState extends State<ChatPage> {
                             () => _transport.compact(_sessionId!));
                       case 'usage':
                         _showUsageSheet();
-                      case 'plans':
-                        _showPlansSheet();
                     }
                   },
             itemBuilder: (context) => [
@@ -1287,10 +1274,6 @@ class _ChatPageState extends State<ChatPage> {
                   value: 'usage',
                   enabled: _sessionId != null,
                   child: Text('用量统计')),
-              PopupMenuItem(
-                  value: 'plans',
-                  enabled: _sessionId != null,
-                  child: Text('执行计划')),
             ],
           ),
         ],
@@ -3653,6 +3636,19 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final todoSteps = planItems != null
         ? const <PlanStep>[]
         : (steps ?? const <PlanStep>[]);
+    // 会话目标(Goal):快照 goal 对象。文本字段以 goalSet 事件同名的
+    // objective 为准(wire 实证),缺失时退 text/goal;status 映射状态徽。
+    final goal = widget.state.goal;
+    final goalText = goal == null
+        ? null
+        : '${goal['objective'] ?? goal['text'] ?? goal['goal'] ?? ''}'.trim();
+    final hasGoal = goalText != null && goalText.isNotEmpty;
+    final (goalLabel, goalColor) = switch ('${goal?['status'] ?? ''}') {
+      'running' => ('进行中', EmberColors.of(context).primary),
+      'paused' => ('已暂停', EmberColors.of(context).warn),
+      'verified' => ('已验证', EmberColors.of(context).ok),
+      _ => ('', EmberColors.of(context).textFaint),
+    };
     final Widget body;
     if (todoSteps.isEmpty && planItems == null) {
       body = Padding(
@@ -3777,6 +3773,41 @@ class _InsightsSheetState extends State<InsightsSheet> {
             context,
             planItems != null ? '执行计划（Plan 工具）' : '待办（最新 TodoWrite）',
             () {}),
+        if (hasGoal)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(EmberRadius.control),
+                border: Border.all(color: EmberColors.of(context).hairline),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.adjust,
+                      size: 13, color: EmberColors.of(context).primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(goalText,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            color: EmberColors.of(context).textSolid)),
+                  ),
+                  if (goalLabel.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text(goalLabel,
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                            color: goalColor)),
+                  ],
+                ],
+              ),
+            ),
+          ),
         Flexible(child: body),
       ],
     );
