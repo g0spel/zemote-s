@@ -164,6 +164,54 @@ void main() {
     expect(diff!.lines.any((l) => l.type == DiffLineType.removed), isTrue);
   });
 
+  test(
+      'cached diff ignores unrelated row updates and invalidates content changes',
+      () {
+    clearToolRenderCaches();
+    final row = <String, dynamic>{
+      'rowId': 7,
+      'kind': 'toolCall',
+      'status': 'running',
+      'input': {'oldText': 'old', 'newText': 'new'},
+    };
+
+    final first = extractDiff(row);
+    row['status'] = 'success';
+    final sameContent = extractDiff(row);
+    expect(identical(first, sameContent), isTrue);
+
+    row['input'] = {'oldText': 'old', 'newText': 'changed'};
+    final changed = extractDiff(row);
+    expect(changed, isNotNull);
+    expect(identical(first, changed), isFalse);
+    expect(changed!.lines.any((line) => line.text == '+changed'), isTrue);
+  });
+
+  test('tool value formatting caches final JSON display and truncates it', () {
+    clearToolRenderCaches();
+    expect(formatToolValue('{"a":1}'), '{\n  "a": 1\n}');
+    expect(formatToolValue('not json'), 'not json');
+
+    final longJson = '{"value":"${'x' * 5000}"}';
+    final formatted = formatToolValue(longJson);
+    expect(formatted.length, 4001);
+    expect(formatted.endsWith('…'), isTrue);
+    expect(identical(formatted, formatToolValue(longJson)), isTrue);
+  });
+
+  test(
+      'inline tool image decoding is content cached and invalid input is ignored',
+      () {
+    clearToolRenderCaches();
+    const encoded = 'aGVsbG8=';
+    final first = decodeInlineToolImage(encoded);
+    final second = decodeInlineToolImage(encoded);
+    expect(first, isNotNull);
+    expect(identical(first, second), isTrue);
+    expect(String.fromCharCodes(first!), 'hello');
+    expect(decodeInlineToolImage('not base64 %'), isNull);
+  });
+
   test('null output for empty candidates', () {
     expect(
       extractDiff({'kind': 'toolCall'}),

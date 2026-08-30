@@ -1077,22 +1077,29 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               ),
             for (final image in images)
               if (image is Map && image['base64'] is String)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.memory(
-                      base64Decode(image['base64'] as String),
-                      fit: BoxFit.contain,
-                      // Cap the decode at viewport width — inline tool
-                      // outputs can embed multi-megapixel renders.
-                      cacheWidth: (MediaQuery.sizeOf(context).width *
-                              MediaQuery.devicePixelRatioOf(context))
-                          .round(),
-                      errorBuilder: (_, __, ___) =>
-                          const SizedBox.shrink(),
-                    ),
-                  ),
+                Builder(
+                  builder: (context) {
+                    final bytes =
+                        decodeInlineToolImage(image['base64'] as String);
+                    if (bytes == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(
+                          bytes,
+                          fit: BoxFit.contain,
+                          // Cap the decode at viewport width — inline tool
+                          // outputs can embed multi-megapixel renders.
+                          cacheWidth: (MediaQuery.sizeOf(context).width *
+                                  MediaQuery.devicePixelRatioOf(context))
+                              .round(),
+                          errorBuilder: (_, __, ___) =>
+                              const SizedBox.shrink(),
+                        ),
+                      ),
+                    );
+                  },
                 ),
           ],
         ),
@@ -1102,11 +1109,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
 
   Widget _kv(BuildContext context, String label, String value) {
     // Pretty-print JSON input when possible (official shows structured view)
-    var display = value;
-    try {
-      final decoded = jsonDecode(value);
-      display = const JsonEncoder.withIndent('  ').convert(decoded);
-    } catch (_) {}
+    final display = formatToolValue(value);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: Column(
@@ -1124,9 +1127,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: SelectableText(
-              display.length > 4000
-                  ? '${display.substring(0, 4000)}…'
-                  : display,
+              display,
               style: TextStyle(
                   fontFamily: 'monospace', fontSize: 11,
                   color: EmberColors.of(context).textSolid),

@@ -1,3 +1,8 @@
+import 'dart:collection';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 
 import 'theme.dart';
@@ -48,9 +53,150 @@ Object? _firstKey(Map<String, dynamic> map, List<String> keys) {
   return null;
 }
 
+class _ToolRenderCache<T> {
+  final int maxEntries;
+  final LinkedHashMap<String, T> _values = LinkedHashMap();
+
+  _ToolRenderCache(this.maxEntries);
+
+  bool containsKey(String key) => _values.containsKey(key);
+
+  T operator [](String key) {
+    final value = _values.remove(key) as T;
+    _values[key] = value;
+    return value;
+  }
+
+  T? removeOldest() {
+    if (_values.isEmpty) return null;
+    return _values.remove(_values.keys.first);
+  }
+
+  T? put(String key, T value) {
+    _values.remove(key);
+    T? evicted;
+    while (_values.length >= maxEntries) {
+      evicted = removeOldest();
+    }
+    _values[key] = value;
+    return evicted;
+  }
+
+  void operator []=(String key, T value) {
+    put(key, value);
+  }
+
+  void clear() => _values.clear();
+}
+
+final _diffCache = _ToolRenderCache<DiffData?>(64);
+final _prettyToolValueCache = _ToolRenderCache<String>(64);
+final _inlineToolImageCache = _ToolRenderCache<Uint8List>(16);
+var _inlineToolImageCacheBytes = 0;
+
+const _maxInlineToolImageCacheBytes = 8 * 1024 * 1024;
+const _maxInlineToolImageCacheEntryBytes = 2 * 1024 * 1024;
+
+String _contentDigest(Object? value) {
+  final encoded = value is String
+      ? value
+      : jsonEncode(_stableCacheValue(value));
+  return sha256.convert(utf8.encode(encoded)).toString();
+}
+
+Object? _stableCacheValue(Object? value) {
+  if (value is Map) {
+    final entries = value.entries
+        .map((entry) => MapEntry('${entry.key}', _stableCacheValue(entry.value)))
+        .toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return <String, Object?>{
+      for (final entry in entries) entry.key: entry.value,
+    };
+  }
+  if (value is Iterable) return value.map(_stableCacheValue).toList();
+  if (value == null || value is String || value is bool) return value;
+  if (value is num) return value.isFinite ? value : '$value';
+  return '$value';
+}
+
+List<Object?> _diffCacheProjection(Map<String, dynamic> row) {
+  final display = row['display'];
+  return [
+    row['input'],
+    row['output'],
+    if (row['raw'] is Map) (row['raw'] as Map)['rawOutput'],
+    row['raw'],
+    if (display is Map && display['kind'] == 'file_diff') display,
+    row['structuredPatch'],
+  ];
+}
+
+void clearToolRenderCaches() {
+  _diffCache.clear();
+  _prettyToolValueCache.clear();
+  _inlineToolImageCache.clear();
+  _inlineToolImageCacheBytes = 0;
+}
+
+String formatToolValue(String value) {
+  final key = _contentDigest(value);
+  if (_prettyToolValueCache.containsKey(key)) {
+    return _prettyToolValueCache[key];
+  }
+
+  var display = value;
+  try {
+    final decoded = jsonDecode(value);
+    display = const JsonEncoder.withIndent('  ').convert(decoded);
+  } catch (_) {}
+  if (display.length > 4000) display = '${display.substring(0, 4000)}…';
+
+  _prettyToolValueCache[key] = display;
+  return display;
+}
+
+Uint8List? decodeInlineToolImage(String encoded) {
+  final key = _contentDigest(encoded);
+  if (_inlineToolImageCache.containsKey(key)) {
+    return _inlineToolImageCache[key];
+  }
+
+  late final Uint8List bytes;
+  try {
+    bytes = base64Decode(encoded);
+  } on FormatException {
+    return null;
+  }
+  if (bytes.length <= _maxInlineToolImageCacheEntryBytes) {
+    while (_inlineToolImageCacheBytes + bytes.length >
+        _maxInlineToolImageCacheBytes) {
+      final evicted = _inlineToolImageCache.removeOldest();
+      if (evicted == null) break;
+      _inlineToolImageCacheBytes -= evicted.length;
+    }
+    if (_inlineToolImageCacheBytes + bytes.length <=
+        _maxInlineToolImageCacheBytes) {
+      final evicted = _inlineToolImageCache.put(key, bytes);
+      if (evicted != null) _inlineToolImageCacheBytes -= evicted.length;
+      _inlineToolImageCacheBytes += bytes.length;
+    }
+  }
+  return bytes;
+}
+
 /// Tries to extract a diff from a toolCall row. Returns null when the row
-/// is not a file edit.
+/// is not a file edit. The key includes every candidate used by the fallback
+/// order, while ignoring unrelated status/progress fields.
 DiffData? extractDiff(Map<String, dynamic> row) {
+  final key = _contentDigest(_diffCacheProjection(row));
+  if (_diffCache.containsKey(key)) return _diffCache[key];
+  final result = _extractDiffUncached(row);
+  _diffCache[key] = result;
+  return result;
+}
+
+DiffData? _extractDiffUncached(Map<String, dynamic> row) {
   // display.kind === 'file_diff' with patch info
   final display = row['display'];
   final candidates = <Object?>[
