@@ -420,10 +420,12 @@ class ZflowClient {
     // 否则恢复换栈后永远读到新 ID，旧路由会一直残留。
     final oldId = session.bridge['bridgeSessionId'] as String?;
     final oldTransport = session._transport;
+    final oldChannels = session._channels;
     if (oldId != null && oldId.isNotEmpty) {
       _frameRouters.remove(oldId);
       _pendingBridgePayloads.remove(oldId);
     }
+    oldChannels.dispose();
     oldTransport.dispose();
     final transport = RpcFrameTransport(
       bridgeSessionId:
@@ -612,6 +614,7 @@ class BridgeSession {
   Map<String, dynamic> get bridge => _bridge;
   RpcFrameTransport get transport => _transport;
   ChannelClient get channels => _channels;
+  bool get isDisposed => _disposed;
 
   void _swap(
     Map<String, dynamic> bridge,

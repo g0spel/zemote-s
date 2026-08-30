@@ -818,6 +818,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
   bool _disposed = false;
   bool _resyncing = false;
   Timer? _resubscribeTimer;
+  Future<void>? _resubscribeFuture;
 
   final _stagedFrames = <Map<String, dynamic>>[];
   final _fragments = <String, _LogicalFrameAssembly>{};
@@ -900,6 +901,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
 
   Future<void> _start() async {
     await _transport.handshake();
+    if (_disposed) return;
     _cancelFrameListener = _transport._channels.addEventListener(
       ConversationTransport.channel,
       _frameEventName,
@@ -915,6 +917,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       // 30s channel default.
       timeout: const Duration(seconds: 60),
     );
+    if (_disposed) return;
     final ack = (res as Map?)?['ack'] as Map?;
     _subscriptionId = ack?['subscriptionId'] as String?;
     _transport._log('[$_logTag] subscribed $topic id=$_subscriptionId');
@@ -931,21 +934,48 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
   }
 
   void _onBridgeRecovered() {
-    if (_disposed) return;
+    if (_disposed || _resubscribeFuture != null) return;
     _transport._log('[$_logTag] bridge recovered, resubscribing $topic');
-    _resubscribe();
+    final future = _resubscribeWithRetry();
+    _resubscribeFuture = future;
+    unawaited(future.whenComplete(() {
+      if (identical(_resubscribeFuture, future)) {
+        _resubscribeFuture = null;
+      }
+    }));
+  }
+
+  Future<void> _resubscribeWithRetry() async {
+    _resubscribeTimer?.cancel();
+    _resubscribeTimer = null;
+    try {
+      await _resubscribe();
+    } catch (e) {
+      if (_disposed) return;
+      _transport._log('[$_logTag] resubscribe failed: $e');
+      _resubscribeTimer = Timer(const Duration(seconds: 3), () {
+        if (!_disposed && _subscriptionId == null) _onBridgeRecovered();
+      });
+    }
   }
 
   Future<void> _resubscribe() async {
-    await _transport.handshake();
-    _onResubscribeCleanup();
-    _cancelFrameListener?.call();
-    _cancelFrameListener = null;
+    if (_disposed) return;
     final oldId = _subscriptionId;
+    // Mark the subscription unavailable before handshake so a handshake
+    // failure enters the existing retry timer instead of looking healthy
+    // forever under the old (now dead) subscription id.
     _subscriptionId = null;
+    await _transport.handshake();
+    if (_disposed) return;
+    _onResubscribeCleanup();
+    final cancel = _cancelFrameListener;
+    _cancelFrameListener = null;
+    cancel?.call();
     _stagedFrames.clear();
     _fragments.clear();
-    if (oldId != null) {
+    _fragmentBytes = 0;
+    if (oldId != null && !_transport.session.isDisposed) {
       try {
         await _transport._channels.call(
           ConversationTransport.channel,
@@ -954,15 +984,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
         );
       } catch (_) {}
     }
-    try {
-      await _start();
-    } catch (e) {
-      _transport._log('[$_logTag] resubscribe failed: $e');
-      _resubscribeTimer?.cancel();
-      _resubscribeTimer = Timer(const Duration(seconds: 3), () {
-        if (!_disposed && _subscriptionId == null) _resubscribe();
-      });
-    }
+    await _start();
   }
 
   void _handleWireFrame(dynamic data) {
@@ -1017,7 +1039,6 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
           id.isEmpty ||
           index == null ||
           count == null ||
-          messageBytes == null ||
           dataBase64 == null) {
         return;
       }
@@ -1025,8 +1046,8 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
           count <= 0 ||
           count > _maxLogicalFragments ||
           index >= count ||
-          messageBytes <= 0 ||
-          messageBytes > _maxLogicalFrameBytes) {
+          (messageBytes != null &&
+              (messageBytes <= 0 || messageBytes > _maxLogicalFrameBytes))) {
         _transport._log('[$_logTag] invalid logical fragment bounds');
         _dropFragment(id);
         return;
@@ -1058,7 +1079,8 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       }
       final added = assembly.add(index, chunk);
       if (added) _fragmentBytes += chunk.length;
-      if (assembly.receivedBytes > messageBytes) {
+      if (assembly.receivedBytes > _maxLogicalFrameBytes ||
+          (messageBytes != null && assembly.receivedBytes > messageBytes)) {
         _transport._log('[$_logTag] logical fragment exceeds declared size');
         _dropFragment(id);
         return;
@@ -1066,7 +1088,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       if (!assembly.isComplete) return;
       _dropFragment(id);
       final bytes = assembly.assemble();
-      if (bytes.length != messageBytes) {
+      if (messageBytes != null && bytes.length != messageBytes) {
         _transport._log('[$_logTag] logical fragment size mismatch');
         return;
       }
@@ -1116,8 +1138,11 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
     _fragmentCleanup?.cancel();
     await _onDispose();
     _transport.session.recovered.removeListener(_onBridgeRecovered);
-    _cancelFrameListener?.call();
+    final cancel = _cancelFrameListener;
+    _cancelFrameListener = null;
+    cancel?.call();
     final id = _subscriptionId;
+    _subscriptionId = null;
     if (id != null) {
       try {
         await _transport._channels.call(
@@ -1307,7 +1332,7 @@ class SlashCommand {
 
 class _LogicalFrameAssembly {
   final int count;
-  final int messageBytes;
+  final int? messageBytes;
   final List<Uint8List?> parts;
   final DateTime createdAt = DateTime.now();
   int received = 0;
@@ -1318,7 +1343,7 @@ class _LogicalFrameAssembly {
   int get receivedBytes =>
       parts.fold<int>(0, (sum, part) => sum + (part?.length ?? 0));
 
-  bool matches(int otherCount, int otherBytes) =>
+  bool matches(int otherCount, int? otherBytes) =>
       count == otherCount && messageBytes == otherBytes;
 
   bool add(int index, Uint8List data) {

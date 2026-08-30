@@ -26,6 +26,7 @@ class ChannelClient {
   int _lastRequestId = 0;
   final _initialized = Completer<void>();
   final _handlers = <int, void Function(int type, Object? data)>{};
+  bool _disposed = false;
 
   ChannelClient({required this.sendBody, this.onLog});
 
@@ -48,6 +49,7 @@ class ChannelClient {
 
   void _sendRequest(int reqType, int id, String channel, String name,
       Object? arg) {
+    if (_disposed) return;
     final writer = ValueWriter();
     encodeValue(writer, [reqType, id, channel, name]);
     encodeValue(writer, arg);
@@ -103,21 +105,31 @@ class ChannelClient {
     void Function(dynamic event) onEvent, {
     Object? arg,
   }) {
+    if (_disposed) return () {};
     final id = _lastRequestId++;
     _handlers[id] = (type, data) {
       if (type == resEventFire) onEvent(data);
     };
+    var cancelled = false;
     ready.then((_) {
+      if (_disposed || cancelled || !_handlers.containsKey(id)) return;
       onLog?.call('[ipc] listen $channel.$event id=$id');
       _sendRequest(reqEventListen, id, channel, event, arg);
     });
     return () {
+      if (cancelled) return;
+      cancelled = true;
       _handlers.remove(id);
-      _sendRequest(reqEventDispose, id, channel, event, null);
+      if (!_disposed) {
+        _sendRequest(reqEventDispose, id, channel, event, null);
+      }
     };
   }
 
-  void dispose() => _handlers.clear();
+  void dispose() {
+    _disposed = true;
+    _handlers.clear();
+  }
 }
 
 class ChannelRpcError implements Exception {
