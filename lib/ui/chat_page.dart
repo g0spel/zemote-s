@@ -203,6 +203,10 @@ class _ChatPageState extends State<ChatPage> {
   /// Whether to keep the view pinned to the newest message. Starts true so
   /// opening the chat lands at the bottom; the user scrolling up unpins it.
   bool _stickToBottom = true;
+  bool _scrollCallbackScheduled = false;
+  bool _scrollAnimationInFlight = false;
+  bool _prependScrollPending = false;
+  Map<String, dynamic>? _prependTailRow;
 
   ConversationState? get _state => _subscription?.state;
 
@@ -381,17 +385,40 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _scrollToBottom() {
+    if (_scrollCallbackScheduled) return;
+    _scrollCallbackScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollCallbackScheduled = false;
+      if (!mounted) return;
+      final prependTail = _prependScrollPending ? _prependTailRow : null;
+      _prependScrollPending = false;
+      _prependTailRow = null;
       if (!_scrollController.hasClients) return;
+      if (prependTail != null) {
+        final rows = _state?.rows;
+        final currentTail = rows == null || rows.isEmpty ? null : rows.last;
+        if (identical(currentTail, prependTail)) return;
+      }
       // Follow the newest message only while the user is pinned to the
       // bottom (or within 400px), so reading history isn't yanked.
-      if (_stickToBottom || _scrollController.position.pixels < 400) {
-        _scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+      final position = _scrollController.position;
+      if ((!_stickToBottom && position.pixels >= 400) ||
+          position.pixels <= 1 ||
+          _scrollAnimationInFlight) {
+        return;
       }
+      _scrollAnimationInFlight = true;
+      _scrollController
+          .animateTo(
+            0,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          )
+          .then<void>((_) {
+        _scrollAnimationInFlight = false;
+      }, onError: (_, __) {
+        _scrollAnimationInFlight = false;
+      });
     });
   }
 
@@ -863,7 +890,14 @@ class _ChatPageState extends State<ChatPage> {
             .toList()
           ..sort((a, b) => ((a['rowId'] as num?) ?? 0)
               .compareTo((b['rowId'] as num?) ?? 0));
+        final oldLength = state.rows.length;
+        final oldFirstRowId = state.firstRowId;
         state.prependOlderRows(older, firstRowId);
+        if (state.rows.length != oldLength ||
+            state.firstRowId != oldFirstRowId) {
+          _prependScrollPending = true;
+          _prependTailRow = state.rows.isEmpty ? null : state.rows.last;
+        }
         // Reverse list: prepended history extends the top end without
         // moving the viewport — no scroll compensation needed.
         // This batch was the last (server says nothing precedes it): the
