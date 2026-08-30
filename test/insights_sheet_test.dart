@@ -203,6 +203,29 @@ void main() {
       return (bridge, channels);
     }
 
+    testWidgets('状态通知后待办面板实时刷新', (tester) async {
+      final state = ConversationState();
+      final (bridge, _) = await pumpSheet(tester, state);
+      expect(find.text('暂无待办'), findsOneWidget);
+
+      state.rows = [
+        {
+          'kind': 'toolCall',
+          'rowId': 1,
+          'toolName': 'TodoWrite',
+          'input': {
+            'todos': [
+              {'content': '新待办', 'status': 'in_progress'},
+            ],
+          },
+        },
+      ];
+      state.notifyListeners();
+      await tester.pump();
+      expect(find.text('新待办'), findsOneWidget);
+      await _tearDown(tester, bridge);
+    });
+
     testWidgets('默认待办 Tab:TodoWrite 推导为待办行', (tester) async {
       final state = ConversationState()
         ..rows = [

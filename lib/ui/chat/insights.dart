@@ -164,6 +164,78 @@ int insightsBgCount({
       rows.where((r) => r['kind'] == 'subagent').length;
 }
 
+/// Cached row/snapshot derivations for one insights sheet. Row-only values use
+/// ConversationState.rowsVersion; snapshot values use snapshot identity because
+/// state.updated does not change rowsVersion.
+class _InsightsDerivedCache {
+  ConversationState? _state;
+  int _rowsVersion = -1;
+  Object? _snapshot;
+  bool _snapshotInitialized = false;
+
+  List<PlanStep>? todoSteps;
+  Map<String, dynamic>? latestCompleted;
+  List<Map<String, dynamic>> endedSubagents = const [];
+  int turnFileTotal = 0;
+  int bgCount = 0;
+  List<Map<String, dynamic>> fileHeaders = const [];
+  List<Map<String, dynamic>> backgroundWorks = const [];
+  List<Map<String, dynamic>>? runningSubagents;
+  int endedSubagentTotal = 0;
+  List<Map<String, dynamic>>? planItems;
+  Map<String, dynamic>? goal;
+
+  void sync(ConversationState state) {
+    final rowsChanged = !identical(_state, state) ||
+        _rowsVersion != state.rowsVersion;
+    if (rowsChanged) {
+      _state = state;
+      _rowsVersion = state.rowsVersion;
+      todoSteps = deriveTodoSteps(state.rows);
+      latestCompleted = latestCompletedTurn(state.rows);
+      endedSubagents = endedSubagentRows(state.rows);
+      var files = 0;
+      final headers = <Map<String, dynamic>>[];
+      for (final row in state.rows) {
+        if (row['kind'] != 'turnHeader') continue;
+        final fileChanges = row['fileChanges'];
+        if (fileChanges is! Map) continue;
+        final count = (fileChanges['files'] as num?)?.toInt() ?? 0;
+        files += count;
+        if (count > 0) headers.add(row);
+      }
+      turnFileTotal = files;
+      fileHeaders = headers.reversed.toList(growable: false);
+    }
+
+    final snapshot = state.snapshot;
+    final snapshotChanged = !_snapshotInitialized || !identical(_snapshot, snapshot);
+    if (snapshotChanged) {
+      _snapshotInitialized = true;
+      _snapshot = snapshot;
+      planItems = parseInsightList(
+          state.plan ?? const {}, const ['items'], allowEmpty: false);
+      goal = state.goal;
+      backgroundWorks = state.backgroundWorks;
+      final subsObj = snapshot?['subagents'];
+      final subs = subsObj is Map ? subsObj.cast<String, dynamic>() : null;
+      runningSubagents = subs == null
+          ? null
+          : parseInsightList(subs['running'], const []);
+      endedSubagentTotal = (subs?['endedTotal'] as num?)?.toInt() ?? 0;
+    }
+    if (rowsChanged || snapshotChanged) {
+      bgCount = insightsBgCount(
+          backgroundWorks: backgroundWorks, rows: state.rows);
+    }
+  }
+}
+
+String _insightsTurnKey(
+    ConversationState state, String sessionId, Map<String, dynamic>? turn) {
+  if (turn == null) return '';
+  return '$sessionId|${state.logEpoch ?? ''}|${turn['rowId']}|${turn['entityId']}';
+}
 /// 洞察 sheet 把手(spec §7.1):输入区上方常驻的 40×4 圆角条,点击或
 /// 上滑呼出底部 sheet;后台有运行任务时右端浮出「后台 N」计数徽,
 /// 面板数据为空也常驻。公开给测试(与 SessionDrawer 同例)。
@@ -282,20 +354,40 @@ class _InsightsSheetState extends State<InsightsSheet> {
   /// whether or not the panel is open, so opening it always shows the
   /// latest turn's diff instantly.
   String? _loadedTurnKey;
+  int _fileRequestGeneration = 0;
+  final _derived = _InsightsDerivedCache();
 
   @override
   void initState() {
     super.initState();
+    _syncDerived();
     widget.state.addListener(_onStateChanged);
+    _onStateChanged();
+  }
+
+  void _syncDerived() {
+    _derived.sync(widget.state);
   }
 
   @override
   void didUpdateWidget(InsightsSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.state != widget.state) {
-      oldWidget.state.removeListener(_onStateChanged);
-      widget.state.addListener(_onStateChanged);
+    final sourceChanged = oldWidget.state != widget.state ||
+        oldWidget.transport != widget.transport ||
+        oldWidget.sessionId != widget.sessionId;
+    if (sourceChanged) {
+      if (oldWidget.state != widget.state) {
+        oldWidget.state.removeListener(_onStateChanged);
+        widget.state.addListener(_onStateChanged);
+      }
+      _fileRequestGeneration++;
+      _loadedTurnKey = null;
+      _fileChanges = null;
+      _filesError = null;
+      _filesLoading = false;
     }
+    _syncDerived();
+    _onStateChanged();
   }
 
   @override
@@ -305,11 +397,21 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   void _onStateChanged() {
-    final turn = latestCompletedTurn(widget.state.rows);
-    final key = turn == null ? null : '${turn['rowId']}';
-    if (key == null || key == _loadedTurnKey) return;
-    _loadedTurnKey = key;
-    _loadFiles();
+    if (!mounted) return;
+    _syncDerived();
+    final turn = _derived.latestCompleted;
+    final key = _insightsTurnKey(widget.state, widget.sessionId, turn);
+    if (key.isEmpty) {
+      _fileRequestGeneration++;
+      _loadedTurnKey = null;
+      _fileChanges = null;
+      _filesError = null;
+      _filesLoading = false;
+    } else if (key != _loadedTurnKey) {
+      _loadedTurnKey = key;
+      unawaited(_loadFiles(target: turn, key: key));
+    }
+    setState(() {});
   }
 
   void _selectTab(int index) {
@@ -319,39 +421,55 @@ class _InsightsSheetState extends State<InsightsSheet> {
         !_filesLoading &&
         _fileChanges == null &&
         _filesError == null) {
-      _loadFiles();
+      unawaited(_loadFiles());
     }
   }
 
   /// File changes are turn-scoped: the target must be the turnHeader of a
   /// COMPLETED turn (the running turn's guard races the streaming
   /// revision). baseRevision/baseLogEpoch are read inside the transport.
-  Future<void> _loadFiles() async {
-    final target = latestCompletedTurn(widget.state.rows);
-    if (target == null) {
-      setState(() => _fileChanges = null);
+  Future<void> _loadFiles({
+    Map<String, dynamic>? target,
+    String? key,
+  }) async {
+    _syncDerived();
+    target ??= _derived.latestCompleted;
+    key ??= _insightsTurnKey(widget.state, widget.sessionId, target);
+    if (target == null || key.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _fileChanges = null;
+          _filesError = null;
+          _filesLoading = false;
+        });
+      }
       return;
     }
-    setState(() {
-      _filesLoading = true;
-      _filesError = null;
-    });
+    final requestGeneration = ++_fileRequestGeneration;
+    if (mounted) {
+      setState(() {
+        _filesLoading = true;
+        _filesError = null;
+      });
+    }
     // Fire-once per turn (armed): mark before awaiting so a failed load
     // doesn't retrigger on every streaming state notification — the
     // manual refresh stays available for retries.
-    _loadedTurnKey = '${target['rowId']}';
+    _loadedTurnKey = key;
     try {
       final res = await widget.transport.fileChanges(
         widget.sessionId,
         target: {'rowId': target['rowId'], 'entityId': target['entityId']},
       );
-      if (!mounted) return;
+      if (!mounted || requestGeneration != _fileRequestGeneration) return;
       setState(() => _fileChanges = res);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestGeneration != _fileRequestGeneration) return;
       setState(() => _filesError = _fmtRpcError(e));
     } finally {
-      if (mounted) setState(() => _filesLoading = false);
+      if (mounted && requestGeneration == _fileRequestGeneration) {
+        setState(() => _filesLoading = false);
+      }
     }
   }
 
@@ -366,9 +484,9 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   int get _todoCount {
-    var n = deriveTodoSteps(widget.state.rows)?.length ?? 0;
-    final planItems = parseInsightList(
-        widget.state.plan ?? const {}, const ['items'], allowEmpty: false);
+    _syncDerived();
+    var n = _derived.todoSteps?.length ?? 0;
+    final planItems = _derived.planItems;
     // Plan-mode progress counts toward the chip when no TodoWrite todos
     // exist (the plan IS the active checklist then).
     if (n == 0 && planItems != null) n = planItems.length;
@@ -376,21 +494,14 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   int get _turnFileTotal {
-    var total = 0;
-    for (final r in widget.state.rows) {
-      if (r['kind'] != 'turnHeader') continue;
-      final fc = r['fileChanges'];
-      if (fc is Map) {
-        final n = fc['files'] as num?;
-        if (n != null) total += n.toInt();
-      }
-    }
-    return total;
+    _syncDerived();
+    return _derived.turnFileTotal;
   }
 
-  int get _bgCount => insightsBgCount(
-      backgroundWorks: widget.state.backgroundWorks,
-      rows: widget.state.rows);
+  int get _bgCount {
+    _syncDerived();
+    return _derived.bgCount;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -542,15 +653,13 @@ class _InsightsSheetState extends State<InsightsSheet> {
   // ------------------------------------------------------------ todo panel
 
   Widget _todoPanel(BuildContext context) {
-    final steps = deriveTodoSteps(widget.state.rows);
+    _syncDerived();
+    final steps = _derived.todoSteps;
     // Plan-mode progress from the conversation snapshot
     // (plan: {items: [{id, content, status: pending|inProgress|completed}],
     // updatedAt}). Displayed INSIDE the todo panel — progress of the
     // structured plan, not a separate surface.
-    final planObj = widget.state.plan;
-    final parsedPlanItems = planObj == null
-        ? null
-        : parseInsightList(planObj, const ['items'], allowEmpty: false);
+    final parsedPlanItems = _derived.planItems;
     final planItems = (parsedPlanItems == null || parsedPlanItems.isEmpty)
         ? null
         : parsedPlanItems;
@@ -562,7 +671,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
         : (steps ?? const <PlanStep>[]);
     // 会话目标(Goal):快照 goal 对象。文本字段以 goalSet 事件同名的
     // objective 为准(wire 实证),缺失时退 text/goal;status 映射状态徽。
-    final goal = widget.state.goal;
+    final goal = _derived.goal;
     final goalText = goal == null
         ? null
         : '${goal['objective'] ?? goal['text'] ?? goal['goal'] ?? ''}'.trim();
@@ -740,14 +849,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
   // ----------------------------------------------------------- files panel
 
   Widget _filesPanel(BuildContext context) {
-    final headers = widget.state.rows
-        .where((r) =>
-            r['kind'] == 'turnHeader' &&
-            r['fileChanges'] is Map &&
-            ((r['fileChanges'] as Map)['files'] as num? ?? 0) > 0)
-        .toList()
-        .reversed
-        .toList();
+    _syncDerived();
+    final headers = _derived.fileHeaders;
 
     Widget body;
     if (_filesLoading) {
@@ -1090,19 +1193,17 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   Widget _bgPanel(BuildContext context) {
-    final works = widget.state.backgroundWorks;
+    _syncDerived();
+    final works = _derived.backgroundWorks;
     // Authoritative RUNNING subagent status lives in snapshot.subagents
     // {revision, childSessionIds, running[], endedTotal}; the snapshot never
     // lists finished subagents — their summary + terminal status live in
     // inline `subagent` rows (endedTotal only counts them). Inline running
     // rows are used only by streams without the snapshot field.
-    final subsObj = widget.state.snapshot?['subagents'];
-    final subs = subsObj is Map ? subsObj.cast<String, dynamic>() : null;
-    final runningSubs =
-        subs == null ? null : parseInsightList(subs['running'], const []);
-    final endedTotal = (subs?['endedTotal'] as num?)?.toInt() ?? 0;
-    final endedRows = endedSubagentRows(widget.state.rows);
-    final fallbackRunningRows = subs == null
+    final runningSubs = _derived.runningSubagents;
+    final endedTotal = _derived.endedSubagentTotal;
+    final endedRows = _derived.endedSubagents;
+    final fallbackRunningRows = runningSubs == null
         ? widget.state.rows
             .where((r) => r['kind'] == 'subagent' && '${r['status']}' == 'running')
             .toList()
