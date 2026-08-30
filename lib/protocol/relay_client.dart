@@ -49,6 +49,10 @@ String? relayCloseReason(int code) {
   }
 }
 
+/// Creates a relay socket. Production uses [WebSocketChannel.connect]; tests
+/// inject a controllable channel to exercise late old-socket callbacks.
+typedef RelaySocketFactory = WebSocketChannel Function(Uri uri);
+
 /// Reimplementation of the relay terminal socket (`pen` class in the web
 /// client). JSON text frames over `wss://<host>/ws`.
 class RelayClient {
@@ -59,6 +63,8 @@ class RelayClient {
   static const heartbeatAckTimeout = Duration(seconds: 30);
   static const waitingTimeout = Duration(seconds: 30);
   static const reconnectWaitTimeout = Duration(seconds: 20);
+
+  final RelaySocketFactory? _socketFactory;
 
   WebSocketChannel? _socket;
   StreamSubscription? _socketSub;
@@ -100,7 +106,13 @@ class RelayClient {
   Timer? _reconnectTimer;
   Timer? _rewaitTimer;
 
-  RelayClient(this.params, {this.onLog});
+  /// Socket generation prevents a late callback from an old socket from
+  /// mutating the state of a newer connection attempt.
+  int _socketGeneration = 0;
+  Future<void>? _connectInFlight;
+
+  RelayClient(this.params, {this.onLog, RelaySocketFactory? socketFactory})
+      : _socketFactory = socketFactory;
 
   void _log(String line) => onLog?.call(line);
 
@@ -117,9 +129,26 @@ class RelayClient {
     await _connect();
   }
 
-  Future<void> _connect() async {
-    _socketSub?.cancel();
-    _socket?.sink.close();
+  Future<void> _connect() {
+    final inFlight = _connectInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _connectOnce();
+    _connectInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_connectInFlight, future)) _connectInFlight = null;
+    });
+  }
+
+  Future<void> _connectOnce() async {
+    final generation = ++_socketGeneration;
+    final oldSub = _socketSub;
+    _socketSub = null;
+    await oldSub?.cancel();
+    final oldSocket = _socket;
+    _socket = null;
+    try {
+      await oldSocket?.sink.close();
+    } catch (_) {}
     // Mirror the official client's reconnectNow(): a fresh socket starts a
     // fresh liveness window, else the first tick after a reconnect sees a
     // stale clock and immediately tears down again.
@@ -129,23 +158,39 @@ class RelayClient {
     _log('[relay] connecting $uri');
     WebSocketChannel socket;
     try {
-      socket = WebSocketChannel.connect(uri);
+      socket = (_socketFactory ?? WebSocketChannel.connect)(uri);
       await socket.ready;
     } catch (e) {
+      if (generation != _socketGeneration || _disposed) return;
       _log('[relay] connect failed: $e');
-      _handleSocketClosed(1006, e.toString());
+      _handleSocketClosed(1006, e.toString(), generation: generation);
       return;
     }
-    if (_disposed) {
-      socket.sink.close();
+    if (_disposed || generation != _socketGeneration) {
+      try {
+        await socket.sink.close();
+      } catch (_) {}
       return;
     }
     _socket = socket;
     _socketSub = socket.stream.listen(
-      _handleRawMessage,
-      onError: (e) => _log('[relay] socket error: $e'),
-      onDone: () =>
-          _handleSocketClosed(socket.closeCode ?? 1006, socket.closeReason),
+      (data) {
+        if (generation != _socketGeneration || !identical(_socket, socket)) {
+          return;
+        }
+        _handleRawMessage(data, generation: generation);
+      },
+      onError: (Object e) {
+        if (generation == _socketGeneration && identical(_socket, socket)) {
+          _log('[relay] socket error: $e');
+        }
+      },
+      onDone: () {
+        if (generation == _socketGeneration && identical(_socket, socket)) {
+          _handleSocketClosed(socket.closeCode ?? 1006, socket.closeReason,
+              generation: generation);
+        }
+      },
     );
     _setState(RelayState.authenticating);
     _send({
@@ -203,7 +248,8 @@ class RelayClient {
     }
   }
 
-  void _handleRawMessage(dynamic data) {
+  void _handleRawMessage(dynamic data, {int? generation}) {
+    if (generation != null && generation != _socketGeneration) return;
     _lastInboundAt = DateTime.now();
     Map<String, dynamic>? frame;
     try {
@@ -308,8 +354,11 @@ class RelayClient {
     }
   }
 
-  void _handleSocketClosed(int code, String? reason) {
-    if (_disposed) return;
+  void _handleSocketClosed(int code, String? reason, {int? generation}) {
+    if (_disposed ||
+        (generation != null && generation != _socketGeneration)) {
+      return;
+    }
     _stopHeartbeat();
     _clearWaitingTimer();
     final mapped = relayCloseReason(code);
