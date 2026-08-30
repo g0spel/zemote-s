@@ -512,6 +512,94 @@ void main() {
       expect(list[1].sessionId, 'older');
     });
 
+    test('list cache reuses same version and invalidates on mutation', () {
+      _injectSessionsSnapshot(state, sessions: [
+        {'sessionId': 'older', 'title': 'Old', 'phase': 'idle', 'lastActivityAt': 100},
+        {'sessionId': 'newer', 'title': 'New', 'phase': 'idle', 'lastActivityAt': 200},
+      ]);
+      final first = state.list;
+      expect(state.list, same(first));
+
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {
+              'op': 'session.upserted',
+              'session': {
+                'sessionId': 'added',
+                'title': 'Added',
+                'phase': 'idle',
+                'lastActivityAt': 150,
+              },
+            },
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: onGap);
+      expect(state.list, isNot(same(first)));
+      expect(state.list.map((e) => e.sessionId), ['newer', 'added', 'older']);
+    });
+
+    test('equal activity keeps stable session order across upserts', () {
+      _injectSessionsSnapshot(state, sessions: [
+        {'sessionId': 'first', 'title': 'First', 'phase': 'idle', 'lastActivityAt': 100},
+        {'sessionId': 'second', 'title': 'Second', 'phase': 'idle', 'lastActivityAt': 100},
+      ]);
+      expect(state.list.map((e) => e.sessionId), ['first', 'second']);
+
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {
+              'op': 'session.upserted',
+              'session': {
+                'sessionId': 'second',
+                'title': 'Second updated',
+                'phase': 'idle',
+                'lastActivityAt': 100,
+              },
+            },
+            {
+              'op': 'session.upserted',
+              'session': {
+                'sessionId': 'third',
+                'title': 'Third',
+                'phase': 'idle',
+                'lastActivityAt': 100,
+              },
+            },
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: onGap);
+      expect(state.list.map((e) => e.sessionId), ['first', 'second', 'third']);
+    });
+
+    test('list cache invalidates when a session is removed', () {
+      _injectSessionsSnapshot(state, sessions: [
+        {'sessionId': 'first', 'title': 'First', 'phase': 'idle', 'lastActivityAt': 100},
+        {'sessionId': 'second', 'title': 'Second', 'phase': 'idle', 'lastActivityAt': 50},
+      ]);
+      final first = state.list;
+
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {'op': 'session.removed', 'sessionId': 'first'},
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: onGap);
+      expect(state.list, isNot(same(first)));
+      expect(state.list.map((e) => e.sessionId), ['second']);
+    });
+
     test('session.upserted delta', () {
       _injectSessionsSnapshot(state);
       state.applyFrame({

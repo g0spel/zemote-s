@@ -1535,10 +1535,35 @@ class SessionsIndexState extends ChangeNotifier {
   final Map<String, SessionEntry> sessions = {};
   bool ready = false;
 
+  int _sessionsVersion = 0;
+  int _sortedSessionsVersion = -1;
+  int _nextSessionOrder = 0;
+  final Map<String, int> _sessionOrder = {};
+  List<SessionEntry>? _sortedSessions;
+
   List<SessionEntry> get list {
-    final values = sessions.values.toList()
-      ..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
-    return values;
+    if (_sortedSessionsVersion != _sessionsVersion) {
+      final values = sessions.values.toList(growable: true)
+        ..sort((a, b) {
+          final activity = b.lastActivityAt.compareTo(a.lastActivityAt);
+          if (activity != 0) return activity;
+          return (_sessionOrder[a.sessionId] ?? 0)
+              .compareTo(_sessionOrder[b.sessionId] ?? 0);
+        });
+      _sortedSessions = List.unmodifiable(values);
+      _sortedSessionsVersion = _sessionsVersion;
+    }
+    return _sortedSessions!;
+  }
+
+  void _sessionsChanged() {
+    _sessionsVersion++;
+    _sortedSessionsVersion = -1;
+    _sortedSessions = null;
+  }
+
+  void _ensureSessionOrder(String sessionId) {
+    _sessionOrder.putIfAbsent(sessionId, () => _nextSessionOrder++);
   }
 
   void applyFrame(Map<String, dynamic> frame,
@@ -1552,16 +1577,20 @@ class SessionsIndexState extends ChangeNotifier {
       workspaceId = snap['workspaceId'] as String?;
       logEpoch = snap['logEpoch'] as String?;
       sessions.clear();
+      _sessionOrder.clear();
+      _nextSessionOrder = 0;
       final list = snap['sessions'];
       if (list is List) {
         for (final s in list) {
           if (s is Map) {
             final entry =
                 SessionEntry(s.cast<String, dynamic>());
+            _ensureSessionOrder(entry.sessionId);
             sessions[entry.sessionId] = entry;
           }
         }
       }
+      _sessionsChanged();
       seq = toSeq;
 
     } else if (payload['kind'] == 'deltas') {
@@ -1577,9 +1606,15 @@ class SessionsIndexState extends ChangeNotifier {
           if (d['op'] == 'session.upserted' && d['session'] is Map) {
             final entry = SessionEntry(
                 (d['session'] as Map).cast<String, dynamic>());
+            _ensureSessionOrder(entry.sessionId);
             sessions[entry.sessionId] = entry;
+            _sessionsChanged();
           } else if (d['op'] == 'session.removed') {
-            sessions.remove('${d['sessionId']}');
+            final id = '${d['sessionId']}';
+            if (sessions.remove(id) != null) {
+              _sessionOrder.remove(id);
+              _sessionsChanged();
+            }
           }
         }
       }
