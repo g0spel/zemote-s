@@ -1631,7 +1631,68 @@ class SessionsIndexSubscription
 /// application in the web client.
 class ConversationState extends ChangeNotifier {
   Map<String, dynamic>? snapshot;
-  List<Map<String, dynamic>> rows = [];
+  List<Map<String, dynamic>> _rows = [];
+  int _rowsVersion = 0;
+  int _rowIndexVersion = -1;
+  final Map<int, int> _rowIdIndex = {};
+  final Set<int> _duplicateRowIds = {};
+
+  List<Map<String, dynamic>> get rows => _rows;
+
+  set rows(List<Map<String, dynamic>> value) {
+    _replaceRows(value);
+  }
+
+  /// Version of the row collection for UI-derived caches. This is separate
+  /// from [seq] because history paging changes rows without advancing the
+  /// wire sequence.
+  int get rowsVersion => _rowsVersion;
+
+  void _replaceRows(List<Map<String, dynamic>> value) {
+    _rows = value;
+    _rowsVersion++;
+    _rowIndexVersion = -1;
+  }
+
+  void _rowsChanged() {
+    _rowsVersion++;
+    _rowIndexVersion = -1;
+  }
+
+  int? _normalizedRowId(Object? value) =>
+      value is num ? value.toInt() : null;
+
+  void _ensureRowIndex() {
+    if (_rowIndexVersion == _rowsVersion) return;
+    _rowIdIndex.clear();
+    _duplicateRowIds.clear();
+    for (var i = 0; i < _rows.length; i++) {
+      final id = _normalizedRowId(_rows[i]['rowId']);
+      if (id == null || _duplicateRowIds.contains(id)) continue;
+      final previous = _rowIdIndex[id];
+      if (previous != null) {
+        _rowIdIndex.remove(id);
+        _duplicateRowIds.add(id);
+      } else {
+        _rowIdIndex[id] = i;
+      }
+    }
+    _rowIndexVersion = _rowsVersion;
+  }
+
+  int _indexOfRowId(num? rowId) {
+    final id = _normalizedRowId(rowId);
+    if (id == null) {
+      return _rows.indexWhere((row) => row['rowId'] == null);
+    }
+    _ensureRowIndex();
+    if (_duplicateRowIds.contains(id)) {
+      return _rows.indexWhere(
+          (row) => _normalizedRowId(row['rowId']) == id);
+    }
+    return _rowIdIndex[id] ?? -1;
+  }
+
   int seq = 0;
   String? logEpoch;
   int? firstRowId;
@@ -1726,14 +1787,14 @@ class ConversationState extends ChangeNotifier {
           if (ts != null) row['_zflowTs'] = ts;
           list.add(row);
         }
-        rows = [...keepOld, ...list];
+        _replaceRows([...keepOld, ...list]);
       } else {
-        rows = [];
+        _replaceRows([]);
       }
       totalCount = (rowsObj['totalCount'] as num?)?.toInt() ?? rows.length;
       firstRowId = (rowsObj['firstRowId'] as num?)?.toInt();
     } else {
-      rows = [];
+      _replaceRows([]);
       totalCount = 0;
       firstRowId = null;
     }
@@ -1748,14 +1809,14 @@ class ConversationState extends ChangeNotifier {
         // history loaded from snapshots stays unstamped. Never sent back.
         row['_zflowTs'] = DateTime.now().millisecondsSinceEpoch;
         rows.add(row);
+        _rowsChanged();
         totalCount += 1;
         firstRowId ??= (row['rowId'] as num?)?.toInt();
         break;
       case 'row.upserted':
         final row = (delta['row'] as Map).cast<String, dynamic>();
         final id = (row['rowId'] as num?)?.toInt();
-        final index = rows.indexWhere(
-            (r) => (r['rowId'] as num?)?.toInt() == id);
+        final index = _indexOfRowId(id);
         if (index != -1) {
           // Upserts replace the whole row; keep the original arrival stamp
           // so streaming edits don't reset the bubble's displayed time.
@@ -1764,6 +1825,7 @@ class ConversationState extends ChangeNotifier {
           final prev = rows[index]['_zflowTs'];
           if (prev != null) row['_zflowTs'] = prev;
           rows[index] = row;
+          _rowsChanged();
         }
         break;
       case 'row.removed':
@@ -1774,7 +1836,7 @@ class ConversationState extends ChangeNotifier {
             .where((r) => ((r['rowId'] as num?)?.toInt() ?? 0) < fromRowId)
             .toList();
         final removed = rows.length - kept.length;
-        rows = kept;
+        if (removed > 0) _replaceRows(kept);
         if (firstRowId != null && fromRowId <= firstRowId!) {
           totalCount = 0;
           firstRowId = null;
@@ -1786,10 +1848,10 @@ class ConversationState extends ChangeNotifier {
         final rowId = (delta['rowId'] as num?)?.toInt();
         final path = delta['path'] as String?;
         final append = delta['append'] as String? ?? '';
-        final index = rows.indexWhere(
-            (r) => (r['rowId'] as num?)?.toInt() == rowId);
+        final index = _indexOfRowId(rowId);
         if (index != -1) {
           rows[index] = _appendToRow(rows[index], path, append);
+          _rowsChanged();
         }
         break;
       case 'state.updated':
@@ -1824,10 +1886,10 @@ class ConversationState extends ChangeNotifier {
   /// Optimistic row edit (e.g. feedback) — mutates the row in place and
   /// notifies; the server row.upserted will confirm.
   void optimisticRowUpdate(num? rowId, Map<String, dynamic> patch) {
-    final index =
-        rows.indexWhere((r) => (r['rowId'] as num?)?.toInt() == rowId?.toInt());
+    final index = _indexOfRowId(rowId);
     if (index == -1) return;
     rows[index] = {...rows[index], ...patch};
+    _rowsChanged();
     _scheduleNotify();
   }
 
@@ -1953,7 +2015,7 @@ class ConversationState extends ChangeNotifier {
         .where((r) => !existing.contains((r['rowId'] as num?)?.toInt()))
         .toList();
     if (fresh.isNotEmpty) {
-      rows = [...fresh, ...rows];
+      _replaceRows([...fresh, ...rows]);
       final firstFresh = (fresh.first['rowId'] as num?)?.toInt();
       firstRowId = newFirstRowId ?? firstFresh ?? firstRowId;
       _scheduleNotify();

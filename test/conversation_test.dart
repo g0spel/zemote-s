@@ -325,6 +325,46 @@ void main() {
       expect(state.isRunning, isFalse);
       expect(state.canStop, isFalse);
     });
+    test('rowsVersion and rowId index preserve first-match semantics', () {
+      final initialVersion = state.rowsVersion;
+      state.rows = [
+        {'rowId': 7, 'kind': 'assistantText', 'text': 'first'},
+        {'rowId': 7, 'kind': 'assistantText', 'text': 'second'},
+        {'kind': 'assistantText', 'text': 'null row'},
+      ];
+      expect(state.rowsVersion, greaterThan(initialVersion));
+
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {'op': 'row.delta', 'rowId': 7, 'path': 'text', 'append': '!'},
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: () => fail('should not gap'));
+      expect(state.rows[0]['text'], 'first!');
+      expect(state.rows[1]['text'], 'second');
+
+      state.optimisticRowUpdate(null, {'feedback': 'like'});
+      expect(state.rows[2]['feedback'], 'like');
+
+      state.rows = [
+        {'rowId': 9, 'kind': 'assistantText', 'text': 'replacement'},
+      ];
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {'op': 'row.upserted', 'row': {'rowId': 9, 'text': 'updated'}},
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: () => fail('should not gap'));
+      expect(state.rows.single['text'], 'updated');
+    });
   });
 
   group('SessionsIndexState delta application', () {
