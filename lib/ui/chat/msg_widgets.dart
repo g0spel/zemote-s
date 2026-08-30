@@ -787,6 +787,71 @@ class _AttachmentViewState extends State<_AttachmentView> {
   }
 }
 
+class _StreamingMarkdown extends StatefulWidget {
+  final String text;
+  final bool streaming;
+
+  const _StreamingMarkdown({
+    super.key,
+    required this.text,
+    required this.streaming,
+  });
+
+  @override
+  State<_StreamingMarkdown> createState() => _StreamingMarkdownState();
+}
+
+class _StreamingMarkdownState extends State<_StreamingMarkdown> {
+  static const _window = Duration(milliseconds: 250);
+
+  late String _renderedText = widget.text;
+  late String _latestText = widget.text;
+  Timer? _timer;
+
+  @override
+  void didUpdateWidget(covariant _StreamingMarkdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _latestText = widget.text;
+    if (!widget.streaming) {
+      _timer?.cancel();
+      _timer = null;
+      _renderedText = widget.text;
+      return;
+    }
+    if (widget.text != _renderedText && _timer == null) {
+      _timer = Timer(_window, () {
+        _timer = null;
+        if (!mounted || _latestText == _renderedText) return;
+        setState(() => _renderedText = _latestText);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ZflowMarkdown(_renderedText, fontSize: 13);
+}
+
+@visibleForTesting
+Widget streamingMarkdownForTest({
+  Key? key,
+  required String text,
+  required bool streaming,
+}) =>
+    _StreamingMarkdown(key: key, text: text, streaming: streaming);
+
+Key? _assistantMarkdownKey(Map<String, dynamic> row) {
+  final rowId = row['rowId'];
+  if (rowId == null) return null;
+  return ValueKey('assistant-md:$rowId:${row['entityId'] ?? ''}');
+}
+
 class _AssistantBubble extends StatelessWidget {
   final Map<String, dynamic> row;
   final ConversationTransport transport;
@@ -837,7 +902,13 @@ class _AssistantBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ZflowMarkdown(text, fontSize: 13),
+          streaming
+              ? _StreamingMarkdown(
+                  key: _assistantMarkdownKey(row),
+                  text: text,
+                  streaming: true,
+                )
+              : ZflowMarkdown(text, fontSize: 13),
           if (showFeedback)
             Row(
               mainAxisSize: MainAxisSize.min,
