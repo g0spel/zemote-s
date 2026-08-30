@@ -179,6 +179,41 @@ void main() {
     );
   });
 
+  test('disposed transport ignores late frames and sends nothing', () async {
+    final localSent = <Map<String, dynamic>>[];
+    final localReceived = <Uint8List>[];
+    final t = RpcFrameTransport(
+      bridgeSessionId: 'bridge-disposed',
+      sendPayload: localSent.add,
+    );
+    t.messages.listen(localReceived.add);
+    await t.dispose();
+
+    t.sendMessage(Uint8List.fromList([1, 2, 3]));
+    expect(
+      t.acceptPayload({
+        'zcode_type': 'rpc-frame',
+        'bridgeSessionId': 'bridge-disposed',
+        'messageSeq': 1,
+        'fragmentIndex': 0,
+        'fragmentCount': 1,
+        'messageBytes': 3,
+        'dataBase64': base64.encode(Uint8List.fromList([1, 2, 3])),
+      }),
+      isTrue,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(localSent, isEmpty);
+    expect(localReceived, isEmpty);
+  });
+
+  test('dispose is idempotent', () async {
+    await transport.dispose();
+    await transport.dispose();
+    transport.sendMessage(Uint8List.fromList([1]));
+    expect(sent, isEmpty);
+  });
+
   test('reassembly with out-of-order fragments', () async {
     final received = <Uint8List>[];
     final transport = RpcFrameTransport(

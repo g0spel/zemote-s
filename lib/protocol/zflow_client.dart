@@ -358,8 +358,12 @@ class ZflowClient {
     final session = BridgeSession._(
       bridge: bridge,
       onDispose: (s) {
+        final id = s.bridge['bridgeSessionId'] as String?;
         _activeBridges.remove(s);
-        _frameRouters.remove(s.bridge['bridgeSessionId']);
+        if (id != null && id.isNotEmpty) {
+          _frameRouters.remove(id);
+          _pendingBridgePayloads.remove(id);
+        }
         if (_activeBridges.isEmpty) {
           _frameWatchdogTimer?.cancel();
           _frameWatchdogTimer = null;
@@ -384,7 +388,15 @@ class ZflowClient {
     String requestedBridgeSessionId,
     Map<String, dynamic> bridge,
   ) {
-    session._transport.dispose();
+    // 保存旧 ID 必须在 _swap 前完成；_swap 会立即替换 session.bridge，
+    // 否则恢复换栈后永远读到新 ID，旧路由会一直残留。
+    final oldId = session.bridge['bridgeSessionId'] as String?;
+    final oldTransport = session._transport;
+    if (oldId != null && oldId.isNotEmpty) {
+      _frameRouters.remove(oldId);
+      _pendingBridgePayloads.remove(oldId);
+    }
+    oldTransport.dispose();
     final transport = RpcFrameTransport(
       bridgeSessionId:
           (bridge['bridgeSessionId'] as String?) ?? requestedBridgeSessionId,
@@ -405,8 +417,6 @@ class ZflowClient {
     // Register at the single dispatch point and flush any frames that
     // arrived before the transport existed (Initialize race).
     final id = transport.bridgeSessionId;
-    final oldId = session._bridge['bridgeSessionId'];
-    if (oldId != id) _frameRouters.remove(oldId);
     _frameRouters[id] = transport.acceptPayload;
     final pending = _pendingBridgePayloads.remove(id);
     if (pending != null) {

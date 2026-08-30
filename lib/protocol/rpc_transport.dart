@@ -32,6 +32,7 @@ class RpcFrameTransport {
 
   final _assemblies = <int, _Assembly>{};
   Timer? _assemblyCleanupTimer;
+  bool _disposed = false;
 
   RpcFrameTransport({
     required this.bridgeSessionId,
@@ -64,6 +65,7 @@ class RpcFrameTransport {
 
   /// Fragment and send one logical message.
   void sendMessage(Uint8List bytes) {
+    if (_disposed) return;
     if (bytes.isEmpty) throw StateError('remote.rpcFrame.emptyMessage');
     if (bytes.length > maxMessageBytes) {
       throw StateError('remote.rpcFrame.messageTooLarge');
@@ -97,6 +99,7 @@ class RpcFrameTransport {
 
   /// Feed a relay payload. Returns true if it was an rpc-frame(-ack).
   bool acceptPayload(Map<String, dynamic> payload) {
+    if (_disposed) return true;
     final type = payload['zcode_type'];
     if (type == 'rpc-frame-ack') return true;
     if (type != 'rpc-frame') return false;
@@ -148,6 +151,8 @@ class RpcFrameTransport {
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     _assemblyCleanupTimer?.cancel();
     _assemblies.clear();
     await _messageController.close();
