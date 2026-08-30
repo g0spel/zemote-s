@@ -55,6 +55,16 @@ typedef RelaySocketFactory = WebSocketChannel Function(Uri uri);
 
 /// Reimplementation of the relay terminal socket (`pen` class in the web
 /// client). JSON text frames over `wss://<host>/ws`.
+class _QueuedPayload {
+  final Map<String, dynamic> payload;
+  final int estimatedBytes;
+  bool cancelled = false;
+
+  _QueuedPayload(this.payload, this.estimatedBytes);
+
+  String? get requestId => payload['requestId'] as String?;
+}
+
 class RelayClient {
   final ZflowConnectionParams params;
   final void Function(String line)? onLog;
@@ -217,14 +227,56 @@ class RelayClient {
   /// waiting) and flushed once the relay reports `matched` — otherwise
   /// requests sent during a reconnect vanish into a dead socket and the
   /// caller hangs until timeout.
-  final _outboundQueue = <Map<String, dynamic>>[];
+  final _outboundQueue = <_QueuedPayload>[];
+  int _outboundQueueBytes = 0;
+
+  static const _maxQueuedPayloads = 100;
+  static const _maxQueuedPayloadBytes = 8 * 1024 * 1024;
+
+  /// Cancel a direct request that timed out before it could leave the relay.
+  /// Payloads already written to a socket cannot be recalled; this only
+  /// removes a queued item identified by its top-level requestId.
+  void cancelQueuedRequest(String requestId) {
+    final index = _outboundQueue.indexWhere(
+        (entry) => entry.requestId == requestId && !entry.cancelled);
+    if (index == -1) return;
+    final entry = _outboundQueue.removeAt(index);
+    entry.cancelled = true;
+    _outboundQueueBytes -= entry.estimatedBytes;
+    _log('[relay] dropped timed-out queued request $requestId');
+  }
+
+  int _estimatePayloadBytes(Map<String, dynamic> payload) {
+    try {
+      return utf8.encode(jsonEncode(payload)).length;
+    } catch (_) {
+      return 0;
+    }
+  }
 
   void sendPayload(Map<String, dynamic> payload) {
     if (state != RelayState.paired || _socket == null) {
-      if (_outboundQueue.length < 100) {
-        _log('[relay] queued (state=$state): ${payload['zcode_type']}');
-        _outboundQueue.add(payload);
+      // View state is replaceable: while disconnected only the newest state
+      // matters, so discard an older queued copy before adding this one.
+      if (payload['zcode_type'] == 'mobile-view-state-update') {
+        for (var i = _outboundQueue.length - 1; i >= 0; i--) {
+          final entry = _outboundQueue[i];
+          if (entry.payload['zcode_type'] == payload['zcode_type']) {
+            _outboundQueueBytes -= entry.estimatedBytes;
+            _outboundQueue.removeAt(i);
+          }
+        }
       }
+      final estimatedBytes = _estimatePayloadBytes(payload);
+      if (_outboundQueue.length >= _maxQueuedPayloads ||
+          _outboundQueueBytes + estimatedBytes > _maxQueuedPayloadBytes) {
+        _log('[relay] dropped queued payload (limit): '
+            '${payload['zcode_type']}');
+        return;
+      }
+      _log('[relay] queued (state=$state): ${payload['zcode_type']}');
+      _outboundQueue.add(_QueuedPayload(payload, estimatedBytes));
+      _outboundQueueBytes += estimatedBytes;
       return;
     }
     _send({
@@ -237,12 +289,14 @@ class RelayClient {
   void _flushOutboundQueue() {
     if (_outboundQueue.isEmpty) return;
     _log('[relay] flushing ${_outboundQueue.length} queued payload(s)');
-    final queued = List<Map<String, dynamic>>.from(_outboundQueue);
+    final queued = List<_QueuedPayload>.from(_outboundQueue);
     _outboundQueue.clear();
-    for (final payload in queued) {
+    _outboundQueueBytes = 0;
+    for (final entry in queued) {
+      if (entry.cancelled) continue;
       _send({
         'type': 'data',
-        'payload': payload,
+        'payload': entry.payload,
         'client_ts': DateTime.now().millisecondsSinceEpoch,
       });
     }
@@ -499,6 +553,8 @@ class RelayClient {
   Future<void> dispose() async {
     _disposed = true;
     _intentionallyClosed = true;
+    _outboundQueue.clear();
+    _outboundQueueBytes = 0;
     _stopHeartbeat();
     _clearWaitingTimer();
     _reconnectTimer?.cancel();

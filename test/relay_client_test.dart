@@ -123,20 +123,59 @@ void main() {
     await client.dispose();
   });
 
-  test('socket factory is used only for actual connection attempts', () async {
-    var created = 0;
+  test('timed-out queued direct request is not flushed', () async {
+    late _FakeSocket socket;
     final client = RelayClient(
       _params(),
-      socketFactory: (_) {
-        created++;
-        return _FakeSocket(Future<void>.value());
-      },
+      socketFactory: (_) => socket = _FakeSocket(Future<void>.value()),
     );
+    await client.start();
 
-    final first = client.start();
-    final second = client.start();
-    await Future.wait([first, second]);
-    expect(created, 1);
+    client.sendPayload({
+      'zcode_type': 'bootstrap-request',
+      'requestId': 'req-timeout',
+    });
+    client.cancelQueuedRequest('req-timeout');
+    await _pair(socket);
+
+    final payloads = socket.sent
+        .whereType<String>()
+        .map(jsonDecode)
+        .whereType<Map>()
+        .map((frame) => frame['payload'])
+        .whereType<Map>();
+    expect(payloads.any((p) => p['requestId'] == 'req-timeout'), isFalse);
+    await client.dispose();
+  });
+
+  test('queued mobile view state keeps only the newest value', () async {
+    late _FakeSocket socket;
+    final client = RelayClient(
+      _params(),
+      socketFactory: (_) => socket = _FakeSocket(Future<void>.value()),
+    );
+    await client.start();
+
+    client.sendPayload({
+      'zcode_type': 'mobile-view-state-update',
+      'viewState': {'activeTaskId': 'old'},
+    });
+    client.sendPayload({
+      'zcode_type': 'mobile-view-state-update',
+      'viewState': {'activeTaskId': 'new'},
+    });
+    await _pair(socket);
+
+    final payloads = socket.sent
+        .whereType<String>()
+        .map(jsonDecode)
+        .whereType<Map>()
+        .map((frame) => frame['payload'])
+        .whereType<Map>()
+        .where((p) => p['zcode_type'] == 'mobile-view-state-update')
+        .toList();
+    expect(payloads, hasLength(1));
+    expect((payloads.single['viewState'] as Map)['activeTaskId'], 'new');
     await client.dispose();
   });
 }

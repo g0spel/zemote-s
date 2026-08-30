@@ -295,6 +295,7 @@ class ZflowClient {
     return completer.future.timeout(timeout, onTimeout: () {
       _pendingMatchers.remove(requestId);
       _pendingCompleters.remove(requestId);
+      relay.cancelQueuedRequest(requestId);
       throw TimeoutException('request $requestId timed out');
     });
   }
@@ -528,6 +529,10 @@ class ZflowClient {
 
   Future<void> dispose() async {
     _disposed = true;
+    for (final session in List<BridgeSession>.from(_activeBridges)) {
+      session._recoveryGeneration++;
+      session._recoveryFuture = null;
+    }
     _frameWatchdogTimer?.cancel();
     relay.stateListenable.removeListener(_onRelayState);
     await _payloadSub?.cancel();
