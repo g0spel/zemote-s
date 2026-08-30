@@ -570,6 +570,18 @@ class ConversationTransport {
   // ------------------------------------------------------------ attachments
 
   static const _attachmentChunkBytes = 384 * 1024;
+  static const _maxAttachmentReadBytes = 16 * 1024 * 1024;
+
+  static int? _integerValue(Object? value) {
+    if (value is int) return value;
+    if (value is num && value == value.truncate()) return value.toInt();
+    return null;
+  }
+
+  static String _attachmentRef(Object? value) {
+    if (value is String && value.isNotEmpty) return value;
+    throw StateError('fault.attachment.missingRef');
+  }
 
   /// Uploads an attachment (begin/chunk/commit, mirrors `rNe()`).
   /// Returns the attachment descriptor `{ref, fileName, mime, bytes}` to be
@@ -608,17 +620,26 @@ class ConversationTransport {
         'checksum': checksum,
       },
     ]);
-    if (beginRes is Map && beginRes['state'] == 'committed') {
+    if (beginRes is! Map) {
+      throw StateError('fault.attachment.invalidBeginResponse');
+    }
+    if (beginRes['state'] == 'committed') {
+      final ref = _attachmentRef(beginRes['ref']);
       onProgress?.call(1);
       return {
-        'ref': beginRes['ref'],
+        'ref': ref,
         'fileName': fileName,
         'mime': mime,
         'bytes': bytes.length,
       };
     }
-    var nextChunk =
-        beginRes is Map ? (beginRes['nextChunkIndex'] as num?)?.toInt() ?? 0 : 0;
+    final nextChunkValue = beginRes['nextChunkIndex'];
+    var nextChunk = nextChunkValue == null
+        ? 0
+        : _integerValue(nextChunkValue);
+    if (nextChunk == null || nextChunk < 0 || nextChunk > totalChunks) {
+      throw StateError('fault.attachment.invalidServerProgress');
+    }
     for (var n = nextChunk; n < totalChunks; n++) {
       final start = n * _attachmentChunkBytes;
       final end = start + _attachmentChunkBytes > bytes.length
@@ -633,18 +654,23 @@ class ConversationTransport {
           'dataBase64': base64.encode(Uint8List.sublistView(bytes, start, end)),
         },
       ]);
-      nextChunk =
-          chunkRes is Map ? (chunkRes['nextChunkIndex'] as num?)?.toInt() ?? n + 1 : n + 1;
-      if (nextChunk != n + 1) {
+      if (chunkRes is! Map) {
+        throw StateError('fault.attachment.invalidChunkResponse');
+      }
+      final nextChunkValue = chunkRes['nextChunkIndex'];
+      final responseNext = _integerValue(nextChunkValue);
+      if (responseNext == null || responseNext != n + 1) {
         throw StateError('fault.attachment.invalidServerProgress');
       }
+      nextChunk = responseNext;
       onProgress?.call(nextChunk / totalChunks);
     }
     onProgress?.call(1);
     final commitRes = await _channels.call(channel, 'attachmentCommitV4', [
       {...scope, ...base},
     ]);
-    final ref = commitRes is Map ? commitRes['ref'] : null;
+    final ref = _attachmentRef(
+        commitRes is Map ? commitRes['ref'] : null);
     return {
       'ref': ref,
       'fileName': fileName,
@@ -659,8 +685,10 @@ class ConversationTransport {
     required String ref,
   }) async {
     await handshake();
-    final chunks = <int>[];
     var offset = 0;
+    int? totalBytes;
+    Uint8List? result;
+    final chunks = BytesBuilder(copy: false);
     String? mediaType;
     for (var round = 0; round < 1024; round++) {
       final res = await _channels.call(channel, 'attachmentReadV4', [
@@ -672,19 +700,87 @@ class ConversationTransport {
           'limit': _attachmentChunkBytes,
         },
       ]);
-      if (res is! Map) break;
-      mediaType ??= res['mediaType'] as String?;
-      final data = res['dataBase64'] as String?;
-      if (data != null && data.isNotEmpty) {
-        chunks.addAll(base64.decode(data));
+      if (res is! Map) {
+        throw StateError('fault.attachment.invalidReadResponse');
       }
-      final next = (res['nextOffset'] as num?)?.toInt();
-      final total = (res['totalBytes'] as num?)?.toInt();
-      if (next == null || next <= offset) break;
+
+      int? responseTotal;
+      if (res.containsKey('totalBytes')) {
+        responseTotal = _integerValue(res['totalBytes']);
+        if (responseTotal == null ||
+            responseTotal < 0 ||
+            responseTotal > _maxAttachmentReadBytes) {
+          throw StateError('fault.attachment.invalidTotalBytes');
+        }
+      }
+      if (responseTotal != null) {
+        if (totalBytes != null && responseTotal != totalBytes) {
+          throw StateError('fault.attachment.inconsistentTotalBytes');
+        }
+        totalBytes ??= responseTotal;
+        if (result == null) {
+          final existing = chunks.takeBytes();
+          if (existing.length > totalBytes) {
+            throw StateError('fault.attachment.invalidTotalBytes');
+          }
+          result = Uint8List(totalBytes);
+          result.setRange(0, existing.length, existing);
+        }
+      }
+      final responseMediaType = res['mediaType'];
+      if (responseMediaType != null && responseMediaType is! String) {
+        throw StateError('fault.attachment.invalidMediaType');
+      }
+      if (mediaType != null &&
+          responseMediaType != null &&
+          responseMediaType != mediaType) {
+        throw StateError('fault.attachment.inconsistentMediaType');
+      }
+      mediaType ??= responseMediaType as String?;
+
+      final data = res['dataBase64'];
+      if (data is! String) {
+        throw StateError('fault.attachment.missingChunk');
+      }
+      final next = _integerValue(res['nextOffset']);
+      if (next == null || next < offset) {
+        throw StateError('fault.attachment.invalidReadProgress');
+      }
+      if (data.isEmpty) {
+        // An empty response with an unchanged cursor is the only EOF marker
+        // available on older hosts that omit totalBytes.
+        if (next == offset && (totalBytes == null || totalBytes == offset)) {
+          final bytes = result ?? chunks.takeBytes();
+          if (totalBytes != null && bytes.length != totalBytes) {
+            throw StateError('fault.attachment.invalidReadProgress');
+          }
+          return (bytes: bytes, mediaType: mediaType);
+        }
+        throw StateError('fault.attachment.missingChunk');
+      }
+
+      late final Uint8List chunk;
+      try {
+        chunk = base64.decode(data);
+      } on FormatException {
+        throw StateError('fault.attachment.invalidChunk');
+      }
+      if (chunk.isEmpty || chunk.length > _attachmentChunkBytes ||
+          next != offset + chunk.length ||
+          next > (totalBytes ?? _maxAttachmentReadBytes)) {
+        throw StateError('fault.attachment.invalidReadProgress');
+      }
+      if (result != null) {
+        result.setRange(offset, next, chunk);
+      } else {
+        chunks.add(chunk);
+      }
       offset = next;
-      if (total != null && offset >= total) break;
+      if (totalBytes != null && offset == totalBytes) {
+        return (bytes: result ?? chunks.takeBytes(), mediaType: mediaType);
+      }
     }
-    return (bytes: Uint8List.fromList(chunks), mediaType: mediaType);
+    throw StateError('fault.attachment.readLimitExceeded');
   }
 
   Future<dynamic> resolveInteraction(

@@ -501,26 +501,48 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<List<Map<String, dynamic>>> _uploadFiles(
-      List<_PendingFile> files, String sessionId) async {
-    final uploaded = <Map<String, dynamic>>[];
-    for (var i = 0; i < files.length; i++) {
-      final file = files[i];
+      Map<String, dynamic> echo,
+      List<_PendingFile> files,
+      String sessionId) async {
+    final total = files.length;
+    var completed = 0;
+    while (files.isNotEmpty) {
+      final file = files.first;
       final descriptor = await _transport.attachmentPut(
         sessionId,
         fileName: file.fileName,
         mime: file.mime,
         bytes: file.bytes,
-        onProgress: (p) =>
-            setState(() => _uploadProgress = (i + p) / files.length),
+        onProgress: (p) {
+          if (!mounted) return;
+          setState(() => _uploadProgress = (completed + p) / total);
+        },
       );
-      uploaded.add(descriptor);
+      files.removeAt(0);
+      completed++;
+      final existing = (echo['attachments'] as List?)
+              ?.whereType<Map>()
+              .map((item) => item.cast<String, dynamic>())
+              .toList() ??
+          <Map<String, dynamic>>[];
+      existing.add(descriptor);
+      echo['attachments'] = existing;
     }
-    return uploaded;
+    return (echo['attachments'] as List?)
+            ?.whereType<Map>()
+            .map((item) => item.cast<String, dynamic>())
+            .toList() ??
+        <Map<String, dynamic>>[];
   }
 
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if ((text.isEmpty && _pendingFiles.isEmpty) || _sending) return;
+
+    if (text.startsWith('/goal ') && _pendingFiles.isNotEmpty) {
+      _toast('目标命令不支持附件');
+      return;
+    }
 
     // Slash commands (mirrors the web composer).
     if (text == '/compact' || text.startsWith('/compact ')) {
@@ -683,11 +705,11 @@ class _ChatPageState extends State<ChatPage> {
               .cast<Map<String, dynamic>>()
               .toList();
       final files = (echo['files'] as List<_PendingFile>?) ?? const [];
-      if (files.isNotEmpty && attachments == null) {
-        setState(() => _progress = '正在上传附件…');
-        attachments = await _uploadFiles(files, sessionId);
-        echo['attachments'] = attachments;
-        setState(() => _progress = null);
+      if (files.isNotEmpty) {
+        if (mounted) setState(() => _progress = '正在上传附件…');
+        final fileList = (echo['files'] as List<_PendingFile>?) ?? [];
+        attachments = await _uploadFiles(echo, fileList, sessionId);
+        if (mounted) setState(() => _progress = null);
       }
       final swSend = Stopwatch()..start();
       final res = await _transport.sendText(
