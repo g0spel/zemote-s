@@ -377,8 +377,9 @@ class _ChatPageState extends State<ChatPage> {
       // Reverse list: opening lands on the newest message by construction
       // (offset 0 = bottom); the listener below only follows NEW deltas
       // while the user stays pinned near the bottom.
-      sub.state.addListener(_scrollToBottom);
-      sub.state.addListener(_dedupeEchoes);
+      sub.state.rowsListenable.addListener(_scrollToBottom);
+      sub.state.rowsListenable.addListener(_dedupeEchoes);
+      sub.state.controlListenable.addListener(_dedupeEchoes);
       // The server snapshot is a tail window (can be as few as 3 rows).
       // The official client shows the full history immediately, so
       // auto-load the missing older rows once on open.
@@ -930,11 +931,11 @@ class _ChatPageState extends State<ChatPage> {
         // moving the viewport — no scroll compensation needed.
         // This batch was the last (server says nothing precedes it): the
         // earliest message is now held — retire the button immediately.
-        if (!hasMore) state.historyExhausted = true;
+        if (!hasMore) state.markHistoryExhausted(true);
       } else {
         // Exhausted (the server's hasMore is false): stop offering the
         // button instead of re-tapping into empty responses.
-        if (!hasMore) state.historyExhausted = true;
+        if (!hasMore) state.markHistoryExhausted(true);
         if (state.rows.isNotEmpty) {
           _toast('没有更早的消息了');
         }
@@ -1118,7 +1119,7 @@ class _ChatPageState extends State<ChatPage> {
                 style: const TextStyle(fontSize: 15)),
             if (state != null)
               AnimatedBuilder(
-                animation: state,
+                animation: state.controlListenable,
                 builder: (context, _) => Text(
                   [
                     if (state.phase.isNotEmpty) state.phase,
@@ -1134,7 +1135,7 @@ class _ChatPageState extends State<ChatPage> {
         actions: [
           if (state != null)
             AnimatedBuilder(
-              animation: state,
+              animation: state.controlListenable,
               builder: (context, _) => state.isRunning
                   ? IconButton(
                       icon: Icon(Icons.stop_circle_outlined,
@@ -1226,7 +1227,7 @@ class _ChatPageState extends State<ChatPage> {
               _sessionStatusChip(context, state)
             else
               AnimatedBuilder(
-                animation: state,
+                animation: state.controlListenable,
                 builder: (context, _) => _sessionStatusChip(context, state),
               ),
             Expanded(
@@ -1364,7 +1365,13 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (state == null) return build();
-    return AnimatedBuilder(animation: state, builder: (context, _) => build());
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        state.controlListenable,
+        state.configListenable,
+      ]),
+      builder: (context, _) => build(),
+    );
   }
 
   /// 模型 pill:`模型名 | 强度档名`(U2:模式选择移到输入框左侧,
@@ -1475,12 +1482,12 @@ class _ChatPageState extends State<ChatPage> {
             ),
           if (state != null)
             AnimatedBuilder(
-              animation: state,
+              animation: state.usageListenable,
               builder: (context, _) => _ContextUsageBar(state: state),
             ),
           if (state != null)
             AnimatedBuilder(
-              animation: state,
+              animation: state.configListenable,
               builder: (context, _) => _ModeBanner(mode: state.currentMode),
             ),
           Expanded(
@@ -1494,7 +1501,10 @@ class _ChatPageState extends State<ChatPage> {
                 : !state.ready
                     ? const Center(child: CircularProgressIndicator())
                     : AnimatedBuilder(
-                        animation: state,
+                        animation: Listenable.merge([
+                          state.rowsListenable,
+                          state.controlListenable,
+                        ]),
                         builder: (context, _) {
                           final groups = cachedGroupRows(state);
                           // Optimistic echoes render newest-first at the
@@ -1591,7 +1601,12 @@ class _ChatPageState extends State<ChatPage> {
           _ReconnectBanner(bridge: _transport.session),
           if (state != null)
             AnimatedBuilder(
-              animation: state,
+              animation: Listenable.merge([
+                state.controlListenable,
+                state.backgroundListenable,
+                state.queueListenable,
+                state.interactionListenable,
+              ]),
               builder: (context, _) => Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1645,7 +1660,10 @@ class _ChatPageState extends State<ChatPage> {
             ),
           if (state != null && _sessionId != null)
             AnimatedBuilder(
-              animation: state,
+              animation: Listenable.merge([
+                state.rowsListenable,
+                state.backgroundListenable,
+              ]),
               builder: (context, _) => InsightsHandle(
                 state: state,
                 transport: _transport,
@@ -1656,8 +1674,12 @@ class _ChatPageState extends State<ChatPage> {
           // 重建输入栏;此前 InputBar 不在 state 监听内,远端已切、
           // 本地按钮不变)。
           AnimatedBuilder(
-            animation: Listenable.merge(
-                [if (state != null) state]),
+            animation: state == null
+                ? const AlwaysStoppedAnimation(null)
+                : Listenable.merge([
+                    state.configListenable,
+                    state.controlListenable,
+                  ]),
             builder: (context, _) => _InputBar(
               controller: _inputController,
               sending: _sending,

@@ -1652,11 +1652,13 @@ class ConversationState extends ChangeNotifier {
     _rows = value;
     _rowsVersion++;
     _rowIndexVersion = -1;
+    _markDomains(_domainRows);
   }
 
   void _rowsChanged() {
     _rowsVersion++;
     _rowIndexVersion = -1;
+    _markDomains(_domainRows);
   }
 
   int? _normalizedRowId(Object? value) =>
@@ -1699,6 +1701,78 @@ class ConversationState extends ChangeNotifier {
   int totalCount = 0;
   bool ready = false;
 
+  static const _domainRows = 1 << 0;
+  static const _domainControl = 1 << 1;
+  static const _domainConfig = 1 << 2;
+  static const _domainUsage = 1 << 3;
+  static const _domainQueue = 1 << 4;
+  static const _domainInteraction = 1 << 5;
+  static const _domainBackground = 1 << 6;
+  static const _domainAll = _domainRows |
+      _domainControl |
+      _domainConfig |
+      _domainUsage |
+      _domainQueue |
+      _domainInteraction |
+      _domainBackground;
+
+  final _rowsNotifier = ChangeNotifier();
+  final _controlNotifier = ChangeNotifier();
+  final _configNotifier = ChangeNotifier();
+  final _usageNotifier = ChangeNotifier();
+  final _queueNotifier = ChangeNotifier();
+  final _interactionNotifier = ChangeNotifier();
+  final _backgroundNotifier = ChangeNotifier();
+  int _pendingDomainMask = 0;
+
+  Listenable get rowsListenable => _rowsNotifier;
+  Listenable get controlListenable => _controlNotifier;
+  Listenable get configListenable => _configNotifier;
+  Listenable get usageListenable => _usageNotifier;
+  Listenable get queueListenable => _queueNotifier;
+  Listenable get interactionListenable => _interactionNotifier;
+  Listenable get backgroundListenable => _backgroundNotifier;
+
+  void _markDomains(int mask) {
+    _pendingDomainMask |= mask;
+  }
+
+  void _markSnapshotDomains(Map<String, dynamic> patch) {
+    var mask = 0;
+    if (patch.containsKey('control') ||
+        patch.containsKey('plan') ||
+        patch.containsKey('goal')) {
+      mask |= _domainControl;
+    }
+    if (patch.containsKey('config')) mask |= _domainConfig;
+    if (patch.containsKey('usage')) mask |= _domainUsage;
+    if (patch.containsKey('queue')) mask |= _domainQueue;
+    if (patch.containsKey('inputRouting') ||
+        patch.containsKey('pendingInteractions')) {
+      mask |= _domainInteraction;
+    }
+    if (patch.containsKey('backgroundWorks') ||
+        patch.containsKey('subagents')) {
+      mask |= _domainBackground;
+    }
+    if (patch.containsKey('rows')) mask |= _domainRows;
+    _markDomains(mask);
+  }
+
+  void _notifyDomains(int mask) {
+    if (mask & _domainRows != 0) _rowsNotifier.notifyListeners();
+    if (mask & _domainControl != 0) _controlNotifier.notifyListeners();
+    if (mask & _domainConfig != 0) _configNotifier.notifyListeners();
+    if (mask & _domainUsage != 0) _usageNotifier.notifyListeners();
+    if (mask & _domainQueue != 0) _queueNotifier.notifyListeners();
+    if (mask & _domainInteraction != 0) {
+      _interactionNotifier.notifyListeners();
+    }
+    if (mask & _domainBackground != 0) {
+      _backgroundNotifier.notifyListeners();
+    }
+  }
+
   // Streaming bursts fire many small deltas per second; notifying the UI on
   // each one burns the main thread on full-list rebuilds. Coalesce: at most
   // one notify per 100ms, flushed on the timer (a trailing notify lands ≤
@@ -1708,6 +1782,9 @@ class ConversationState extends ChangeNotifier {
   void _scheduleNotify() {
     _notifyTimer ??= Timer(const Duration(milliseconds: 100), () {
       _notifyTimer = null;
+      final mask = _pendingDomainMask;
+      _pendingDomainMask = 0;
+      _notifyDomains(mask);
       notifyListeners();
     });
   }
@@ -1715,6 +1792,13 @@ class ConversationState extends ChangeNotifier {
   @override
   void dispose() {
     _notifyTimer?.cancel();
+    _rowsNotifier.dispose();
+    _controlNotifier.dispose();
+    _configNotifier.dispose();
+    _usageNotifier.dispose();
+    _queueNotifier.dispose();
+    _interactionNotifier.dispose();
+    _backgroundNotifier.dispose();
     super.dispose();
   }
 
@@ -1749,6 +1833,7 @@ class ConversationState extends ChangeNotifier {
 
   void _applySnapshot(Map<String, dynamic> snap, int toSeq) {
     snapshot = snap;
+    _markDomains(_domainAll);
     if (_pendingPatch != null) {
       snapshot = {...snap, ..._pendingPatch!};
       _pendingPatch = null;
@@ -1810,6 +1895,7 @@ class ConversationState extends ChangeNotifier {
         row['_zflowTs'] = DateTime.now().millisecondsSinceEpoch;
         rows.add(row);
         _rowsChanged();
+        if (row['kind'] == 'subagent') _markDomains(_domainBackground);
         totalCount += 1;
         firstRowId ??= (row['rowId'] as num?)?.toInt();
         break;
@@ -1822,10 +1908,14 @@ class ConversationState extends ChangeNotifier {
           // so streaming edits don't reset the bubble's displayed time.
           // (Guarded write: the wire map may be typed with non-nullable
           // values, which rejects a null assignment.)
+          final wasSubagent = rows[index]['kind'] == 'subagent';
           final prev = rows[index]['_zflowTs'];
           if (prev != null) row['_zflowTs'] = prev;
           rows[index] = row;
           _rowsChanged();
+          if (wasSubagent || row['kind'] == 'subagent') {
+            _markDomains(_domainBackground);
+          }
         }
         break;
       case 'row.removed':
@@ -1836,7 +1926,13 @@ class ConversationState extends ChangeNotifier {
             .where((r) => ((r['rowId'] as num?)?.toInt() ?? 0) < fromRowId)
             .toList();
         final removed = rows.length - kept.length;
-        if (removed > 0) _replaceRows(kept);
+        final removedSubagent = rows.any((row) =>
+            row['kind'] == 'subagent' &&
+            ((row['rowId'] as num?)?.toInt() ?? 0) >= fromRowId);
+        if (removed > 0) {
+          if (removedSubagent) _markDomains(_domainBackground);
+          _replaceRows(kept);
+        }
         if (firstRowId != null && fromRowId <= firstRowId!) {
           totalCount = 0;
           firstRowId = null;
@@ -1850,24 +1946,28 @@ class ConversationState extends ChangeNotifier {
         final append = delta['append'] as String? ?? '';
         final index = _indexOfRowId(rowId);
         if (index != -1) {
+          final wasSubagent = rows[index]['kind'] == 'subagent';
           rows[index] = _appendToRow(rows[index], path, append);
           _rowsChanged();
+          if (wasSubagent) _markDomains(_domainBackground);
         }
         break;
       case 'state.updated':
         final patch = delta['patch'];
         if (patch is Map) {
+          final normalizedPatch = patch.cast<String, dynamic>();
           if (snapshot != null) {
-            snapshot = {...snapshot!, ...patch.cast<String, dynamic>()};
+            snapshot = {...snapshot!, ...normalizedPatch};
           } else {
             // Patch arrived before the initial snapshot — buffer and
             // merge when the snapshot lands (otherwise config/queue/
             // control updates are silently lost).
             _pendingPatch = {
               ...?_pendingPatch,
-              ...patch.cast<String, dynamic>(),
+              ...normalizedPatch,
             };
           }
+          _markSnapshotDomains(normalizedPatch);
         }
         break;
     }
@@ -1880,6 +1980,7 @@ class ConversationState extends ChangeNotifier {
   void optimisticPatch(Map<String, dynamic> patch) {
     if (snapshot == null) return;
     snapshot = {...snapshot!, ...patch};
+    _markSnapshotDomains(patch);
     _scheduleNotify();
   }
 
@@ -1889,7 +1990,9 @@ class ConversationState extends ChangeNotifier {
     final index = _indexOfRowId(rowId);
     if (index == -1) return;
     rows[index] = {...rows[index], ...patch};
+    final isSubagent = rows[index]['kind'] == 'subagent';
     _rowsChanged();
+    if (isSubagent) _markDomains(_domainBackground);
     _scheduleNotify();
   }
 
@@ -1904,6 +2007,7 @@ class ConversationState extends ChangeNotifier {
       ...snapshot!,
       'queue': {...q, 'items': items ?? []},
     };
+    _markDomains(_domainQueue);
     _scheduleNotify();
   }
 
@@ -2000,6 +2104,13 @@ class ConversationState extends ChangeNotifier {
   /// profile filtered out.
   bool historyExhausted = false;
 
+  void markHistoryExhausted(bool value) {
+    if (historyExhausted == value) return;
+    historyExhausted = value;
+    _markDomains(_domainRows);
+    _scheduleNotify();
+  }
+
   /// rowsRange pagination cursor: the OLDEST row we already hold. The
   /// snapshot's firstRowId is the FULL projection's head (not the window
   /// head) — using it as beforeRowId filters everything out.
@@ -2016,11 +2127,15 @@ class ConversationState extends ChangeNotifier {
         .toList();
     if (fresh.isNotEmpty) {
       _replaceRows([...fresh, ...rows]);
+      if (fresh.any((row) => row['kind'] == 'subagent')) {
+        _markDomains(_domainBackground);
+      }
       final firstFresh = (fresh.first['rowId'] as num?)?.toInt();
       firstRowId = newFirstRowId ?? firstFresh ?? firstRowId;
       _scheduleNotify();
     } else if (newFirstRowId != null && newFirstRowId != firstRowId) {
       firstRowId = newFirstRowId;
+      _markDomains(_domainRows);
       _scheduleNotify();
     }
   }

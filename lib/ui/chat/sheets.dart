@@ -80,7 +80,11 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
     final state = widget.state;
     if (state != null) {
       return AnimatedBuilder(
-          animation: state, builder: (context, _) => _content(context));
+          animation: Listenable.merge([
+            state.configListenable,
+            state.controlListenable,
+          ]),
+          builder: (context, _) => _content(context));
     }
     return _content(context);
   }

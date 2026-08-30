@@ -365,6 +365,87 @@ void main() {
       }, onGap: () => fail('should not gap'));
       expect(state.rows.single['text'], 'updated');
     });
+    test('domain listeners receive selective coalesced notifications', () async {
+      final state = ConversationState();
+      addTearDown(state.dispose);
+      var main = 0;
+      var rows = 0;
+      var control = 0;
+      var config = 0;
+      var usage = 0;
+      var queue = 0;
+      var interaction = 0;
+      var background = 0;
+      state.addListener(() => main++);
+      state.rowsListenable.addListener(() => rows++);
+      state.controlListenable.addListener(() => control++);
+      state.configListenable.addListener(() => config++);
+      state.usageListenable.addListener(() => usage++);
+      state.queueListenable.addListener(() => queue++);
+      state.interactionListenable.addListener(() => interaction++);
+      state.backgroundListenable.addListener(() => background++);
+
+      _injectSnapshot(state, snapshot: {
+        'control': {'phase': 'idle'},
+        'config': {'model': 'm'},
+        'usage': {'contextWindow': {}},
+        'queue': {'items': []},
+        'pendingInteractions': [],
+        'backgroundWorks': [],
+        'rows': {'window': [], 'totalCount': 0},
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(main, 1);
+      expect(rows, 1);
+      expect(control, 1);
+      expect(config, 1);
+      expect(usage, 1);
+      expect(queue, 1);
+      expect(interaction, 1);
+      expect(background, 1);
+
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {'op': 'state.updated', 'patch': {'usage': null, 'queue': null}},
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: () => fail('should not gap'));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(main, 2);
+      expect(usage, 2);
+      expect(queue, 2);
+      expect(rows, 1);
+      expect(config, 1);
+
+      state.applyFrame({
+        'payload': {
+          'kind': 'deltas',
+          'deltas': [
+            {
+              'op': 'row.appended',
+              'row': {'rowId': 1, 'kind': 'subagent', 'status': 'running'},
+            },
+            {
+              'op': 'row.delta',
+              'rowId': 1,
+              'path': 'summaryText',
+              'append': 'x',
+            },
+          ],
+        },
+        'fromSeq': state.seq,
+        'toSeq': state.seq + 1,
+      }, onGap: () => fail('should not gap'));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(main, 3);
+      expect(rows, 2);
+      expect(background, 2);
+      expect(config, 1);
+    });
   });
 
   group('SessionsIndexState delta application', () {
