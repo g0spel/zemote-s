@@ -33,6 +33,8 @@ class ConversationTransport {
   final String clientId = generateUuid();
   bool _handshaken = false;
   Future<void>? _handshakeFuture;
+  late final _SharedSessionsIndex _sessionsIndexShared;
+  bool _disposed = false;
 
   /// From the server hello — required for attachment uploads.
   String? connectionId;
@@ -43,6 +45,7 @@ class ConversationTransport {
     this.appVersion = '3.6.5',
     this.onLog,
   }) {
+    _sessionsIndexShared = _SharedSessionsIndex(this);
     // A reopened bridge has no handshake state — start over (mirrors the
     // web client's `wD` cache being per service instance).
     session.recovered.addListener(_onBridgeRecovered);
@@ -105,6 +108,17 @@ class ConversationTransport {
 
   void _untrackSubscription(String sessionId) {
     _subscriptions.remove(sessionId);
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    session.recovered.removeListener(_onBridgeRecovered);
+    unawaited(_disposeSharedSessionsIndex());
+    for (final subscription in List<ConversationSubscription>.from(_subscriptions.values)) {
+      unawaited(subscription.dispose());
+    }
+    _subscriptions.clear();
   }
 
   /// Commands that require `baseRevision` (CAS, mirrors `eAe` in the web
@@ -826,20 +840,12 @@ class ConversationTransport {
 
   /// Subscribes the sessions-index of this workspace
   /// (`subscribeSessionsIndexV4` + `onDynamicSessionsIndexFrame`).
-  /// Provides the live session list with title/phase/lastAssistantPreview.
-  Future<SessionsIndexSubscription> subscribeSessionsIndex() async {
-    await handshake();
-    final subscription = SessionsIndexSubscription._(this);
-    try {
-      await subscription._start();
-    } catch (_) {
-      // 与 subscribe() 同一约定:失败回收订阅(周期清理定时器与
-      // recovered 监听不得残留),错误原样上抛。
-      await subscription.dispose();
-      rethrow;
-    }
-    return subscription;
-  }
+  /// Multiple consumers of this transport share one wire subscription and
+  /// receive independent handles; the final handle release tears it down.
+  Future<SessionsIndexSubscription> subscribeSessionsIndex() =>
+      _sessionsIndexShared.acquire();
+
+  Future<void> _disposeSharedSessionsIndex() => _sessionsIndexShared.dispose();
 
   // ---------------------------------------------------- workspace config
 
@@ -1625,9 +1631,9 @@ class SessionsIndexState extends ChangeNotifier {
   }
 }
 
-class SessionsIndexSubscription
+class _SessionsIndexWireSubscription
     extends _SubscriptionBase<SessionsIndexState> {
-  SessionsIndexSubscription._(ConversationTransport transport)
+  _SessionsIndexWireSubscription(ConversationTransport transport)
       : super(transport, SessionsIndexState(), 'v4-si');
 
   @override String get _frameEventName => 'onDynamicSessionsIndexFrame';
@@ -1659,6 +1665,112 @@ class SessionsIndexSubscription
     final subId = subscriptionId;
     if (subId == null || frame['subscriptionId'] != subId) return;
     state.applyFrame(frame, onGap: _resync);
+  }
+}
+
+class _SharedSessionsIndex {
+  final ConversationTransport _transport;
+  _SessionsIndexWireSubscription? _wire;
+  Future<_SessionsIndexWireSubscription>? _starting;
+  Future<void>? _stopping;
+  int _references = 0;
+  bool _disposed = false;
+
+  String? get subscriptionId => _wire?.subscriptionId;
+  String get topic =>
+      'sessions-index/${_transport.scope['workspaceIdentity'] ?? _transport.scope['workspacePath']}';
+
+  _SharedSessionsIndex(this._transport);
+
+  Future<SessionsIndexSubscription> acquire() async {
+    if (_disposed) throw StateError('sessions-index registry disposed');
+    final stopping = _stopping;
+    if (stopping != null) await stopping;
+    if (_disposed) throw StateError('sessions-index registry disposed');
+    var wire = _wire;
+    if (wire == null) {
+      final starting = _starting ??= _startWire();
+      try {
+        wire = await starting;
+      } finally {
+        if (identical(_starting, starting)) _starting = null;
+      }
+    }
+    if (_disposed || wire._disposed) {
+      throw StateError('sessions-index registry disposed');
+    }
+    _references++;
+    return SessionsIndexSubscription._(this, wire.state);
+  }
+
+  Future<_SessionsIndexWireSubscription> _startWire() async {
+    await _transport.handshake();
+    if (_disposed) throw StateError('sessions-index registry disposed');
+    final wire = _SessionsIndexWireSubscription(_transport);
+    try {
+      await wire._start();
+    } catch (_) {
+      await wire.dispose();
+      rethrow;
+    }
+    if (_disposed) {
+      await wire.dispose();
+      throw StateError('sessions-index registry disposed');
+    }
+    _wire = wire;
+    return wire;
+  }
+
+  Future<void> release() async {
+    if (_references == 0) return;
+    _references--;
+    if (_references != 0) return;
+    final wire = _wire;
+    _wire = null;
+    if (wire != null) {
+      final stopping = wire.dispose();
+      _stopping = stopping;
+      try {
+        await stopping;
+      } finally {
+        if (identical(_stopping, stopping)) _stopping = null;
+      }
+    }
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _references = 0;
+    final starting = _starting;
+    final stopping = _stopping;
+    if (stopping != null) await stopping;
+    final wire = _wire;
+    _wire = null;
+    if (wire != null) await wire.dispose();
+    if (starting != null) {
+      try {
+        final pending = await starting;
+        if (!identical(pending, wire)) await pending.dispose();
+      } catch (_) {}
+    }
+  }
+}
+
+class SessionsIndexSubscription {
+  final _SharedSessionsIndex _shared;
+  final SessionsIndexState state;
+  bool _disposed = false;
+
+  SessionsIndexSubscription._(this._shared, this.state);
+
+  String? get subscriptionId => _shared.subscriptionId;
+  String get topic => _shared.topic;
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    await _shared.release();
   }
 }
 

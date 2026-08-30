@@ -651,6 +651,10 @@ class BridgeSession {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    for (final transport in _conversations.values) {
+      transport.dispose();
+    }
+    _conversations.clear();
     degraded.dispose();
     recovered.dispose();
     _transport.dispose();
