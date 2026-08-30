@@ -1001,15 +1001,16 @@ class _SessionDrawerState extends State<SessionDrawer> {
       }
       return seed.isEmpty ? _noMatch(context) : _buildSessionList(seed);
     }
-    if (_entries.isEmpty) {
+    final filtered = _filtered;
+    final archived = filterSessions(_archived, _query);
+    if (filtered.isEmpty && archived.isEmpty) {
+      if (_query.trim().isNotEmpty) return _noMatch(context);
       return Center(
         child: Text('暂无会话，点「＋新会话」开始对话',
             style: TextStyle(
                 fontSize: EmberType.caption, color: colors.textFaint)),
       );
     }
-    final filtered = _filtered;
-    if (filtered.isEmpty) return _noMatch(context);
     return _buildSessionList(filtered);
   }
 
@@ -1059,25 +1060,52 @@ class _SessionDrawerState extends State<SessionDrawer> {
 
   Widget _buildSessionList(List<SessionEntry> entries) {
     final colors = EmberColors.of(context);
-    return ListView(
+    final groups = groupSessions(
+        [...entries, ...filterSessions(_archived, _query)], _pinnedIds);
+    final items = <({String group, SessionEntry? entry, int occurrence})>[];
+    for (final group in groups.entries) {
+      items.add((group: group.key, entry: null, occurrence: 0));
+      final occurrences = <String, int>{};
+      for (final entry in group.value) {
+        final occurrence = occurrences.update(
+          entry.sessionId,
+          (count) => count + 1,
+          ifAbsent: () => 0,
+        );
+        items.add((
+          group: group.key,
+          entry: entry,
+          occurrence: occurrence,
+        ));
+      }
+    }
+    return ListView.builder(
       padding: const EdgeInsets.symmetric(
           horizontal: EmberSpacing.page, vertical: EmberSpacing.gapS),
-      children: [
-        for (final group in groupSessions(
-            [...entries, ...filterSessions(_archived, _query)], _pinnedIds)
-            .entries) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                EmberSpacing.cardPad, EmberSpacing.gapS, 0, 4),
-            child: Text(_groupLabels[group.key] ?? group.key,
-                style: TextStyle(
-                    fontSize: EmberType.caption,
-                    fontWeight: FontWeight.w600,
-                    color: colors.textFaint)),
-          ),
-          for (final e in group.value) _buildRow(context, e),
-        ],
-      ],
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        final entry = item.entry;
+        if (entry == null) {
+          return KeyedSubtree(
+            key: ValueKey('session-group-${item.group}'),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  EmberSpacing.cardPad, EmberSpacing.gapS, 0, 4),
+              child: Text(_groupLabels[item.group] ?? item.group,
+                  style: TextStyle(
+                      fontSize: EmberType.caption,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textFaint)),
+            ),
+          );
+        }
+        return KeyedSubtree(
+          key: ValueKey(
+              'session-row-${item.group}-${entry.sessionId}-${item.occurrence}'),
+          child: _buildRow(context, entry),
+        );
+      },
     );
   }
 
