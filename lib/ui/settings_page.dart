@@ -221,8 +221,10 @@ class SettingsPage extends StatelessWidget {
                 trailing: _chevron,
                 onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                        builder: (_) =>
-                            ModelProvidersPage(session: bridge!))),
+                        builder: (_) => ModelProvidersPage(
+                              session: bridge!,
+                              scope: _scopeOf(bridge!),
+                            ))),
               ),
               const Divider(indent: 52),
               ListTile(

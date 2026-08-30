@@ -243,14 +243,19 @@ class _ChatPageState extends State<ChatPage> {
   /// prepareWorkspace 最近一次成功拉取时刻(5s 新鲜度窗:窗内重复打开
   /// 模型面板不再发请求,连开即开)。
   DateTime? _prepFetchedAt;
+  int _prepGeneration = 0;
 
   /// 只刷 prepareWorkspace(模型/思考档/模式可选项的实时来源)。
   /// 必须 refresh: true——传输层有会话级缓存,不带参数会直接返回缓存
   /// (模型增删后旧缓存照旧,面板"刷新"实际没上线)。
   Future<void> _refreshPrep() async {
+    final generation = ++_prepGeneration;
+    final transportGeneration = _transport.prepGeneration;
     try {
       final prep = await _transport.prepareWorkspace(refresh: true);
-      if (mounted) {
+      if (mounted &&
+          generation == _prepGeneration &&
+          transportGeneration == _transport.prepGeneration) {
         setState(() {
           _prep = prep;
           _prepFetchedAt = DateTime.now();
@@ -286,6 +291,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _prepGeneration++;
     _subscription?.dispose();
     final titleSub = _titleSub;
     _titleSub = null;

@@ -629,16 +629,15 @@ class BridgeSession {
   String? get workspaceKey => _bridge['workspaceKey'] as String?;
   String? get initialTaskId => _bridge['initialTaskId'] as String?;
 
-  /// The web client performs the conversation handshake ONCE per service
-  /// (cached via `wD`). The transport is keyed by scope and cleared on
-  /// stack swap so the new bridge handshakes again.
+  /// The transport is keyed by the complete workspace scope so a path change
+  /// under the same identity cannot reuse a stale scope.
   final Map<String, ConversationTransport> _conversations = {};
 
   ConversationTransport conversation(
     Map<String, dynamic> scope, {
     void Function(String line)? onLog,
   }) {
-    final key = '${scope['workspaceIdentity'] ?? scope['workspacePath']}';
+    final key = '${scope['workspacePath']}\u0000${scope['workspaceIdentity'] ?? ''}';
     return _conversations.putIfAbsent(
       key,
       () => ConversationTransport(

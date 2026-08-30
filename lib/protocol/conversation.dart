@@ -52,10 +52,15 @@ class ConversationTransport {
     _handshaken = false;
     _handshakeFuture = null;
     connectionId = null;
+    _prepGeneration++;
+    _prepRequestGeneration++;
     _prep = null;
+    _prepInFlight = null;
+    _prepRefreshInFlight = null;
   }
 
   ChannelClient get _channels => session.channels;
+  int get prepGeneration => _prepGeneration;
 
   void _log(String line) => onLog?.call(line);
 
@@ -840,35 +845,56 @@ class ConversationTransport {
 
   WorkspacePrep? _prep;
 
-  /// prepareWorkspace 在途 future(仅并发去重:聊天页 init、模型面板、
-  /// 供应商页可能同时强刷,合走一个请求。刻意不做 TTL 陈旧窗——缓存
-  /// 一致性比省一个请求重要,见传输层缓存假刷新的教训)。
+  /// prepareWorkspace 在途 future(按是否强刷分开合并,避免 refresh 被普通请求吸附)。
   Future<WorkspacePrep>? _prepInFlight;
+  Future<WorkspacePrep>? _prepRefreshInFlight;
+  int _prepGeneration = 0;
+  int _prepRequestGeneration = 0;
 
   /// `zcode-task.prepareWorkspace` — returns configOptions (model/mode/
   /// thought selects) and slashCommands (builtin + custom skills/MCP).
   Future<WorkspacePrep> prepareWorkspace({bool refresh = false}) async {
     final cached = _prep;
     if (cached != null && !refresh) return cached;
-    final inFlight = _prepInFlight;
+
+    final inFlight = refresh
+        ? _prepRefreshInFlight
+        : (_prepInFlight ?? _prepRefreshInFlight);
     if (inFlight != null) return inFlight;
-    final future = _fetchPrep();
-    _prepInFlight = future;
+
+    final generation = _prepGeneration;
+    final requestGeneration = ++_prepRequestGeneration;
+    final future = _fetchPrep(generation, requestGeneration);
+    if (refresh) {
+      _prepRefreshInFlight = future;
+    } else {
+      _prepInFlight = future;
+    }
     try {
       return await future;
     } finally {
-      if (identical(_prepInFlight, future)) _prepInFlight = null;
+      if (refresh) {
+        if (identical(_prepRefreshInFlight, future)) {
+          _prepRefreshInFlight = null;
+        }
+      } else if (identical(_prepInFlight, future)) {
+        _prepInFlight = null;
+      }
     }
   }
 
-  Future<WorkspacePrep> _fetchPrep() async {
+  Future<WorkspacePrep> _fetchPrep(
+      int generation, int requestGeneration) async {
     final res = await _channels.call(
       Channels.zcodeTask,
       'prepareWorkspace',
       [scope],
     );
     final prep = WorkspacePrep._(res is Map ? res : const {});
-    _prep = prep;
+    if (generation == _prepGeneration &&
+        requestGeneration == _prepRequestGeneration) {
+      _prep = prep;
+    }
     return prep;
   }
 
