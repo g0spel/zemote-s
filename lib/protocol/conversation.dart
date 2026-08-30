@@ -821,6 +821,12 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
 
   final _stagedFrames = <Map<String, dynamic>>[];
   final _fragments = <String, _LogicalFrameAssembly>{};
+  int _fragmentBytes = 0;
+  static const _maxLogicalFragments = 64;
+  static const _maxLogicalFrameBytes = 16 * 1024 * 1024;
+  static const _maxFragmentAssemblies = 32;
+  static const _maxFragmentBytes = 32 * 1024 * 1024;
+  static const _maxStagedFrames = 128;
   Timer? _fragmentCleanup;
 
   _SubscriptionBase(this._transport, this.state, this._logTag) {
@@ -881,9 +887,15 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       if (now.difference(a.createdAt).inSeconds > 60) stale.add(id);
     });
     for (final id in stale) {
-      _fragments.remove(id);
+      final assembly = _fragments.remove(id);
+      if (assembly != null) _fragmentBytes -= assembly.receivedBytes;
       _transport._log('[$_logTag] purged stale fragment $id');
     }
+  }
+
+  void _dropFragment(String id) {
+    final assembly = _fragments.remove(id);
+    if (assembly != null) _fragmentBytes -= assembly.receivedBytes;
   }
 
   Future<void> _start() async {
@@ -984,33 +996,90 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
 
   void _acceptOrStage(Map<String, dynamic> frame) {
     if (_subscriptionId == null) {
-      _stagedFrames.add(frame);
+      if (_stagedFrames.length < _maxStagedFrames) {
+        _stagedFrames.add(frame);
+      } else {
+        _transport._log('[$_logTag] staged frame limit reached');
+      }
       return;
     }
     _acceptLogicalFrame(frame);
   }
 
   void _acceptFragment(Map<String, dynamic> frame) {
-    final id = frame['logicalFrameId'] as String?;
-    final index = (frame['fragmentIndex'] as num?)?.toInt();
-    final count = (frame['fragmentCount'] as num?)?.toInt();
-    final dataBase64 = frame['dataBase64'] as String?;
-    if (id == null || index == null || count == null || dataBase64 == null) {
-      return;
-    }
-    final assembly =
-        _fragments.putIfAbsent(id, () => _LogicalFrameAssembly(count));
-    assembly.add(index, base64.decode(dataBase64));
-    if (assembly.isComplete) {
-      _fragments.remove(id);
+    try {
+      final id = frame['logicalFrameId'] as String?;
+      final index = (frame['fragmentIndex'] as num?)?.toInt();
+      final count = (frame['fragmentCount'] as num?)?.toInt();
+      final messageBytes = (frame['messageBytes'] as num?)?.toInt();
+      final dataBase64 = frame['dataBase64'] as String?;
+      if (id == null ||
+          id.isEmpty ||
+          index == null ||
+          count == null ||
+          messageBytes == null ||
+          dataBase64 == null) {
+        return;
+      }
+      if (index < 0 ||
+          count <= 0 ||
+          count > _maxLogicalFragments ||
+          index >= count ||
+          messageBytes <= 0 ||
+          messageBytes > _maxLogicalFrameBytes) {
+        _transport._log('[$_logTag] invalid logical fragment bounds');
+        _dropFragment(id);
+        return;
+      }
+      final Uint8List chunk;
       try {
-        final decoded = jsonDecode(utf8.decode(assembly.assemble()));
+        chunk = base64.decode(dataBase64);
+      } catch (_) {
+        _dropFragment(id);
+        return;
+      }
+      if (chunk.isEmpty || chunk.length > _maxLogicalFrameBytes) {
+        _dropFragment(id);
+        return;
+      }
+      var assembly = _fragments[id];
+      if (assembly == null) {
+        if (_fragments.length >= _maxFragmentAssemblies ||
+            _fragmentBytes + chunk.length > _maxFragmentBytes) {
+          _transport._log('[$_logTag] logical fragment limit reached');
+          return;
+        }
+        assembly = _LogicalFrameAssembly(count, messageBytes);
+        _fragments[id] = assembly;
+      } else if (!assembly.matches(count, messageBytes)) {
+        _transport._log('[$_logTag] logical fragment metadata mismatch');
+        _dropFragment(id);
+        return;
+      }
+      final added = assembly.add(index, chunk);
+      if (added) _fragmentBytes += chunk.length;
+      if (assembly.receivedBytes > messageBytes) {
+        _transport._log('[$_logTag] logical fragment exceeds declared size');
+        _dropFragment(id);
+        return;
+      }
+      if (!assembly.isComplete) return;
+      _dropFragment(id);
+      final bytes = assembly.assemble();
+      if (bytes.length != messageBytes) {
+        _transport._log('[$_logTag] logical fragment size mismatch');
+        return;
+      }
+      try {
+        final decoded = jsonDecode(utf8.decode(bytes));
         if (decoded is Map) {
           _acceptOrStage(decoded.cast<String, dynamic>());
         }
       } catch (e) {
         _transport._log('[$_logTag] bad logical frame: $e');
       }
+    } catch (e) {
+      _transport._log('[$_logTag] malformed logical fragment: $e');
     }
   }
 
@@ -1061,6 +1130,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       } catch (_) {}
     }
     _fragments.clear();
+    _fragmentBytes = 0;
   }
 }
 
@@ -1237,16 +1307,25 @@ class SlashCommand {
 
 class _LogicalFrameAssembly {
   final int count;
+  final int messageBytes;
   final List<Uint8List?> parts;
   final DateTime createdAt = DateTime.now();
   int received = 0;
 
-  _LogicalFrameAssembly(this.count) : parts = List.filled(count, null);
+  _LogicalFrameAssembly(this.count, this.messageBytes)
+      : parts = List<Uint8List?>.filled(count, null);
 
-  void add(int index, Uint8List data) {
-    if (index < 0 || index >= count) return;
-    if (parts[index] == null) received += 1;
+  int get receivedBytes =>
+      parts.fold<int>(0, (sum, part) => sum + (part?.length ?? 0));
+
+  bool matches(int otherCount, int otherBytes) =>
+      count == otherCount && messageBytes == otherBytes;
+
+  bool add(int index, Uint8List data) {
+    if (index < 0 || index >= count || parts[index] != null) return false;
     parts[index] = data;
+    received += 1;
+    return true;
   }
 
   bool get isComplete => received == count;

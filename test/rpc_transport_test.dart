@@ -214,6 +214,71 @@ void main() {
     expect(sent, isEmpty);
   });
 
+  test('rejects invalid inbound fragment bounds without allocating', () {
+    expect(
+      transport.acceptPayload({
+        'zcode_type': 'rpc-frame',
+        'bridgeSessionId': 'bridge-1',
+        'messageSeq': 9,
+        'fragmentIndex': 0,
+        'fragmentCount': RpcFrameTransport.maxFragments + 1,
+        'messageBytes': 1,
+        'dataBase64': base64.encode(Uint8List.fromList([1])),
+      }),
+      isTrue,
+    );
+    expect(received, isEmpty);
+    expect(sent, isEmpty);
+  });
+
+  test('drops an assembly when fragment metadata changes', () {
+    final chunk = base64.encode(Uint8List.fromList([1]));
+    transport.acceptPayload({
+      'zcode_type': 'rpc-frame',
+      'bridgeSessionId': 'bridge-1',
+      'messageSeq': 10,
+      'fragmentIndex': 0,
+      'fragmentCount': 2,
+      'messageBytes': 2,
+      'dataBase64': chunk,
+    });
+    transport.acceptPayload({
+      'zcode_type': 'rpc-frame',
+      'bridgeSessionId': 'bridge-1',
+      'messageSeq': 10,
+      'fragmentIndex': 1,
+      'fragmentCount': 3,
+      'messageBytes': 3,
+      'dataBase64': chunk,
+    });
+    transport.acceptPayload({
+      'zcode_type': 'rpc-frame',
+      'bridgeSessionId': 'bridge-1',
+      'messageSeq': 10,
+      'fragmentIndex': 1,
+      'fragmentCount': 2,
+      'messageBytes': 2,
+      'dataBase64': chunk,
+    });
+    expect(received, isEmpty);
+    expect(sent, isEmpty);
+  });
+
+  test('rejects assembled length mismatch', () async {
+    transport.acceptPayload({
+      'zcode_type': 'rpc-frame',
+      'bridgeSessionId': 'bridge-1',
+      'messageSeq': 11,
+      'fragmentIndex': 0,
+      'fragmentCount': 1,
+      'messageBytes': 2,
+      'dataBase64': base64.encode(Uint8List.fromList([1])),
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(received, isEmpty);
+    expect(sent.where((p) => p['zcode_type'] == 'rpc-frame-ack'), isEmpty);
+  });
+
   test('reassembly with out-of-order fragments', () async {
     final received = <Uint8List>[];
     final transport = RpcFrameTransport(

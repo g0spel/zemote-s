@@ -17,6 +17,8 @@ class RpcFrameTransport {
 
   /// Raw bytes per fragment; base64 expands by 4/3, keep envelope < 1 MiB.
   static const _fragmentPayloadBytes = 512 * 1024;
+  static const _maxInboundAssemblies = 32;
+  static const _maxInboundAssemblyBytes = 32 * 1024 * 1024;
 
   final String bridgeSessionId;
   final int? bridgeGeneration;
@@ -31,6 +33,7 @@ class RpcFrameTransport {
   Stream<Uint8List> get messages => _messageController.stream;
 
   final _assemblies = <int, _Assembly>{};
+  int _inboundAssemblyBytes = 0;
   Timer? _assemblyCleanupTimer;
   bool _disposed = false;
 
@@ -52,9 +55,15 @@ class RpcFrameTransport {
       if (now.difference(a.createdAt).inSeconds > 60) stale.add(seq);
     });
     for (final seq in stale) {
-      _assemblies.remove(seq);
+      final assembly = _assemblies.remove(seq);
+      if (assembly != null) _inboundAssemblyBytes -= assembly.receivedBytes;
       onLog?.call('[rpc] purged stale assembly $seq');
     }
+  }
+
+  void _dropAssembly(int messageSeq) {
+    final assembly = _assemblies.remove(messageSeq);
+    if (assembly != null) _inboundAssemblyBytes -= assembly.receivedBytes;
   }
 
   Map<String, dynamic> get _identity => {
@@ -118,21 +127,59 @@ class RpcFrameTransport {
         dataBase64 == null) {
       return true;
     }
+    if (messageSeq < 0 ||
+        fragmentIndex < 0 ||
+        fragmentCount <= 0 ||
+        fragmentCount > maxFragments ||
+        messageBytes <= 0 ||
+        messageBytes > maxMessageBytes) {
+      onLog?.call('[rpc] invalid inbound fragment bounds');
+      _dropAssembly(messageSeq);
+      return true;
+    }
 
-    final assembly = _assemblies.putIfAbsent(
-      messageSeq,
-      () => _Assembly(fragmentCount, messageBytes, checksum),
-    );
-    Uint8List? chunk;
+    Uint8List chunk;
     try {
       chunk = base64.decode(dataBase64);
     } catch (_) {
+      _dropAssembly(messageSeq);
       return true;
     }
-    assembly.add(fragmentIndex, chunk);
+    if (chunk.isEmpty || chunk.length > _fragmentPayloadBytes) {
+      onLog?.call('[rpc] invalid inbound fragment size');
+      _dropAssembly(messageSeq);
+      return true;
+    }
+
+    var assembly = _assemblies[messageSeq];
+    if (assembly == null) {
+      if (_assemblies.length >= _maxInboundAssemblies ||
+          _inboundAssemblyBytes + chunk.length > _maxInboundAssemblyBytes) {
+        onLog?.call('[rpc] inbound assembly limit reached');
+        return true;
+      }
+      assembly = _Assembly(fragmentCount, messageBytes, checksum);
+      _assemblies[messageSeq] = assembly;
+    } else if (!assembly.matches(fragmentCount, messageBytes, checksum)) {
+      onLog?.call('[rpc] inbound fragment metadata mismatch');
+      _dropAssembly(messageSeq);
+      return true;
+    }
+    if (fragmentIndex >= fragmentCount) return true;
+    final added = assembly.add(fragmentIndex, chunk);
+    if (added) _inboundAssemblyBytes += chunk.length;
+    if (assembly.receivedBytes > messageBytes) {
+      onLog?.call('[rpc] inbound assembly exceeds declared size');
+      _dropAssembly(messageSeq);
+      return true;
+    }
     if (assembly.isComplete) {
-      _assemblies.remove(messageSeq);
+      _dropAssembly(messageSeq);
       final message = assembly.assemble();
+      if (message.length != messageBytes) {
+        onLog?.call('[rpc] inbound assembly size mismatch');
+        return true;
+      }
       if (assembly.checksum == null ||
           Crc32.hexOf(message) == assembly.checksum) {
         onLog?.call(
@@ -155,6 +202,7 @@ class RpcFrameTransport {
     _disposed = true;
     _assemblyCleanupTimer?.cancel();
     _assemblies.clear();
+    _inboundAssemblyBytes = 0;
     await _messageController.close();
   }
 }
@@ -170,10 +218,19 @@ class _Assembly {
   _Assembly(this.fragmentCount, this.messageBytes, this.checksum)
       : fragments = List<Uint8List?>.filled(fragmentCount, null);
 
-  void add(int index, Uint8List data) {
-    if (index < 0 || index >= fragmentCount) return;
-    if (fragments[index] == null) received += 1;
+  int get receivedBytes =>
+      fragments.fold<int>(0, (sum, fragment) => sum + (fragment?.length ?? 0));
+
+  bool matches(int count, int bytes, String? crc) =>
+      fragmentCount == count && messageBytes == bytes && checksum == crc;
+
+  bool add(int index, Uint8List data) {
+    if (index < 0 || index >= fragmentCount || fragments[index] != null) {
+      return false;
+    }
     fragments[index] = data;
+    received += 1;
+    return true;
   }
 
   bool get isComplete => received == fragmentCount;
