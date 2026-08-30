@@ -82,7 +82,7 @@ class ZflowClient {
       if (workspaceKey.isEmpty) return;
       _log('[watchdog] 桥帧静默 ${silent.inSeconds}s,主动重连工作区 '
           '$workspaceKey(不等 bridge-degraded)');
-      _recoverBridgeOnce(_activeBridges.last);
+      _recoverActiveBridges();
     });
   }
 
@@ -113,33 +113,51 @@ class ZflowClient {
   Future<void> _recoverActiveBridges() async {
     _log('[bridge] recovering ${_activeBridges.length} bridge(s)');
     for (final session in List<BridgeSession>.from(_activeBridges)) {
-      if (_recoveringBridges.contains(session)) continue;
-      _recoveringBridges.add(session);
-      unawaited(_recoverBridgeWithRetry(session));
+      _startBridgeRecovery(session);
     }
   }
 
   final Set<BridgeSession> _recoveringBridges = {};
 
+  /// Starts at most one recovery loop per bridge. All recovery signals
+  /// (relay state, bridge-degraded, frame watchdog) enter here so a burst of
+  /// signals cannot reopen the same bridge concurrently.
+  void _startBridgeRecovery(BridgeSession session) {
+    if (session._disposed || session._recoveryFuture != null) return;
+    final generation = ++session._recoveryGeneration;
+    final future = _recoverBridgeWithRetry(session, generation);
+    session._recoveryFuture = future;
+    _recoveringBridges.add(session);
+    unawaited(future.whenComplete(() {
+      _recoveringBridges.remove(session);
+      if (identical(session._recoveryFuture, future)) {
+        session._recoveryFuture = null;
+      }
+    }));
+  }
+
   /// Retries bridge recovery until it succeeds, so a degraded bridge never
   /// strands commands ("can't send after reconnect"). A relay re-drop during
   /// the retries just prolongs the loop.
-  Future<void> _recoverBridgeWithRetry(BridgeSession session) async {
-    try {
-      for (var attempt = 1; attempt <= 15; attempt++) {
-        if (session._disposed) return;
-        if (await _recoverBridgeOnce(session)) return;
-        if (session._disposed) return;
-        _log('[bridge] recovery attempt $attempt failed, retrying');
-        await Future.delayed(const Duration(seconds: 3));
-      }
-    } finally {
-      _recoveringBridges.remove(session);
+  Future<void> _recoverBridgeWithRetry(
+      BridgeSession session, int generation) async {
+    for (var attempt = 1; attempt <= 15; attempt++) {
+      if (!_recoveryIsCurrent(session, generation)) return;
+      if (await _recoverBridgeOnce(session, generation)) return;
+      if (!_recoveryIsCurrent(session, generation)) return;
+      _log('[bridge] recovery attempt $attempt failed, retrying');
+      await Future.delayed(const Duration(seconds: 3));
     }
   }
 
+  bool _recoveryIsCurrent(BridgeSession session, int generation) =>
+      !_disposed && !session._disposed &&
+      generation == session._recoveryGeneration;
+
   /// Returns true when the bridge is healthy again.
-  Future<bool> _recoverBridgeOnce(BridgeSession session) async {
+  Future<bool> _recoverBridgeOnce(
+      BridgeSession session, int generation) async {
+    if (!_recoveryIsCurrent(session, generation)) return true;
     final workspaceKey = session.bridge['workspaceKey'] as String?;
     if (workspaceKey == null) {
       // Nothing to reconnect; clear the degraded flag so commands unblock.
@@ -151,6 +169,7 @@ class ZflowClient {
     try {
       final res = await reconnectWorkspace(workspaceKey)
           .timeout(const Duration(seconds: 15));
+      if (!_recoveryIsCurrent(session, generation)) return true;
       if (res['success'] == true) {
         _log('[bridge] reconnected $workspaceKey');
         session.degraded.value = null;
@@ -160,16 +179,20 @@ class ZflowClient {
     } catch (e) {
       _log('[bridge] reconnect-request failed: $e');
     }
+    if (!_recoveryIsCurrent(session, generation)) return true;
     // 2) full reopen: new workspace-bridge-open, swap the transport stack
     // into the SAME BridgeSession so open pages keep working.
     try {
-      await _reopenBridge(session, workspaceKey);
+      await _reopenBridge(session, workspaceKey, generation);
+      if (!_recoveryIsCurrent(session, generation)) return true;
       session.degraded.value = null;
       session.recovered.value += 1;
       return true;
     } catch (e) {
       _log('[bridge] reopen failed: $e');
-      session.degraded.value = 'reopen-failed: $e';
+      if (_recoveryIsCurrent(session, generation)) {
+        session.degraded.value = 'reopen-failed: $e';
+      }
       return false;
     }
   }
@@ -320,7 +343,11 @@ class ZflowClient {
         found = true;
       }
     }
-    if (found) _recoverActiveBridges();
+    if (found) {
+      final session = _activeBridges.firstWhere(
+          (s) => s.bridge['bridgeSessionId'] == bridgeSessionId);
+      _startBridgeRecovery(session);
+    }
   }
 
   /// workspace-bridge-open -> workspace-bridge-ready, then builds the
@@ -430,7 +457,7 @@ class ZflowClient {
   /// bridgeSessionId, bumped generation, carries recoveryId), then swaps
   /// the stack into the existing [BridgeSession].
   Future<void> _reopenBridge(
-      BridgeSession session, String workspaceKey) async {
+      BridgeSession session, String workspaceKey, int recoveryGeneration) async {
     final oldBridge = session.bridge;
     final bridgeSessionId = _reqId('bridge');
     final generation = ++_bridgeGeneration;
@@ -454,6 +481,7 @@ class ZflowClient {
     if (res['zcode_type'] == 'workspace-bridge-error') {
       throw StateError('workspace-bridge-error: ${res['error'] ?? res}');
     }
+    if (!_recoveryIsCurrent(session, recoveryGeneration)) return;
     final bridge =
         (res['bridge'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
     _attachStack(session, bridgeSessionId, bridge);
@@ -524,6 +552,11 @@ class BridgeSession {
   /// Bumped when the bridge recovers/reopens — subscriptions must
   /// resubscribe (server-side subscription state died with the old bridge).
   final ValueNotifier<int> recovered = ValueNotifier(0);
+
+  /// One recovery loop per bridge. All triggers reuse this future instead of
+  /// racing separate reconnect/reopen operations.
+  Future<void>? _recoveryFuture;
+  int _recoveryGeneration = 0;
 
   /// Resolves once the bridge is healthy again (degraded cleared), or throws
   /// [TimeoutException]. Commands gate on this so a send during a
