@@ -1496,7 +1496,7 @@ class _ChatPageState extends State<ChatPage> {
                     : AnimatedBuilder(
                         animation: state,
                         builder: (context, _) {
-                          final groups = _groupRows(state.rows);
+                          final groups = cachedGroupRows(state);
                           // Optimistic echoes render newest-first at the
                           // bottom (reverse index 0..n-1).
                           final echoCount = _echoes.length;

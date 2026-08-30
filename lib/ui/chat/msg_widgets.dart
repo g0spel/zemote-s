@@ -179,6 +179,31 @@ List<List<Map<String, dynamic>>> _groupRows(
   return groups;
 }
 
+ConversationState? _groupCacheState;
+int _groupCacheVersion = -1;
+List<List<Map<String, dynamic>>>? _groupCache;
+
+/// Reuses row grouping while the state has not published a row mutation.
+/// Echoes and control-only updates are outside this cache's input.
+List<List<Map<String, dynamic>>> cachedGroupRows(ConversationState state) {
+  if (identical(_groupCacheState, state) &&
+      _groupCacheVersion == state.rowsVersion &&
+      _groupCache != null) {
+    return _groupCache!;
+  }
+  final groups = _groupRows(state.rows);
+  _groupCacheState = state;
+  _groupCacheVersion = state.rowsVersion;
+  _groupCache = groups;
+  return groups;
+}
+
+void clearGroupRowsCache() {
+  _groupCacheState = null;
+  _groupCacheVersion = -1;
+  _groupCache = null;
+}
+
 class _TurnGroupWidget extends StatelessWidget {
   final List<Map<String, dynamic>> rows;
   final ConversationTransport transport;
