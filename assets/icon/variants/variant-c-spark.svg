@@ -1,0 +1,29 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 备选 C:抽象余烬火花(三道上升火痕 + 在线点) -->
+  <defs>
+    <linearGradient id="emberC" gradientUnits="userSpaceOnUse"
+        x1="300" y1="780" x2="760" y2="260">
+      <stop offset="0" stop-color="#BA5A37"/>
+      <stop offset="1" stop-color="#E8A87C"/>
+    </linearGradient>
+    <radialGradient id="glowC" cx="0.5" cy="0.66" r="0.52">
+      <stop offset="0" stop-color="#D97757" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#D97757" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="sqC">
+      <rect width="1024" height="1024" rx="224"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#sqC)">
+    <rect width="1024" height="1024" fill="#1B1917"/>
+    <rect width="1024" height="1024" fill="url(#glowC)"/>
+  </g>
+  <g fill="url(#emberC)">
+    <path d="M472 788 L340 788 L588 236 L652 236 Z"/>
+    <rect x="300" y="712" width="424" height="112" rx="56" opacity="0.55"/>
+    <rect x="392" y="300" width="300" height="104" rx="52" opacity="0.35"
+          transform="rotate(-24 542 352)"/>
+  </g>
+  <circle cx="736" cy="204" r="52" fill="#1B1917"/>
+  <circle cx="736" cy="204" r="36" fill="#7FB069"/>
+</svg>

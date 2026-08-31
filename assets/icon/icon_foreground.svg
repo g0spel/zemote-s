@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 自适应图标前景:透明底,内容位于安全区(中心 66%)内;
+       背景由 adaptive_icon_background 单独着色(#1B1917)。
+       间隔环用底色,与背景层无缝衔接 -->
+  <defs>
+    <linearGradient id="emberZ" gradientUnits="userSpaceOnUse"
+        x1="252" y1="248" x2="772" y2="776">
+      <stop offset="0" stop-color="#E08A5E"/>
+      <stop offset="1" stop-color="#BA5A37"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.62" r="0.5">
+      <stop offset="0" stop-color="#D97757" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#D97757" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+
+  <g fill="url(#emberZ)">
+    <rect x="252" y="248" width="520" height="120" rx="18"/>
+    <polygon points="595,284 747,284 429,740 277,740"/>
+    <rect x="252" y="656" width="520" height="120" rx="18"/>
+  </g>
+
+  <circle cx="772" cy="248" r="56" fill="#1B1917"/>
+  <circle cx="772" cy="248" r="40" fill="#7FB069"/>
+</svg>

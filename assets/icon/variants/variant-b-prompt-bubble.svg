@@ -1,0 +1,30 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 备选 B:终端对话气泡 >_ -->
+  <defs>
+    <linearGradient id="emberB" gradientUnits="userSpaceOnUse"
+        x1="212" y1="212" x2="812" y2="812">
+      <stop offset="0" stop-color="#E08A5E"/>
+      <stop offset="1" stop-color="#BA5A37"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.62" r="0.5">
+      <stop offset="0" stop-color="#D97757" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#D97757" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="sqB">
+      <rect width="1024" height="1024" rx="224"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#sqB)">
+    <rect width="1024" height="1024" fill="#1B1917"/>
+    <rect width="1024" height="1024" fill="url(#glowB)"/>
+  </g>
+  <!-- 气泡:左下带尾角 -->
+  <path d="M312 212 H712 A100 100 0 0 1 812 312 V560 A100 100 0 0 1 712 660 H436 L292 800 A24 24 0 0 1 252 782 V312 A100 100 0 0 1 312 212 Z"
+        fill="url(#emberB)"/>
+  <!-- 提示符 >_ -->
+  <g stroke="#1B1917" stroke-width="52" stroke-linecap="round"
+     stroke-linejoin="round" fill="none">
+    <polyline points="356,330 480,436 356,542"/>
+    <line x1="540" y1="542" x2="668" y2="542"/>
+  </g>
+</svg>

@@ -1,0 +1,36 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Zflow 图标:Ember 设计语言(暖炭底 + 余烬渐变 Z + 在线绿点)
+       斜杠两端收进横杠直边内(y 284/740),不破坏横杠的圆角轮廓;
+       渐变 userSpaceOnUse 全局采样,三块形状无接缝 -->
+  <defs>
+    <linearGradient id="emberZ" gradientUnits="userSpaceOnUse"
+        x1="252" y1="248" x2="772" y2="776">
+      <stop offset="0" stop-color="#E08A5E"/>
+      <stop offset="1" stop-color="#BA5A37"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.62" r="0.5">
+      <stop offset="0" stop-color="#D97757" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#D97757" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="224"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="#1B1917"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+  </g>
+
+  <!-- Z:顶横杠 + 斜杠 + 底横杠 -->
+  <g fill="url(#emberZ)">
+    <rect x="252" y="248" width="520" height="120" rx="18"/>
+    <polygon points="595,284 747,284 429,740 277,740"/>
+    <rect x="252" y="656" width="520" height="120" rx="18"/>
+  </g>
+
+  <!-- 在线点:压在 Z 右上角的徽标式状态点(绿 = 已连接),
+       底色间隔环把徽标从字面 cleanly 分离 -->
+  <circle cx="772" cy="248" r="56" fill="#1B1917"/>
+  <circle cx="772" cy="248" r="40" fill="#7FB069"/>
+</svg>
