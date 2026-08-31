@@ -1457,6 +1457,35 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                     );
                   },
                 ),
+            // 尾部时间戳(用户裁定,与助手消息一致):运行中附转圈,
+            // 完成后仅时间;行无戳(历史)则整行隐藏。标题块的执行中/
+            // 执行完毕状态文字不受影响。
+            if (status == 'running' ||
+                status == 'inputStreaming' ||
+                status == 'pendingApproval' ||
+                _messageTimeLabel(_rowTsOf(row)).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (status == 'running' ||
+                        status == 'inputStreaming' ||
+                        status == 'pendingApproval') ...[
+                      const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child:
+                              CircularProgressIndicator(strokeWidth: 1.5)),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(_messageTimeLabel(_rowTsOf(row)),
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: EmberColors.of(context).textFaint)),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

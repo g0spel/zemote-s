@@ -147,6 +147,7 @@ final _chatRows = <Map<String, dynamic>>[
     'toolName': 'bash',
     'status': 'success',
     'inputText': "grep -rn '_parkedSubscriptions' lib/protocol | head -5",
+    'ts': _tsAgo(const Duration(seconds: 75)),
     'output': {
       'text': 'lib/protocol/conversation.dart:47:  final _parkedSubscriptions =\n'
           'lib/protocol/conversation.dart:312: parkSubscription(sub)\n'
