@@ -1638,12 +1638,25 @@ class _ToolCallTileState extends State<_ToolCallTile> {
     );
   }
 
-  /// 查看工具输出(用户裁定:所有工具、所有文件类型,文本与图片
-  /// 都能看):全屏等宽查看器,标题带工具名与目标路径。
+  /// 查看工具输出(用户裁定):有 diff 的工具(编辑类)全屏展示变更;
+  /// 其余展示文本与图片;输出被宿主截断时提示「后续内容已省略」
+  /// (桌面端同款文案,协议不提供取回接口)。
   void _viewOutput(BuildContext context, Map<String, dynamic> row,
       String inputText, String outputText, String toolName) {
     final path = toolTargetPathOf(row, inputText);
     final title = path == null ? toolName : '$toolName · $path';
+    final diff = extractDiff(row);
+    final truncated = row['truncated'] is Map
+        ? (row['truncated'] as Map)['totalBytes'] as num?
+        : null;
+    if (diff != null) {
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => _ToolDiffSheet(title: title, diff: diff),
+      );
+      return;
+    }
     final images = collectToolImages(row, outputText);
     final dataUri = RegExp(
         r'data:image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+',
@@ -1656,6 +1669,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
         title: title,
         content: text,
         images: images,
+        truncatedBytes: truncated?.toInt(),
       ),
     );
   }
@@ -1701,15 +1715,18 @@ class _ToolCallTileState extends State<_ToolCallTile> {
 
 /// 工具输出全屏查看器(用户裁定:所有工具、所有文件类型,文本与
 /// 图片都能看):等宽可选中文本支持横向滚动,图片整幅随页滚动。
+/// [truncatedBytes] 非空 = 宿主截断了输出,底部提示后续已省略。
 class _ToolOutputSheet extends StatelessWidget {
   final String title;
   final String content;
   final List images;
+  final int? truncatedBytes;
 
   const _ToolOutputSheet({
     required this.title,
     required this.content,
     required this.images,
+    this.truncatedBytes,
   });
 
   @override
@@ -1800,8 +1817,70 @@ class _ToolOutputSheet extends StatelessWidget {
                               style: TextStyle(
                                   fontSize: 12, color: colors.textFaint)),
                         ),
+                      if (truncatedBytes != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text('后续内容已省略 · 共 $truncatedBytes 字节',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: colors.textFaint)),
+                        ),
                     ],
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 工具变更全屏查看(编辑类工具的「查看」):目标文件路径 + 完整
+/// diff,随页滚动。
+class _ToolDiffSheet extends StatelessWidget {
+  final String title;
+  final DiffData diff;
+
+  const _ToolDiffSheet({required this.title, required this.diff});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.heightOf(context) * 0.92,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: EmberFonts.term,
+                            color: colors.textSolid)),
+                  ),
+                  IconButton(
+                    tooltip: '关闭',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.pop(context),
+                    icon:
+                        Icon(Icons.close, size: 20, color: colors.textMuted),
+                  ),
+                ],
+              ),
+              const Divider(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: DiffView(diff: diff),
                 ),
               ),
             ],
