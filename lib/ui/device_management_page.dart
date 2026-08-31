@@ -482,6 +482,21 @@ class _DeviceCard extends StatelessWidget {
               ],
             ),
           ),
+          // 手动重连(zremote 吸收):有凭据但未在连接时允许一键重连,
+          // 配合自动恢复兜底。
+          if (account.params != null && !connecting)
+            IconButton(
+              icon: Icon(Icons.refresh,
+                  size: 18, color: colors.textMuted),
+              tooltip: session.isConnected(account.id) ? '重连' : '连接',
+              onPressed: () async {
+                try {
+                  await session.connect(account);
+                } catch (_) {
+                  // 失败详情已在卡片状态与 errorOf 里展示。
+                }
+              },
+            ),
           IconButton(
             icon: Icon(Icons.edit_outlined,
                 size: 18, color: colors.textMuted),
