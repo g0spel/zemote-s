@@ -126,6 +126,7 @@ class ChatController {
 
   // ------------------------------------------------------- subscription
 
+  /// 同会话重订阅/错误路径:旧订阅已无保留价值,排队断开。
   void _retireCurrentSubscription() {
     final subscription = _subscription;
     if (subscription == null) return;
@@ -134,6 +135,15 @@ class ChatController {
         .then<void>((_) async {
       await subscription.dispose();
     });
+  }
+
+  /// 离开页面/换源时把仍健康的活跃订阅驻留到传输层池（不断开、继续
+  /// 收帧），切回该会话时零握手秒开。池上限与身份校验在传输层。
+  void _parkCurrentSubscription() {
+    final subscription = _subscription;
+    if (subscription == null) return;
+    _detachSubscription(subscription);
+    subscription.transport.parkSubscription(subscription);
   }
 
   void _detachSubscription(ConversationSubscription subscription) {
@@ -164,6 +174,30 @@ class ChatController {
         if (!isCurrentOperation(sourceGeneration, subscribeGeneration,
             _subscribeGeneration, transport,
             sessionId: sessionId)) {
+          return;
+        }
+        // 驻留池命中:零握手复用仍活跃的订阅(state 已含最新行)。
+        final parked = transport.takeParkedSubscription(sessionId);
+        if (parked != null) {
+          if (!isCurrentOperation(sourceGeneration, subscribeGeneration,
+              _subscribeGeneration, transport,
+              sessionId: sessionId)) {
+            await parked.dispose();
+            return;
+          }
+          sub = parked;
+          _subscription = sub;
+          error = null;
+          _notify();
+          if (onRowsChanged != null) {
+            sub.state.rowsListenable.addListener(_fireRowsChanged);
+          }
+          sub.state.rowsListenable.addListener(_dedupeEchoes);
+          sub.state.controlListenable.addListener(_dedupeEchoes);
+          if (diagLogEnabled.value) {
+            debugPrint('[chat] subscribe parked-hit $sessionId');
+          }
+          if (sub.state.canLoadOlder) unawaited(loadOlder());
           return;
         }
         sub = await transport
@@ -1073,7 +1107,8 @@ class ChatController {
     String? sessionId, {
     required bool watchTitle,
   }) {
-    _retireCurrentSubscription();
+    // 旧会话的活跃订阅驻留（切回秒开），而不是断开。
+    _parkCurrentSubscription();
     final oldTitleSub = _titleSub;
     _invalidateOperations();
     _prepGeneration++;
@@ -1110,7 +1145,7 @@ class ChatController {
     _disposed = true;
     _invalidateOperations();
     _prepGeneration++;
-    _retireCurrentSubscription();
+    _parkCurrentSubscription();
     final titleSub = _titleSub;
     _titleSub = null;
     if (titleSub != null) {

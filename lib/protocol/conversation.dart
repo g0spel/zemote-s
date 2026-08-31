@@ -136,11 +136,68 @@ class ConversationTransport {
     }
   }
 
+  // ------------------------------------------------- parked subscriptions
+
+  /// 已驻留订阅(LRU):切走的会话不断开,继续收帧保持 state 最新——切回
+  /// 即秒开(零握手、零快照重放)。上限 [_parkedLimit],超出按驻留时间
+  /// 淘汰并断开。桥 dispose 时随 tracked 订阅一并清理。
+  final _parkedSubscriptions =
+      <String, (ConversationSubscription, DateTime)>{};
+  static const _parkedLimit = 3;
+
+  /// 驻留一个仍被 tracked 的活跃订阅。仅接受当前 tracked 实例(被恢复
+  /// 流程替换过的旧实例直接断开);同会话重复驻留以最新为准。
+  void parkSubscription(ConversationSubscription subscription) {
+    if (_disposed) {
+      unawaited(subscription.dispose());
+      return;
+    }
+    final sessionId = subscription.sessionId;
+    if (!identical(_subscriptions[sessionId], subscription)) {
+      unawaited(subscription.dispose());
+      return;
+    }
+    final existing = _parkedSubscriptions[sessionId];
+    if (existing != null && identical(existing.$1, subscription)) return;
+    _parkedSubscriptions[sessionId] = (subscription, DateTime.now());
+    _evictParkedSubscriptions();
+  }
+
+  /// 取回驻留订阅(从池中移除,回到正常使用)。tracked 身份已变(桥恢复
+  /// 替换)时返回 null 并断开驻留副本。
+  ConversationSubscription? takeParkedSubscription(String sessionId) {
+    final parked = _parkedSubscriptions.remove(sessionId);
+    if (parked == null) return null;
+    final (subscription, _) = parked;
+    if (!identical(_subscriptions[sessionId], subscription)) {
+      unawaited(subscription.dispose());
+      return null;
+    }
+    return subscription;
+  }
+
+  void _evictParkedSubscriptions() {
+    while (_parkedSubscriptions.length > _parkedLimit) {
+      String? oldestKey;
+      DateTime? oldestAt;
+      for (final entry in _parkedSubscriptions.entries) {
+        if (oldestAt == null || entry.value.$2.isBefore(oldestAt)) {
+          oldestKey = entry.key;
+          oldestAt = entry.value.$2;
+        }
+      }
+      if (oldestKey == null) break;
+      final evicted = _parkedSubscriptions.remove(oldestKey)!;
+      unawaited(evicted.$1.dispose());
+    }
+  }
+
   void dispose() {
     if (_disposed) return;
     _disposed = true;
     session.recovered.removeListener(_onBridgeRecovered);
     unawaited(_disposeSharedSessionsIndex());
+    _parkedSubscriptions.clear();
     for (final subscription in List<ConversationSubscription>.from(_subscriptions.values)) {
       unawaited(subscription.dispose());
     }
@@ -959,6 +1016,9 @@ class ConversationTransport {
 abstract class _SubscriptionBase<T extends ChangeNotifier> {
   final ConversationTransport _transport;
   final String _logTag;
+
+  /// 所属传输层（驻留池归属与释放路径使用）。
+  ConversationTransport get transport => _transport;
 
   final T state;
 

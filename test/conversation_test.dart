@@ -1153,6 +1153,114 @@ void main() {
     await commandFuture;
   });
 
+  group('parked subscriptions (切会话保活)', () {
+    test('park 后取回同一实例，切回零握手', () async {
+      final sent = <Uint8List>[];
+      final channels = ChannelClient(sendBody: sent.add);
+      final bridge = BridgeSession.detached(
+        {'workspaceKey': '/ws'},
+        channels: channels,
+      );
+      final transport = ConversationTransport(
+        session: bridge,
+        scope: const {'workspacePath': '/ws'},
+      );
+      addTearDown(() {
+        transport.dispose();
+        bridge.dispose();
+      });
+      channels.handleMessage(
+          _conversationFrame(const [ChannelClient.resInitialize, 0]));
+
+      final sub = await _subscribed(
+          channels, sent, transport, 'session-1', 'park-sub-1');
+      final before = sent.length;
+      transport.parkSubscription(sub);
+      final parked = transport.takeParkedSubscription('session-1');
+      expect(parked, same(sub), reason: '驻留取回应是同一实例');
+      expect(parked?.state, same(sub.state), reason: 'state(行缓存)保持最新');
+      expect(sent.length, before, reason: '驻留/取回不产生任何 wire 流量');
+      await _drainConversation(channels, sent);
+    });
+
+    test('tracked 身份被替换后驻留副本失效并断开', () async {
+      final sent = <Uint8List>[];
+      final channels = ChannelClient(sendBody: sent.add);
+      final bridge = BridgeSession.detached(
+        {'workspaceKey': '/ws'},
+        channels: channels,
+      );
+      final transport = ConversationTransport(
+        session: bridge,
+        scope: const {'workspacePath': '/ws'},
+      );
+      addTearDown(() {
+        transport.dispose();
+        bridge.dispose();
+      });
+      channels.handleMessage(
+          _conversationFrame(const [ChannelClient.resInitialize, 0]));
+
+      final old = await _subscribed(
+          channels, sent, transport, 'session-1', 'park-old');
+      transport.parkSubscription(old);
+
+      // 同会话新订阅（模拟恢复流程的替换）→ tracked 身份变化。
+      final replacement = await _subscribed(
+          channels, sent, transport, 'session-1', 'park-new');
+      expect(identical(replacement, old), isFalse);
+
+      expect(transport.takeParkedSubscription('session-1'), isNull,
+          reason: '驻留副本已失效');
+      final disposalSent = sent.length;
+      await _flushConversation();
+      await _drainConversation(channels, sent);
+      expect(sent.length, greaterThan(disposalSent - 1),
+          reason: '失效副本的断开流量已发出');
+    });
+
+    test('超过池上限淘汰最旧驻留并断开', () async {
+      final sent = <Uint8List>[];
+      final channels = ChannelClient(sendBody: sent.add);
+      final bridge = BridgeSession.detached(
+        {'workspaceKey': '/ws'},
+        channels: channels,
+      );
+      final transport = ConversationTransport(
+        session: bridge,
+        scope: const {'workspacePath': '/ws'},
+      );
+      addTearDown(() {
+        transport.dispose();
+        bridge.dispose();
+      });
+      channels.handleMessage(
+          _conversationFrame(const [ChannelClient.resInitialize, 0]));
+
+      final first = await _subscribed(
+          channels, sent, transport, 'session-1', 'park-evict-1');
+      transport.parkSubscription(first);
+      final firstUnsubIndex = sent.length;
+
+      for (final (i, id) in const ['s2', 's3', 's4'].indexed) {
+        final sub = await _subscribed(
+            channels, sent, transport, id, 'park-evict-${i + 2}');
+        transport.parkSubscription(sub);
+      }
+
+      // 驻留 s1 后又驻留 3 个 → s1（最旧）被淘汰：其 unsubscribe 已发出。
+      await _flushConversation();
+      expect(
+        sent.map(_conversationRequest).toList().reversed.any(
+              (r) => r.method == 'unsubscribeConversationV4',
+            ),
+        isTrue,
+        reason: '淘汰即断开',
+      );
+      expect(firstUnsubIndex, lessThan(sent.length));
+      await _drainConversation(channels, sent);
+    });
+  });
 }
 
 
@@ -1192,4 +1300,55 @@ void _injectSessionsSnapshot(
     },
     'toSeq': 1,
   }, onGap: () => fail('unexpected gap'));
+}
+
+// ------------------------------------------------- parked subscriptions
+
+/// 应答当前全部未应答的 promise 帧（重复应答幂等），冲掉 RPC 超时定时器。
+Future<void> _drainConversation(
+    ChannelClient channels, List<Uint8List> sent) async {
+  for (var round = 0; round < 4; round++) {
+    final before = sent.length;
+    for (final body in sent) {
+      final reader = ValueReader(body);
+      final header = decodeValue(reader) as List;
+      if (header[0] == ChannelClient.reqPromise) {
+        _respondConversation(
+            channels, (header[1] as num).toInt(), <String, dynamic>{});
+      }
+    }
+    await _flushConversation();
+    if (sent.length == before) return;
+  }
+}
+
+/// 完成一次会话订阅握手，返回订阅。
+Future<ConversationSubscription> _subscribed(
+  ChannelClient channels,
+  List<Uint8List> sent,
+  ConversationTransport transport,
+  String sessionId,
+  String subId,
+) async {
+  final future = transport.subscribe(sessionId);
+  await _flushConversation();
+  var requests = sent.map(_conversationRequest).toList();
+  final hello = requests.singleWhere((r) => r.method == 'helloConversationV4');
+  _respondConversation(channels, hello.id, <String, dynamic>{});
+  await _flushConversation();
+  requests = sent.map(_conversationRequest).toList();
+  final initialize =
+      requests.singleWhere((r) => r.method == 'initializeConversationV4');
+  _respondConversation(channels, initialize.id, <String, dynamic>{});
+  await _flushConversation();
+  requests = sent.map(_conversationRequest).toList();
+  final subscribe = requests
+      .where((r) =>
+          r.method == 'subscribeConversationV4' &&
+          r.id > (hello.id > initialize.id ? hello.id : initialize.id))
+      .toList();
+  _respondConversation(channels, subscribe.last.id, {
+    'ack': {'subscriptionId': subId},
+  });
+  return future;
 }
