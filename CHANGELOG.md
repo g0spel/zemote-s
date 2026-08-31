@@ -5,6 +5,42 @@
 > 本文件记录本仓库自有迭代(v0.3.5 起);协议演进经宿主源码核对与实机探针验证后跟进。
 
 
+## [1.0.1] - 2026-08-31
+
+1.0 后的六阶段优化:网络与协议恢复正确性、渲染与会话列表性能、异步生命周期防护、RPC 语义统一、CI 门禁。全量 338 项测试通过。
+
+### Fixed
+
+**网络与恢复正确性**
+- 旧桥帧路由残留:transport 换桥后,旧 bridgeSessionId 的迟到帧不再进入新/旧通道;桥重开清理残留 pending 载荷,多次重开不再累积。
+- 桥恢复 single-flight:`bridge-degraded`、普通恢复、帧看门狗三条入口合并为同一恢复路径——连续恢复通知只重建一次,慢恢复的旧结果不再覆盖新 transport。
+- relay socket 回调隔离:新连接建立后,旧 socket 晚到的关闭/异常回调不再把状态拽回重连、不再污染新连接的出站队列。
+- 超时请求出站取消:断线期间已超时的队列项恢复后不再迟到执行(非幂等命令不重发);状态更新类只保留最新值,队列增加字节上限。
+- 入站分片边界:单片大小、assembly 数量、总缓存字节上限;metadata 冲突、坏 base64、checksum 错只丢弃对应 assembly,不击穿订阅。
+- 订阅恢复可弃可重试:桥恢复后首次握手失败进入既有重试;页面销毁与重订阅竞争不再写旧状态、不再经已废弃 transport 发 unsubscribe。
+
+**异步生命周期**
+- 全部页面(聊天/抽屉/洞察/模型面板/供应商/RootShell)的异步操作按 source + operation generation 失效:旧请求晚到不再 setState、不再写入已切换的会话。
+- 延迟操作(重发/分叉/抽屉重命名删除归档/供应商保存删除)发 RPC 前校验来源,源切换后旧 RPC 不再发出。
+- 会话订阅替换串行化并 single-flight;旧订阅释放不再误删替换映射。
+- TaskNotifier 启动失败可重试、dispose 幂等;RootShell 换设备先释放桥再异步清理。
+
+**RPC 语义**
+- 通用命令成功集合统一为 accepted/noop/duplicate——此前重复停止(stop)被误报为失败;供应商与抽屉操作对明确 rejected 显示原因,不再静默吞掉。createSession(accepted+sessionId)、辅助会话、workspace 重连各自契约不变。
+
+### Performance
+
+- 工具卡渲染缓存:diff/JSON 美化/内联图片解码按内容 key 缓存,重复构建不再重复计算。
+- 流式渲染:滚动调度去重;流式 Markdown 受控节流(最终文本不延迟不丢失);会话行按 rowId 索引,千行会话的 O(N) 查找消除。
+- 派生缓存:turn 分组、洞察(Todo/Plan/子代理/后台计数)按变更版本缓存;ConversationState 通知按七个域细分,无关区域不再重建。
+- 会话列表:抽屉惰性构建;sessions-index 排序缓存;同 workspace 的索引订阅共享——抽屉、标题、后台通知、临时探测复用一条 wire 订阅。
+- 附件:传输边界校验、上传后按文件粒度释放、失败重试保留已完成项。
+- prepareWorkspace 统一入口:供应商页/设置页走 transport 缓存,refresh 语义一致,桥恢复后旧 prep 不写回。
+
+### Changed
+
+- CI:固定 Flutter 3.47.0 + Java 17;PR 增加 Android debug APK 编译冒烟;单元测试产出覆盖率 artifact;集成测试缺 `ZEMOTE_PROBE_URL` 时明确标记 skip(不再伪装通过)。
+
 ## [1.0.0] - 2026-08-30
 
 首个 1.0:真机全量测试驱动的稳定化、UI 改版逻辑回归的审计回退、网络与渲染性能优化。
