@@ -1529,6 +1529,31 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                     );
                   },
                 ),
+            // 查看按钮(用户裁定:所有工具、所有文件类型,点开全屏
+            // 查看工具输出),位于尾部转圈/时间戳上方。
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _viewOutput(
+                      context,
+                      images,
+                      toolPath == null
+                          ? toolName
+                          : '$toolName · $toolPath',
+                      outputText),
+                  icon: const Icon(Icons.visibility_outlined, size: 14),
+                  label: const Text('查看', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: e.textMuted,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+            ),
             // 尾部时间戳(用户裁定,与助手消息一致):运行中附转圈,
             // 完成后仅时间;行无戳(历史)则整行隐藏。标题块的执行中/
             // 执行完毕状态文字不受影响。
@@ -1560,6 +1585,21 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 查看工具输出(用户裁定:所有工具、所有文件类型,文本与图片
+  /// 都能看):全屏等宽查看器,标题带工具名与目标路径。
+  void _viewOutput(
+      BuildContext context, List images, String title, String content) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _ToolOutputSheet(
+        title: title,
+        content: content,
+        images: images,
       ),
     );
   }
@@ -1598,6 +1638,115 @@ class _ToolCallTileState extends State<_ToolCallTile> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 工具输出全屏查看器(用户裁定:所有工具、所有文件类型,文本与
+/// 图片都能看):等宽可选中文本支持横向滚动,图片整幅随页滚动。
+class _ToolOutputSheet extends StatelessWidget {
+  final String title;
+  final String content;
+  final List images;
+
+  const _ToolOutputSheet({
+    required this.title,
+    required this.content,
+    required this.images,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.heightOf(context) * 0.92,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: colors.textSolid)),
+                  ),
+                  IconButton(
+                    tooltip: '关闭',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.pop(context),
+                    icon:
+                        Icon(Icons.close, size: 20, color: colors.textMuted),
+                  ),
+                ],
+              ),
+              const Divider(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (content.isNotEmpty)
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SelectableText(
+                            content,
+                            style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11.5,
+                                height: 1.5,
+                                color: colors.textSoft),
+                          ),
+                        ),
+                      for (final image in images)
+                        if (image is Map && image['base64'] is String)
+                          Builder(
+                            builder: (context) {
+                              final bytes = decodeInlineToolImage(
+                                  image['base64'] as String);
+                              if (bytes == null) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(
+                                    bytes,
+                                    fit: BoxFit.contain,
+                                    width: double.infinity,
+                                    // Cap the decode at viewport width —
+                                    // inline renders can be huge.
+                                    cacheWidth: (MediaQuery.sizeOf(context)
+                                            .width *
+                                        MediaQuery.devicePixelRatioOf(
+                                            context))
+                                        .round(),
+                                    errorBuilder: (_, _, _) =>
+                                        const SizedBox.shrink(),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                      if (content.isEmpty && images.isEmpty)
+                        Text('(无输出)',
+                            style: TextStyle(
+                                fontSize: 12, color: colors.textFaint)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
