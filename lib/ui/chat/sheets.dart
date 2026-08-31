@@ -508,6 +508,185 @@ class _UsageSheetState extends State<_UsageSheet> {
   bool _querying = false;
   int _queryGeneration = 0;
 
+  /// 剩余额度(usage-stats.getEntitlementSnapshot):打开即拉取,内联
+  /// 展示(参考官方 web 样式),不再跳二级页。
+  Map<String, dynamic>? _entitlements;
+  String? _quotaError;
+  bool _quotaLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuota();
+  }
+
+  Future<void> _loadQuota() async {
+    if (_quotaLoading) return;
+    _quotaLoading = true;
+    try {
+      final res = await widget.session.channels.call('usage-stats',
+          'getEntitlementSnapshot', [
+        {'includeSubscription': true},
+      ]);
+      if (!mounted) return;
+      setState(() =>
+          _entitlements = res is Map ? res.cast<String, dynamic>() : {});
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _quotaError = '$e');
+    } finally {
+      _quotaLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  String _fmtQuotaReset(Object? millis) {
+    if (millis is! num) return '-';
+    final t = DateTime.fromMillisecondsSinceEpoch(millis.toInt()).toLocal();
+    var m = '${t.month}/${t.day}';
+    final now = DateTime.now();
+    if (t.year == now.year &&
+        t.month == now.month &&
+        t.day == now.day) {
+      m = '今天';
+    }
+    return '$m ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 剩余额度(官方 web 样式):五小时/每周双窗口格 + 工具调用/MCP 行。
+  Widget _quotaSection() {
+    final colors = EmberColors.of(context);
+    if (_quotaLoading && _entitlements == null) {
+      return const SizedBox(
+          height: 2, child: LinearProgressIndicator(minHeight: 2));
+    }
+    if (_quotaError != null) {
+      return Text('额度加载失败: $_quotaError',
+          style: TextStyle(fontSize: 11, color: colors.textFaint));
+    }
+    final data = _entitlements;
+    if (data == null) return const SizedBox.shrink();
+    final quota = data['quota'];
+    final limits =
+        quota is Map && quota['limits'] is List ? quota['limits'] as List : const [];
+    final windows = limits
+        .whereType<Map>()
+        .where((l) => isQuotaWindowLimit(l.cast<String, dynamic>()))
+        .toList();
+    final mcpTotal = mcpQuotaTotal(limits);
+    final remaining = data['remaining'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('剩余额度',
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: colors.textSolid)),
+        const SizedBox(height: 10),
+        if (windows.isNotEmpty)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final (i, w) in windows.indexed) ...[
+                if (i > 0) const SizedBox(width: 10),
+                Expanded(
+                  child: _quotaTile(
+                    label: limitWindowLabel(w.cast<String, dynamic>()),
+                    remaining: tokensRemainingPercent(
+                        w.cast<String, dynamic>()),
+                    reset: _fmtQuotaReset(w['nextResetTime']),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        if (remaining is Map && remaining['isShow'] == true) ...[
+          const SizedBox(height: 8),
+          _quotaRow(
+            label: 'MCP 工具调用',
+            percentText: mcpTotal == null
+                ? '${remaining['count'] ?? '-'}'
+                : '${remaining['count'] ?? '-'} / $mcpTotal',
+            barValue: ((remaining['percentage'] as num?) ?? 0).toDouble(),
+            reset: _fmtQuotaReset(remaining['nextResetTime']),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 双窗口额度格:标签 + 剩余%(阈值色)+ 进度条 + 重置时间。
+  Widget _quotaTile({
+    required String label,
+    required int? remaining,
+    required String reset,
+  }) {
+    final colors = EmberColors.of(context);
+    final color = quotaColor(remaining, colors);
+    return Container(
+      padding: const EdgeInsets.all(EmberSpacing.cardPad),
+      decoration: BoxDecoration(
+        color: Color.lerp(colors.bg, colors.card, 0.5),
+        borderRadius: BorderRadius.circular(EmberRadius.control),
+        border: Border.all(color: colors.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 10.5, color: colors.textMuted)),
+          const SizedBox(height: 4),
+          Text(remaining == null ? '-' : '剩余 $remaining%',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: color)),
+          const SizedBox(height: 6),
+          if (remaining != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: (remaining / 100).clamp(0.0, 1.0),
+                minHeight: 4,
+                backgroundColor: colors.raise,
+                valueColor: AlwaysStoppedAnimation(color),
+              ),
+            ),
+          const SizedBox(height: 4),
+          Text('重置 $reset',
+              style: TextStyle(fontSize: 10, color: colors.textFaint)),
+        ],
+      ),
+    );
+  }
+
+  /// MCP/工具调用的行式额度:名称 + 计数 + 进度条 + 重置时间。
+  Widget _quotaRow({
+    required String label,
+    required String percentText,
+    required double barValue,
+    required String reset,
+  }) {
+    final colors = EmberColors.of(context);
+    return Row(
+      children: [
+        Text(label,
+            style: TextStyle(fontSize: 11.5, color: colors.textMuted)),
+        const Spacer(),
+        Text(percentText,
+            style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: colors.textSolid)),
+        const SizedBox(width: 8),
+        Text('· $reset',
+            style: TextStyle(fontSize: 10.5, color: colors.textFaint)),
+      ],
+    );
+  }
+
   /// 上下文容量头(桌面 ○ 面板同款):用量/上限 + 百分比 + 进度条。
   Widget _contextCapacityHeader(Map<dynamic, dynamic> contextWindow) {
     final used = (contextWindow['usedTokens'] as num?) ?? 0;
@@ -561,11 +740,12 @@ class _UsageSheetState extends State<_UsageSheet> {
     final usage = widget.state.usage ?? const {};
     final cumulative = usage['cumulative'];
     final contextWindow = usage['contextWindow'];
-    // 缓存命中率 = 命中读取 / (命中读取 + 未命中净输入):输入侧有多大
-    // 比例直接走了缓存。无输入时不显示(除零无意义)。
+    // 平均缓存命中率 = 缓存读取 / (缓存读取 + 缓存写入 + 净输入):
+    // 写入也算未命中的输入侧开销,与桌面端口径一致。
     final cacheRead = (cumulative?['cacheReadTokens'] as num?) ?? 0;
+    final cacheWrite = (cumulative?['cacheWriteTokens'] as num?) ?? 0;
     final netInput = (cumulative?['inputTokens'] as num?) ?? 0;
-    final cacheDenom = cacheRead + netInput;
+    final cacheDenom = cacheRead + cacheWrite + netInput;
     final cacheHitRate = cacheDenom > 0
         ? '${(cacheRead / cacheDenom * 100).toStringAsFixed(1)}%'
         : null;
@@ -586,9 +766,6 @@ class _UsageSheetState extends State<_UsageSheet> {
               _UsageRow('累计输入', '${formatTokenCount(netInput)} tokens'),
               _UsageRow('累计输出',
                   '${formatTokenCount((cumulative['outputTokens'] as num?) ?? 0)} tokens'),
-              _UsageRow('缓存读取', '${formatTokenCount(cacheRead)} tokens'),
-              _UsageRow('缓存写入',
-                  '${formatTokenCount((cumulative['cacheWriteTokens'] as num?) ?? 0)} tokens'),
               if (cacheHitRate != null) _UsageRow('缓存命中率', cacheHitRate),
             ],
             const SizedBox(height: 12),
@@ -600,18 +777,8 @@ class _UsageSheetState extends State<_UsageSheet> {
                 onPressed: _querying ? null : _queryTaskUsage,
               ),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.savings_outlined, size: 16),
-                label: const Text('剩余额度(5小时/每周/工具调用/MCP)'),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                      builder: (_) => UsagePage(session: widget.session)),
-                ),
-              ),
-            ),
+            const SizedBox(height: 12),
+            _quotaSection(),
           ],
         ),
       ),

@@ -430,7 +430,16 @@ void main() {
       });
       await tester.pump();
       await tester.pump();
-      expect(find.textContaining('最近回合'), findsOneWidget); // 回合摘要行
+      // 最新完成回合自动装载并展开:回合摘要行 + 逐文件明细都可见。
+      expect(find.text('1 个文件已更改'), findsOneWidget);
+      expect(find.text('lib/ui/chat_page.dart'), findsOneWidget);
+      // 点击摘要行收起明细,再点重开(条目已缓存,不重发请求)。
+      await tester.tap(find.text('1 个文件已更改'));
+      await tester.pump();
+      expect(find.text('lib/ui/chat_page.dart'), findsNothing);
+      await tester.tap(find.text('1 个文件已更改'));
+      await tester.pump();
+      await tester.pump();
       expect(find.text('lib/ui/chat_page.dart'), findsOneWidget);
       await _tearDown(tester, bridge);
     });

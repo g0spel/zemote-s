@@ -382,14 +382,17 @@ class _InsightsSheetState extends State<InsightsSheet> {
 
   int _tab = _todo;
 
-  dynamic _fileChanges;
-  bool _filesLoading = false;
-  String? _filesError;
+  /// 文件面板按回合装载:rowId → 已拉取条目/错误/展开态。
+  final Map<String, List<Map<String, dynamic>>> _turnEntries = {};
+  final Map<String, String> _turnErrors = {};
+  final Set<String> _turnExpanded = {};
+  final Set<String> _turnLoading = {};
 
-  /// Turn (rowId) whose file changes are already loaded — the armed
-  /// pattern mirrors the web client: each turn completing reloads once,
-  /// whether or not the panel is open, so opening it always shows the
-  /// latest turn's diff instantly.
+  /// 后台面板已展开项(workId/rowId 键)。
+  final Set<String> _bgExpanded = {};
+
+  /// 已装载过的最新完成回合（arming 模式,对齐 web 客户端:回合完成
+  /// 即自动装载一次）。
   String? _loadedTurnKey;
   int _fileRequestGeneration = 0;
   final _derived = _InsightsDerivedCache();
@@ -443,9 +446,10 @@ class _InsightsSheetState extends State<InsightsSheet> {
       }
       _fileRequestGeneration++;
       _loadedTurnKey = null;
-      _fileChanges = null;
-      _filesError = null;
-      _filesLoading = false;
+      _turnEntries.clear();
+      _turnErrors.clear();
+      _turnExpanded.clear();
+      _turnLoading.clear();
       _hostPlans = null;
       _hostPlansLoading = false;
       _loadHostPlans();
@@ -468,12 +472,13 @@ class _InsightsSheetState extends State<InsightsSheet> {
     if (key.isEmpty) {
       _fileRequestGeneration++;
       _loadedTurnKey = null;
-      _fileChanges = null;
-      _filesError = null;
-      _filesLoading = false;
     } else if (key != _loadedTurnKey) {
+      // 最新完成回合自动装载并展开:当前回合一结束就能看到编辑明细。
       _loadedTurnKey = key;
-      unawaited(_loadFiles(target: turn, key: key));
+      if (turn != null) {
+        _turnExpanded.add('${turn['rowId']}');
+        unawaited(_loadTurnFiles(turn));
+      }
     }
     setState(() {});
   }
@@ -481,45 +486,24 @@ class _InsightsSheetState extends State<InsightsSheet> {
   void _selectTab(int index) {
     if (!_isSourceCurrent()) return;
     setState(() => _tab = index);
-    // Skip when a prefetch for this turn is already in flight.
-    if (_tab == _files &&
-        !_filesLoading &&
-        _fileChanges == null &&
-        _filesError == null) {
-      unawaited(_loadFiles());
+    // 切到文件 Tab 时,若最新完成回合还没装载过就先装载它。
+    if (_tab == _files && _loadedTurnKey == null) {
+      final turn = _derived.latestCompleted;
+      if (turn != null) unawaited(_loadTurnFiles(turn));
     }
   }
 
   /// File changes are turn-scoped: the target must be the turnHeader of a
   /// COMPLETED turn (the running turn's guard races the streaming
   /// revision). baseRevision/baseLogEpoch are read inside the transport.
-  Future<void> _loadFiles({
-    Map<String, dynamic>? target,
-    String? key,
-  }) async {
+  /// 结果按回合 rowId 缓存,展开时按需装载。
+  Future<void> _loadTurnFiles(Map<String, dynamic> header) async {
+    final key = '${header['rowId']}';
+    if (_turnLoading.contains(key) || _turnEntries.containsKey(key)) return;
     final sourceState = widget.state;
     final sourceTransport = widget.transport;
     final sourceSessionId = widget.sessionId;
     if (!_isSourceCurrent()) return;
-    _derived.sync(sourceState);
-    target ??= _derived.latestCompleted;
-    final requestKey = _insightsTurnKey(sourceState, sourceSessionId, target);
-    if (target == null ||
-        requestKey.isEmpty ||
-        (key != null && key != requestKey)) {
-      if (mounted &&
-          _isSourceCurrent() &&
-          identical(widget.state, sourceState) &&
-          identical(widget.transport, sourceTransport) &&
-          widget.sessionId == sourceSessionId) {
-        setState(() {
-          _fileChanges = null;
-          _filesError = null;
-          _filesLoading = false;
-        });
-      }
-      return;
-    }
     final requestGeneration = ++_fileRequestGeneration;
     bool isCurrent() =>
         mounted &&
@@ -527,33 +511,40 @@ class _InsightsSheetState extends State<InsightsSheet> {
         _isSourceCurrent() &&
         identical(widget.state, sourceState) &&
         identical(widget.transport, sourceTransport) &&
-        widget.sessionId == sourceSessionId &&
-        _insightsTurnKey(widget.state, widget.sessionId, target) == requestKey;
-    if (mounted && _isSourceCurrent()) {
-      setState(() {
-        _filesLoading = true;
-        _filesError = null;
-      });
-    }
-    // Fire-once per turn (armed): mark before awaiting so a failed load
-    // doesn't retrigger on every streaming state notification — the
-    // manual refresh stays available for retries.
-    _loadedTurnKey = requestKey;
+        widget.sessionId == sourceSessionId;
+    _turnLoading.add(key);
+    if (mounted) setState(() {});
     try {
       final res = await sourceTransport.fileChanges(
         sourceSessionId,
-        target: {'rowId': target['rowId'], 'entityId': target['entityId']},
+        target: {'rowId': header['rowId'], 'entityId': header['entityId']},
       );
       if (!isCurrent()) return;
-      setState(() => _fileChanges = res);
+      final entries = parseInsightList(
+          res, const ['files', 'changes', 'fileChanges', 'items'],
+          allowEmpty: true);
+      _turnEntries[key] = entries ?? const [];
+      _turnErrors[key] = _turnEntries[key]!.isEmpty ? '无文件变更数据' : '';
     } catch (e) {
       if (!isCurrent()) return;
-      setState(() => _filesError = _fmtRpcError(e));
+      _turnErrors[key] = _fmtRpcError(e);
     } finally {
-      if (isCurrent()) {
-        setState(() => _filesLoading = false);
-      }
+      _turnLoading.remove(key);
+      if (isCurrent()) setState(() {});
     }
+  }
+
+  void _toggleTurnFiles(Map<String, dynamic> header) {
+    final key = '${header['rowId']}';
+    if (_turnExpanded.contains(key)) {
+      _turnExpanded.remove(key);
+      setState(() {});
+      return;
+    }
+    _turnExpanded.add(key);
+    setState(() {});
+    final headerState = '${header['state']}';
+    if (headerState == 'completedSuccess') unawaited(_loadTurnFiles(header));
   }
 
   /// ChannelRpcError often carries the real cause in [ChannelRpcError.data]
@@ -735,18 +726,6 @@ class _InsightsSheetState extends State<InsightsSheet> {
     );
   }
 
-  Widget _jsonFallback(dynamic data) {
-    const encoder = JsonEncoder.withIndent('  ');
-    return SingleChildScrollView(
-      controller: widget.scrollController,
-      physics: const AlwaysScrollableScrollPhysics(),
-      child: SelectableText(
-        data == null ? '（无数据）' : encoder.convert(data),
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
-      ),
-    );
-  }
-
   // ------------------------------------------------------------ todo panel
 
   Widget _todoPanel(BuildContext context) {
@@ -818,6 +797,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
 
     final sections = <Widget>[];
     if (hasGoal) {
+      final running = '${goal?['status']}' == 'running';
+      final paused = '${goal?['status']}' == 'paused';
       sections.add(Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Container(
@@ -846,6 +827,24 @@ class _InsightsSheetState extends State<InsightsSheet> {
                         fontWeight: FontWeight.w600,
                         color: goalColor)),
               ],
+              // 开始/暂停目标(桌面同款):运行中可暂停,已暂停可开始。
+              if ((running || paused) && widget.sessionId.isNotEmpty)
+                IconButton(
+                  visualDensity:
+                      const VisualDensity(horizontal: -4, vertical: -4),
+                  constraints:
+                      const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    running
+                        ? Icons.pause_circle_outline
+                        : Icons.play_circle_outline,
+                    size: 18,
+                    color: colors.primary,
+                  ),
+                  tooltip: running ? '暂停目标' : '开始目标',
+                  onPressed: () => _toggleGoal(widget.state),
+                ),
             ],
           ),
         ),
@@ -891,7 +890,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelHeader(context, '待办与计划', () {}),
+        _panelHeader(context, '目标', () {}),
         Flexible(
           child: ListView(
             controller: widget.scrollController,
@@ -904,6 +903,29 @@ class _InsightsSheetState extends State<InsightsSheet> {
     );
   }
 
+  /// 目标 开始/暂停(桌面同款):乐观置状态,宿主确认后回读一致。
+  Future<void> _toggleGoal(ConversationState state) async {
+    if (!_isSourceCurrent() || widget.sessionId.isEmpty) return;
+    final goal = state.goal;
+    if (goal == null) return;
+    final running = '${goal['status']}' == 'running';
+    try {
+      if (running) {
+        await widget.transport.pauseGoal(widget.sessionId);
+        state.optimisticPatch({
+          'goal': {...goal, 'status': 'paused'},
+        });
+      } else {
+        await widget.transport.resumeGoal(widget.sessionId);
+        state.optimisticPatch({
+          'goal': {...goal, 'status': 'running'},
+        });
+      }
+    } catch (_) {
+      // 失败保持原状态;宿主状态回读会纠正。
+    }
+  }
+
   // ----------------------------------------------------------- files panel
 
   Widget _filesPanel(BuildContext context) {
@@ -911,80 +933,129 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final headers = _derived.fileHeaders;
 
     Widget body;
-    if (_filesLoading) {
-      body = const Center(
-          child: SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 1.5)));
-    } else if (_filesError != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _panelHeader(context, '文件', _loadFiles),
-          _errorRow(_filesError!, _loadFiles),
-        ],
+    if (headers.isEmpty) {
+      body = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text('暂无文件变更数据',
+            style: TextStyle(
+                fontSize: 11.5,
+                color: EmberColors.of(context).textFaint)),
       );
     } else {
-      final entries = parseInsightList(
-          _fileChanges, const ['files', 'changes', 'fileChanges', 'items'],
-          allowEmpty: true);
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (headers.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                '最近回合：'
-                '${headers.map((h) {
-                  final fc = (h['fileChanges'] as Map).cast<String, dynamic>();
-                  return '+${fc['additions'] ?? 0} −${fc['deletions'] ?? 0} · ${fc['files']} 文件';
-                }).join('；')}',
-                style: TextStyle(
-                    fontSize: 10.5, color: EmberColors.of(context).textFaint),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          if (_fileChanges == null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text('暂无文件变更数据',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      color: EmberColors.of(context).textFaint)),
-            )
-          else if (entries == null)
-            Flexible(child: _jsonFallback(_fileChanges))
-          else if (entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text('本回合无文件变更',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      color: EmberColors.of(context).textFaint)),
-            )
-          else
-            Flexible(
-              child: ListView.builder(
-                controller: widget.scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                shrinkWrap: true,
-                itemCount: entries.length,
-                itemBuilder: (context, i) => _fileTile(context, entries[i]),
-              ),
-            ),
-        ],
+        children: [for (final h in headers) _turnFileRow(context, h)],
       );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelHeader(context, '文件', _loadFiles, loading: _filesLoading),
+        _panelHeader(context, '编辑', _refreshFiles,
+            loading: _turnLoading.isNotEmpty),
         Flexible(child: body),
       ],
     );
+  }
+
+  /// 回合文件变更行(桌面变更面板样式):摘要行可点,展开后显示该回合
+  /// 逐文件明细;运行中的回合尚不能查询(服务端 stale guard),仅显状态。
+  Widget _turnFileRow(BuildContext context, Map<String, dynamic> header) {
+    final colors = EmberColors.of(context);
+    final fc = header['fileChanges'] as Map? ?? const {};
+    final files = (fc['files'] as num?)?.toInt() ?? 0;
+    final adds = (fc['additions'] as num?)?.toInt();
+    final dels = (fc['deletions'] as num?)?.toInt();
+    final key = '${header['rowId']}';
+    final completed = '${header['state']}' == 'completedSuccess';
+    final expanded = _turnExpanded.contains(key);
+    final loading = _turnLoading.contains(key);
+    final error = _turnErrors[key];
+    final entries = _turnEntries[key];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: completed ? () => _toggleTurnFiles(header) : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Row(
+              children: [
+                Text(expanded ? '▾' : '▸',
+                    style: TextStyle(
+                        fontSize: 10.5, color: colors.textFaint)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('$files 个文件已更改',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: completed
+                              ? colors.textSolid
+                              : colors.textMuted)),
+                ),
+                if (!completed)
+                  Text('运行中',
+                      style: TextStyle(fontSize: 10.5, color: colors.warn))
+                else ...[
+                  if (adds != null && adds > 0)
+                    Text('+$adds',
+                        style: TextStyle(fontSize: 10.5, color: colors.ok)),
+                  if (dels != null && dels > 0) ...[
+                    const SizedBox(width: 6),
+                    Text('-$dels',
+                        style: TextStyle(fontSize: 10.5, color: colors.err)),
+                  ],
+                ],
+              ],
+            ),
+          ),
+        ),
+        if (expanded) ...[
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 1.5)),
+            )
+          else if (error != null && error.isNotEmpty)
+            _errorRow(error, () => _loadTurnFiles(header))
+          else if (entries == null || entries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text('本回合无文件变更',
+                  style: TextStyle(
+                      fontSize: 11, color: colors.textFaint)),
+            )
+          else
+            for (final e in entries) _fileTile(context, e),
+        ],
+      ],
+    );
+  }
+
+  /// 手动刷新:重载已展开回合;未展开任何回合时装载最新完成回合。
+  void _refreshFiles() {
+    _syncDerived();
+    var refreshed = false;
+    for (final h in _derived.fileHeaders) {
+      final key = '${h['rowId']}';
+      if (_turnExpanded.contains(key)) {
+        _turnEntries.remove(key);
+        _turnErrors.remove(key);
+        unawaited(_loadTurnFiles(h));
+        refreshed = true;
+      }
+    }
+    if (!refreshed) {
+      final turn = _derived.latestCompleted;
+      if (turn != null) {
+        _turnExpanded.add('${turn['rowId']}');
+        unawaited(_loadTurnFiles(turn));
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   void _showFileDetail(BuildContext context, Map<String, dynamic> e) {
@@ -1102,6 +1173,18 @@ class _InsightsSheetState extends State<InsightsSheet> {
 
   // ------------------------------------------------------------- bg panel
 
+  /// 后台面板分组小标题(后台任务/子代理)。
+  Widget _bgGroupLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: EmberColors.of(context).textFaint)),
+    );
+  }
+
   String _fmtMs(num? v) {
     if (v == null) return '';
     final d = DateTime.fromMillisecondsSinceEpoch(v.toInt());
@@ -1111,7 +1194,14 @@ class _InsightsSheetState extends State<InsightsSheet> {
   /// backgroundWorks entry: {workId, kind: bash|subagent, title,
   /// status: running|resultPending|failed|cancelled, startedAt(ms),
   /// endedAt?(ms), cancellable?, blocked?, childSessionId?}
-  Widget _workTile(BuildContext context, Map<String, dynamic> w) {
+  /// 已结束项可点开展开完整信息([expanded]/[onToggle])。
+  Widget _workTile(
+    BuildContext context,
+    Map<String, dynamic> w, {
+    bool expanded = false,
+    VoidCallback? onToggle,
+  }) {
+    final colors = EmberColors.of(context);
     final status = '${w['status']}';
     final Widget leading;
     String suffix = '';
@@ -1142,25 +1232,75 @@ class _InsightsSheetState extends State<InsightsSheet> {
         : startedAt != null
             ? ' · ${_fmtMs(startedAt as num?)} 开始'
             : '';
-    return Padding(
+    final tile = Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Icon(kindIcon, size: 13, color: EmberColors.of(context).textFaint),
-          const SizedBox(width: 5),
-          leading,
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              '${w['title'] ?? w['kind'] ?? '后台任务'}$suffix$time',
-              style: const TextStyle(fontSize: 11.5),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+      child: InkWell(
+        onTap: onToggle,
+        borderRadius: BorderRadius.circular(EmberRadius.control),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(kindIcon,
+                    size: 13, color: EmberColors.of(context).textFaint),
+                const SizedBox(width: 5),
+                leading,
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${w['title'] ?? w['kind'] ?? '后台任务'}$suffix$time',
+                    style: const TextStyle(fontSize: 11.5),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (onToggle != null)
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 13,
+                    color: EmberColors.of(context).textFaint,
+                  ),
+              ],
             ),
-          ),
-        ],
+            if (expanded) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if ('${w['title'] ?? ''}'.isNotEmpty)
+                      Text('${w['title']}',
+                          style: TextStyle(
+                              fontSize: 11, color: colors.textSolid)),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        '类型 ${w['kind'] ?? '-'}',
+                        '状态 $status',
+                        if (w['workId'] != null) 'id ${w['workId']}',
+                        if (w['childSessionId'] != null)
+                          '会话 ${w['childSessionId']}',
+                        if (startedAt != null)
+                          '开始 ${_fmtMs(startedAt as num?)}',
+                        if (endedAt != null) '结束 ${_fmtMs(endedAt as num?)}',
+                      ].join(' · '),
+                      style: TextStyle(
+                          fontSize: 10.5,
+                          color: EmberColors.of(context).textMuted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
+    return tile;
   }
 
   /// snapshot.subagents.running entry: {childSessionId, agentId?,
@@ -1210,7 +1350,13 @@ class _InsightsSheetState extends State<InsightsSheet> {
   /// running|success|failed|cancelled, summaryText, startedAt?(ms),
   /// endedAt?(ms)}. Terminal rows back the finished-subagent list; running
   /// rows back the fallback stream (no snapshot `subagents` field).
-  Widget _subagentRowTile(BuildContext context, Map<String, dynamic> r) {
+  /// 已结束行可点开展开完整摘要([expanded]/[onToggle])。
+  Widget _subagentRowTile(
+    BuildContext context,
+    Map<String, dynamic> r, {
+    bool expanded = false,
+    VoidCallback? onToggle,
+  }) {
     final status = '${r['status']}';
     final (leading, suffix) = switch (status) {
       'success' => (
@@ -1245,22 +1391,58 @@ class _InsightsSheetState extends State<InsightsSheet> {
             : '';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          leading,
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              '${summary.isEmpty ? '子代理 · ${r['subagentType'] ?? ''}' : summary}'
-              '$suffix$time',
-              style: TextStyle(
-                  fontSize: 11, color: EmberColors.of(context).textSoft),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+      child: InkWell(
+        onTap: onToggle,
+        borderRadius: BorderRadius.circular(EmberRadius.control),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                leading,
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${summary.isEmpty ? '子代理 · ${r['subagentType'] ?? ''}' : summary}'
+                    '$suffix$time',
+                    style: TextStyle(
+                        fontSize: 11, color: EmberColors.of(context).textSoft),
+                    maxLines: expanded ? null : 2,
+                    overflow: expanded
+                        ? TextOverflow.visible
+                        : TextOverflow.ellipsis,
+                  ),
+                ),
+                if (onToggle != null)
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 13,
+                    color: EmberColors.of(context).textFaint,
+                  ),
+              ],
             ),
-          ),
-        ],
+            if (expanded) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 19),
+                child: Text(
+                  [
+                    '类型 ${r['subagentType'] ?? '-'}',
+                    '状态 $status',
+                    if (startedAt != null) '开始 ${_fmtMs(startedAt as num?)}',
+                    if (endedAt != null) '结束 ${_fmtMs(endedAt as num?)}',
+                  ].join(' · '),
+                  style: TextStyle(
+                      fontSize: 10.5,
+                      color: EmberColors.of(context).textMuted),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1311,30 +1493,40 @@ class _InsightsSheetState extends State<InsightsSheet> {
             physics: const AlwaysScrollableScrollPhysics(),
             shrinkWrap: true,
             children: [
-              for (final w in works) _workTile(context, w),
+              // 后台任务组(bash/agent 作业)。
+              if (works.isNotEmpty) ...[
+                _bgGroupLabel('后台任务'),
+                for (final w in works)
+                  _workTile(
+                    context,
+                    w,
+                    expanded: _bgExpanded.contains('w${w['workId']}'),
+                    onToggle: () => setState(() =>
+                        _bgExpanded.contains('w${w['workId']}')
+                            ? _bgExpanded.remove('w${w['workId']}')
+                            : _bgExpanded.add('w${w['workId']}')),
+                  ),
+              ],
+              // 子代理组:运行中在前,已结束在后(均可点开展开)。
               if ((runningSubs?.isNotEmpty ?? false) ||
-                  fallbackRunningRows.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 2),
-                  child: Text('运行中的子代理',
-                      style: TextStyle(
-                          fontSize: 10.5,
-                          color: EmberColors.of(context).textFaint)),
-                ),
+                  fallbackRunningRows.isNotEmpty ||
+                  endedRows.isNotEmpty ||
+                  endedTotal > 0) ...[
+                _bgGroupLabel('子代理'),
                 if (runningSubs != null)
                   for (final s in runningSubs) _subagentTile(context, s),
                 for (final r in fallbackRunningRows)
                   _subagentRowTile(context, r),
-              ],
-              if (endedRows.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 2),
-                  child: Text('已结束的子代理',
-                      style: TextStyle(
-                          fontSize: 10.5,
-                          color: EmberColors.of(context).textFaint)),
-                ),
-                for (final r in endedRows) _subagentRowTile(context, r),
+                for (final r in endedRows)
+                  _subagentRowTile(
+                    context,
+                    r,
+                    expanded: _bgExpanded.contains('s${r['rowId']}'),
+                    onToggle: () => setState(() =>
+                        _bgExpanded.contains('s${r['rowId']}')
+                            ? _bgExpanded.remove('s${r['rowId']}')
+                            : _bgExpanded.add('s${r['rowId']}')),
+                  ),
                 // Rows outside the loaded window aren't available — the
                 // snapshot count keeps the total honest.
                 if (endedTotal > endedRows.length)
@@ -1345,14 +1537,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                             fontSize: 10.5,
                             color: EmberColors.of(context).textFaint)),
                   ),
-              ] else if (endedTotal > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text('已结束 $endedTotal 个子代理',
-                      style: TextStyle(
-                          fontSize: 10.5,
-                          color: EmberColors.of(context).textFaint)),
-                ),
+              ],
             ],
           ),
         ),

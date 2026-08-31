@@ -1201,6 +1201,9 @@ class _ToolCallTileState extends State<_ToolCallTile> {
         .split('\n')
         .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
 
+    /// bash 工具保留原始输入输出;其余工具直接展示结果。
+    final isBash = toolName.toLowerCase() == 'bash';
+
     final (icon, color) = switch (status) {
       'running' || 'inputStreaming' || 'pendingApproval' => (
           Icons.hourglass_top,
@@ -1259,6 +1262,20 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                               color: e.textFaint),
                           overflow: TextOverflow.ellipsis),
                     ),
+                    // 执行状态文字(用户裁定):标题里直接可见,不只靠颜色。
+                    if (status == 'running' ||
+                        status == 'inputStreaming' ||
+                        status == 'pendingApproval') ...[
+                      const SizedBox(width: 6),
+                      Text('执行中',
+                          style: TextStyle(
+                              fontSize: EmberType.caption, color: e.run)),
+                    ] else if (status == 'success') ...[
+                      const SizedBox(width: 6),
+                      Text('执行完毕',
+                          style: TextStyle(
+                              fontSize: EmberType.caption, color: e.textFaint)),
+                    ],
                     if (!_open) ...[
                       const SizedBox(width: 6),
                       Expanded(
@@ -1277,8 +1294,22 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               ),
             ),
             if (_open) ...[
-              if (inputText.isNotEmpty) _kv(context, '输入', inputText),
-              if (outputText.isNotEmpty) _kv(context, '输出', outputText),
+              // 用户裁定:bash 保留原始输入输出,其余工具直接展示结果
+              // (不再铺原始输入/输出 kv)。
+              if (isBash) ...[
+                if (inputText.isNotEmpty) _kv(context, '输入', inputText),
+                if (outputText.isNotEmpty) _kv(context, '输出', outputText),
+              ] else if (outputText.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                  child: SelectableText(
+                    outputText,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.45,
+                        color: EmberColors.of(context).textSoft),
+                  ),
+                ),
               if (error is Map)
                 _kv(context, '错误',
                     '${error['code'] ?? ''} ${error['message'] ?? ''}'),
@@ -1677,7 +1708,7 @@ Future<void> showTurnFileChangesSheet(
     if (entries == null) {
       showModalBottomSheet(
         context: context,
-        builder: (context) => _JsonSheet(title: '文件变更', data: changes),
+        builder: (context) => _JsonSheet(title: '编辑', data: changes),
       );
       return;
     }
@@ -1837,7 +1868,7 @@ class _FileChangesSheet extends StatelessWidget {
                   const EdgeInsets.symmetric(horizontal: EmberSpacing.page),
               child: Row(
                 children: [
-                  Text('文件变更 · ${entries.length}',
+                  Text('编辑 · ${entries.length}',
                       style: TextStyle(
                           fontSize: EmberType.body,
                           fontWeight: FontWeight.w600,

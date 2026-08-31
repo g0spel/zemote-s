@@ -606,8 +606,9 @@ class _ChatPageState extends State<ChatPage> {
   /// 菜单;状态胶囊随订阅实时跟进(phase 帧只在 state 上通知)。
   Widget _embeddedHeader(BuildContext context, ConversationState? state) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(EmberSpacing.page, EmberSpacing.gapS,
-          EmberSpacing.page, EmberSpacing.gapS),
+      // 底部间距收紧(用户裁定:顶栏与用量条之间的空隙减半)。
+      padding: const EdgeInsets.fromLTRB(
+          EmberSpacing.page, EmberSpacing.gapS, EmberSpacing.page, 2),
       child: Row(
         children: [
           if (widget.headerLeading != null) widget.headerLeading!,

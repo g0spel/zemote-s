@@ -143,7 +143,7 @@ class ConversationTransport {
   /// 淘汰并断开。桥 dispose 时随 tracked 订阅一并清理。
   final _parkedSubscriptions =
       <String, (ConversationSubscription, DateTime)>{};
-  static const _parkedLimit = 3;
+  static const _parkedLimit = 8;
 
   /// 驻留一个仍被 tracked 的活跃订阅。仅接受当前 tracked 实例(被恢复
   /// 流程替换过的旧实例直接断开);同会话重复驻留以最新为准。

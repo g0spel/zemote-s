@@ -1219,7 +1219,7 @@ void main() {
           reason: '失效副本的断开流量已发出');
     });
 
-    test('超过池上限淘汰最旧驻留并断开', () async {
+    test('超过池上限(8)淘汰最旧驻留并断开', () async {
       final sent = <Uint8List>[];
       final channels = ChannelClient(sendBody: sent.add);
       final bridge = BridgeSession.detached(
@@ -1242,13 +1242,13 @@ void main() {
       transport.parkSubscription(first);
       final firstUnsubIndex = sent.length;
 
-      for (final (i, id) in const ['s2', 's3', 's4'].indexed) {
+      // 再驻留 8 个 → 共 9 个,超出上限 8,最旧(session-1)被淘汰。
+      for (var i = 2; i <= 9; i++) {
         final sub = await _subscribed(
-            channels, sent, transport, id, 'park-evict-${i + 2}');
+            channels, sent, transport, 'session-$i', 'park-evict-$i');
         transport.parkSubscription(sub);
       }
 
-      // 驻留 s1 后又驻留 3 个 → s1（最旧）被淘汰：其 unsubscribe 已发出。
       await _flushConversation();
       expect(
         sent.map(_conversationRequest).toList().reversed.any(
