@@ -57,7 +57,6 @@ class ChatController {
   int _filePickGeneration = 0;
   int _sendGeneration = 0;
   int _runGeneration = 0;
-  int _sideChatGeneration = 0;
   int _skillsGeneration = 0;
   int _titleGeneration = 0;
   int _draftPrefsGeneration = 0;
@@ -117,7 +116,6 @@ class ChatController {
     _filePickGeneration++;
     _sendGeneration++;
     _runGeneration++;
-    _sideChatGeneration++;
     _skillsGeneration++;
     _titleGeneration++;
     _draftPrefsGeneration++;
@@ -334,33 +332,6 @@ class ChatController {
 
   Future<void> stop() =>
       run('停止失败', () => transport.stop(requireSession()));
-
-  /// Opens an auxiliary (side) chat attached to the current session
-  /// (`createSelectionSideSession`)。返回新会话 id;源已失效/失败返回
-  /// null(失败已 toast)。
-  Future<String?> createSideSession() async {
-    final sessionId = _sessionId;
-    if (sessionId == null) return null;
-    final sourceGeneration = _sourceGeneration;
-    final operationGeneration = ++_sideChatGeneration;
-    final transport = this.transport;
-    try {
-      final sideId = await transport.createSelectionSideSession(sessionId);
-      if (!isCurrentOperation(
-          sourceGeneration, operationGeneration, _sideChatGeneration, transport,
-          sessionId: sessionId)) {
-        return null;
-      }
-      return sideId;
-    } catch (e) {
-      if (isCurrentOperation(
-          sourceGeneration, operationGeneration, _sideChatGeneration, transport,
-          sessionId: sessionId)) {
-        onToast('打开辅助对话失败: $e');
-      }
-      return null;
-    }
-  }
 
   // ------------------------------------------------------------- sending
 

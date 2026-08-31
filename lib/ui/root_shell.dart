@@ -485,6 +485,40 @@ class _RootShellState extends State<RootShell> {
 
   void _closeDrawer() => setState(() => _drawerOpen = false);
 
+  /// 抽屉「辅助对话」:基于当前内嵌会话创建 side session 并推入新页。
+  /// 草稿态(无会话)按钮已禁用,这里兜底再判一次。
+  Future<void> _openSideChatFromDrawer(
+    BridgeSession bridge,
+    Map<String, dynamic> scope,
+    String workspaceKey,
+    String? sessionId,
+  ) async {
+    _closeDrawer();
+    if (sessionId == null || !mounted) return;
+    try {
+      final sideId = await bridge
+          .conversation(scope)
+          .createSelectionSideSession(sessionId);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatPage(
+            session: bridge,
+            scope: scope,
+            workspaceKey: workspaceKey,
+            sessionId: sideId,
+            title: '辅助对话',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('打开辅助对话失败: $e')));
+      }
+    }
+  }
+
   /// A4:当前内嵌会话被删除/归档(从 sessions-index 消失,抽屉 diff 回调)
   /// → 复位到 draft 并提示。抽屉保持打开(用户多半正在管理操作中)。
   void _onCurrentSessionVanished() {
@@ -763,6 +797,9 @@ class _RootShellState extends State<RootShell> {
               workspacePath: workspace['workspacePath'] as String? ?? '',
               currentSessionId: sessionId,
               onPick: _pickFromDrawer,
+              onOpenSideChat: () =>
+                  _openSideChatFromDrawer(bridge, _scopeOf(workspace),
+                      workspaceKeyOf(workspace) ?? '', sessionId),
               onSwitchWorkspace: _showWorkspaceSwitcher,
               onCurrentSessionVanished: _onCurrentSessionVanished,
               onManageDevices: () {

@@ -118,6 +118,10 @@ class SessionDrawer extends StatefulWidget {
   /// 选择会话(null = 新会话)。宿主负责关闭抽屉。
   final ValueChanged<String?> onPick;
 
+  /// 「辅助对话」入口:基于当前内嵌会话创建 side session(宿主实现;
+  /// 草稿态按钮禁用)。
+  final VoidCallback onOpenSideChat;
+
   /// 工作区条 ⌄:宿主弹出工作区切换 sheet;携带当前工作区的实时会话数
   /// (取自本抽屉的在途 sessions-index 订阅;其他工作区无数据来源,由
   /// 宿主决定不显示)。
@@ -145,6 +149,7 @@ class SessionDrawer extends StatefulWidget {
     required this.workspacePath,
     required this.currentSessionId,
     required this.onPick,
+    required this.onOpenSideChat,
     required this.onSwitchWorkspace,
     required this.onCurrentSessionVanished,
     required this.onManageDevices,
@@ -501,9 +506,26 @@ class _SessionDrawerState extends State<SessionDrawer> {
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 EmberSpacing.page, 0, EmberSpacing.page, EmberSpacing.gapS),
-            child: _DashedActionButton(
-              label: '新会话',
-              onTap: () => widget.onPick(null),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _DashedActionButton(
+                    label: '新会话',
+                    onTap: () => widget.onPick(null),
+                  ),
+                ),
+                // 辅助对话(原顶栏入口移此):基于当前内嵌会话创建
+                // side session;草稿态(无会话)禁用。
+                const SizedBox(width: EmberSpacing.gapS),
+                Expanded(
+                  child: _DashedActionButton(
+                    label: '辅助对话',
+                    icon: Icons.quickreply_outlined,
+                    enabled: widget.currentSessionId != null,
+                    onTap: widget.onOpenSideChat,
+                  ),
+                ),
+              ],
             ),
           ),
           if (_managing)
@@ -955,26 +977,36 @@ class _DashedActionButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _DashedActionButton({required this.label, required this.onTap});
+  /// 前置图标(默认 ＋);[enabled] false 时整钮禁用置灰。
+  final IconData icon;
+  final bool enabled;
+
+  const _DashedActionButton({
+    required this.label,
+    required this.onTap,
+    this.icon = Icons.add,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
+    final tint = enabled ? colors.primary : colors.textFaint;
     return CustomPaint(
-      painter: _DashedRectPainter(color: colors.textFaint),
+      painter: _DashedRectPainter(
+          color: enabled ? colors.textFaint : colors.hairline),
       child: InkWell(
-        onTap: onTap,
+        onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(EmberRadius.control),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add, size: 16, color: colors.primary),
+              Icon(icon, size: 16, color: tint),
               const SizedBox(width: EmberSpacing.gapS),
               Text(label,
-                  style: TextStyle(
-                      fontSize: EmberType.body, color: colors.primary)),
+                  style: TextStyle(fontSize: EmberType.body, color: tint)),
             ],
           ),
         ),

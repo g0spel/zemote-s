@@ -3,6 +3,9 @@ part of '../chat_page.dart';
 
 // ---------------------------------------------------------------- sheets
 
+/// 会话设置面板的分区:模型列表 / 思考档(按所选模型实际支持的档位)。
+enum _SheetSection { model, thought }
+
 class _ModelModeSheet extends StatefulWidget {
   final ConversationState? state;
   final ConversationTransport transport;
@@ -10,6 +13,9 @@ class _ModelModeSheet extends StatefulWidget {
   final String? sessionId;
   final Map<String, String>? draftConfig;
   final bool Function() isSourceCurrent;
+
+  /// 本次面板展示的分区(模型按钮/思考按钮分别打开对应分区)。
+  final _SheetSection section;
 
   /// 打开时的实时取数(新鲜度窗内不发请求);null 退回 [prep] 缓存。
   final Future<WorkspacePrep?> Function()? onRefreshPrep;
@@ -19,6 +25,7 @@ class _ModelModeSheet extends StatefulWidget {
     required this.state,
     required this.transport,
     required this.isSourceCurrent,
+    required this.section,
     this.prep,
     this.sessionId,
     this.draftConfig,
@@ -196,11 +203,9 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
   }
 
   Widget _content(BuildContext context) {
-    final sid = widget.sessionId ?? '';
     final config = widget.state?.config ?? const {};
     final modelOption = _prep?.option('model');
     final thoughtOption = _prep?.option('thought_level');
-    final followup = '${config['followupMode'] ?? 'queue'}';
 
     // Current selection: prefer the LIVE session config (updates after a
     // switch), fall back to prepareWorkspace's currentValue / draft.
@@ -222,7 +227,10 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_isDraft ? '新会话 · 模型' : '模型',
+            Text(
+                widget.section == _SheetSection.thought
+                    ? '思考等级'
+                    : (_isDraft ? '新会话 · 模型' : '模型'),
                 style:
                     const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             if (_refreshing)
@@ -234,183 +242,189 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
                 ),
               ),
             const SizedBox(height: 16),
-            const SizedBox(height: 12),
-            if (thoughtOption != null && thoughtOption.options.isNotEmpty) ...[
-              Text(thoughtOption.name, style: const TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final v in thoughtOption.options)
-                    ChoiceChip(
-                      label: Text(v.name),
-                      selected: currentThoughtValue == v.value ||
-                          widget.state?.currentThought == v.value,
-                      onSelected: (_) {
-                        if (_isDraft) {
-                          _setDraft('thought', v.value);
-                        } else {
-                          _setDesiredThought(
-                              currentModelValue, v.value, config);
-                          final configPatch = _desiredConfigPatch();
-                          _apply(
-                            context,
-                            () => _switchConfig(sid, configPatch),
-                            onAccepted: () => widget.state?.optimisticPatch({
-                              'config': {
-                                ...?widget.state!.config,
-                                ...configPatch,
-                              },
-                            }),
-                          );
-                        }
-                      },
-                    ),
-                ],
-              ),
-            ] else if ((widget.state?.thoughtLevels ?? const [])
-                .isNotEmpty) ...[
-              const Text('思考等级', style: TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final level in widget.state!.thoughtLevels)
-                    ChoiceChip(
-                      label: Text(level),
-                      selected: widget.state?.currentThought == level,
-                      onSelected: (_) {
-                      _setDesiredThought(
-                        currentModelValue,
-                        level,
-                        config,
-                      );
-                      final configPatch = _desiredConfigPatch();
-                      _apply(
-                        context,
-                        () => _switchConfig(sid, configPatch),
-                        onAccepted: () => widget.state?.optimisticPatch({
-                          'config': {
-                            ...?widget.state!.config,
-                            ...configPatch,
-                          },
-                        }),
-                      );
-                    },
-                    ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 12),
-            if (modelOption != null && modelOption.options.isNotEmpty) ...[
-              Text(modelOption.name, style: const TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              for (final v in modelOption.options)
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    currentModelValue == v.value
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
-                    size: 18,
-                    color: currentModelValue == v.value
-                        ? EmberColors.of(context).primary
-                        : EmberColors.of(context).textFaint,
-                  ),
-                  title: Text(v.name, style: const TextStyle(fontSize: 13)),
-                  subtitle: v.modelProviderName != null
-                      ? Text(v.modelProviderName!,
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: EmberColors.of(context).textFaint))
-                      : null,
-                  onTap: () {
-                    if (_isDraft) {
-                      _setDraft('model', v.value);
-                    } else {
-                      // thought must be valid for the target model:
-                      // keep current if supported, else fall back to the
-                      // thought option's currentValue (Turbo: enabled/off)
-                      final currentThought = widget.state?.currentThought ?? '';
-                      final thoughtOpt = _prep?.option('thought_level');
-                      final thought = currentThought.isNotEmpty &&
-                              (thoughtOpt?.options
-                                      .any((o) => o.value == currentThought) ??
-                                  false)
-                          ? currentThought
-                          : '${thoughtOpt?.currentValue ?? (currentThought.isNotEmpty ? currentThought : 'enabled')}';
-                      _setDesiredModel(v.value, thought, config);
-                      final configPatch = _desiredConfigPatch();
-                      _apply(
-                        context,
-                        () => _switchConfig(sid, configPatch),
-                        onAccepted: () => widget.state?.optimisticPatch({
-                          'config': {
-                            ...?widget.state!.config,
-                            ...configPatch,
-                          },
-                        }),
-                      );
-                    }
-                  },
-                ),
-            ] else
-              Text('当前模型: ${widget.state?.currentModel ?? ''}',
-                  style: TextStyle(
-                      fontSize: 12, color: EmberColors.of(context).textMuted)),
-            if (!_isDraft) ...[
-              const SizedBox(height: 16),
-              const Text('后续消息', style: TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final f in const ['queue', 'guide'])
-                    ChoiceChip(
-                      label: Text(f == 'queue' ? '排队' : '引导'),
-                      selected: followup == f,
-                      onSelected: (_) => _apply(
-                        context,
-                        () => widget.transport.setFollowupMode(sid, f),
-                        onAccepted: () => widget.state?.optimisticPatch({
-                          'config': {
-                            ...?widget.state!.config,
-                            'followupMode': f,
-                          },
-                        }),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-            if (_otherOptions.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              const Text('其他配置', style: TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              for (final o in _otherOptions)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child:
-                            Text(o.name, style: const TextStyle(fontSize: 13)),
-                      ),
-                      const SizedBox(width: 8),
-                      Text('${o.currentValue}',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: EmberColors.of(context).textMuted)),
-                    ],
-                  ),
-                ),
-            ],
+            if (widget.section == _SheetSection.thought)
+              ..._thoughtSection(
+                  context, currentModelValue, currentThoughtValue, config)
+            else
+              ..._modelSection(context, currentModelValue, config),
           ],
         ),
       ),
     );
+  }
+
+  /// 思考档可选项:按当前所选模型实际支持的档位
+  /// ([ConfigOptionValue.modelThoughtLevels])过滤;模型未声明档位时回退
+  /// 全部档位。返回 (value, 显示名) 对。
+  List<(String, String)> _thoughtChoices(String currentModelValue) {
+    final thoughtOption = _prep?.option('thought_level');
+    final all = thoughtOption?.options ?? const <ConfigOptionValue>[];
+    ConfigOptionValue? entry;
+    for (final o in _prep?.option('model')?.options ??
+        const <ConfigOptionValue>[]) {
+      if (o.value == currentModelValue) entry = o;
+    }
+    final levels = entry?.modelThoughtLevels ?? const [];
+    if (levels.isEmpty) {
+      return [for (final o in all) (o.value, o.name)];
+    }
+    final choices = <(String, String)>[];
+    for (final level in levels) {
+      (String, String)? match;
+      for (final o in all) {
+        if (o.value == level) match = (o.value, o.name);
+      }
+      if (match == null) {
+        for (final o in all) {
+          if (o.name == level) match = (o.value, o.name);
+        }
+      }
+      choices.add(match ?? (level, level));
+    }
+    return choices;
+  }
+
+  List<Widget> _thoughtSection(
+    BuildContext context,
+    String currentModelValue,
+    String currentThoughtValue,
+    Map<String, dynamic> config,
+  ) {
+    final choices = _thoughtChoices(currentModelValue);
+    final liveThought = widget.state?.currentThought;
+    return [
+      if (choices.isEmpty)
+        Text('当前模型未提供思考档位',
+            style: TextStyle(
+                fontSize: 12,
+                color: EmberColors.of(context).textMuted))
+      else
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final (value, name) in choices)
+              ChoiceChip(
+                label: Text(name),
+                selected: currentThoughtValue == value ||
+                    widget.state?.currentThought == value,
+                onSelected: (_) {
+                  if (_isDraft) {
+                    _setDraft('thought', value);
+                  } else {
+                    _setDesiredThought(currentModelValue, value, config);
+                    final configPatch = _desiredConfigPatch();
+                    _apply(
+                      context,
+                      () => _switchConfig(widget.sessionId!, configPatch),
+                      onAccepted: () => widget.state?.optimisticPatch({
+                        'config': {
+                          ...?widget.state!.config,
+                          ...configPatch,
+                        },
+                      }),
+                    );
+                  }
+                },
+              ),
+          ],
+        ),
+      if (liveThought != null && liveThought.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text('当前: $liveThought',
+              style: TextStyle(
+                  fontSize: 11.5, color: EmberColors.of(context).textMuted)),
+        ),
+    ];
+  }
+
+  List<Widget> _modelSection(
+    BuildContext context,
+    String currentModelValue,
+    Map<String, dynamic> config,
+  ) {
+    final modelOption = _prep?.option('model');
+    return [
+      if (modelOption != null && modelOption.options.isNotEmpty) ...[
+        Text(modelOption.name, style: const TextStyle(fontSize: 13)),
+        const SizedBox(height: 8),
+        for (final v in modelOption.options)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              currentModelValue == v.value
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off,
+              size: 18,
+              color: currentModelValue == v.value
+                  ? EmberColors.of(context).primary
+                  : EmberColors.of(context).textFaint,
+            ),
+            title: Text(v.name, style: const TextStyle(fontSize: 13)),
+            subtitle: v.modelProviderName != null
+                ? Text(v.modelProviderName!,
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: EmberColors.of(context).textFaint))
+                : null,
+            onTap: () {
+              if (_isDraft) {
+                _setDraft('model', v.value);
+              } else {
+                // thought must be valid for the target model:
+                // keep current if supported, else fall back to the
+                // thought option's currentValue (Turbo: enabled/off)
+                final currentThought = widget.state?.currentThought ?? '';
+                final thoughtOpt = _prep?.option('thought_level');
+                final thought = currentThought.isNotEmpty &&
+                        (thoughtOpt?.options
+                                .any((o) => o.value == currentThought) ??
+                            false)
+                    ? currentThought
+                    : '${thoughtOpt?.currentValue ?? (currentThought.isNotEmpty ? currentThought : 'enabled')}';
+                _setDesiredModel(v.value, thought, config);
+                final configPatch = _desiredConfigPatch();
+                _apply(
+                  context,
+                  () => _switchConfig(widget.sessionId!, configPatch),
+                  onAccepted: () => widget.state?.optimisticPatch({
+                    'config': {
+                      ...?widget.state!.config,
+                      ...configPatch,
+                    },
+                  }),
+                );
+              }
+            },
+          ),
+      ] else
+        Text('当前模型: ${widget.state?.currentModel ?? ''}',
+            style: TextStyle(
+                fontSize: 12, color: EmberColors.of(context).textMuted)),
+      if (_otherOptions.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        const Text('其他配置', style: TextStyle(fontSize: 13)),
+        const SizedBox(height: 8),
+        for (final o in _otherOptions)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(o.name, style: const TextStyle(fontSize: 13)),
+                ),
+                const SizedBox(width: 8),
+                Text('${o.currentValue}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: EmberColors.of(context).textMuted)),
+              ],
+            ),
+          ),
+      ],
+    ];
   }
 
   Future<void> _apply(

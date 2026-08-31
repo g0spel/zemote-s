@@ -160,9 +160,8 @@ class _PlusSheetState extends State<_PlusSheet> {
   }
 }
 
-/// 输入区卡片(桌面客户端同款布局):上输入行 + 下图标行
-/// `＋ 盾(模式) √N排队 …… ○用量 ◈模型 🧠思考 ➤/■`。会话设置
-/// (模型/思考/模式)全部内联在卡片里,顶栏不再放模型 pill。
+/// 会话设置面板图标行(桌面同款布局)。按钮全部压缩密度,整行高度约为
+/// 常规 IconButton 行的一半。
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
@@ -173,7 +172,7 @@ class _InputBar extends StatelessWidget {
   /// 排队中的乐观消息数(桌面 √N 徽标)。
   final int queueCount;
 
-  /// 当前协作模式 value(空则不渲染盾形按钮)与菜单回调。
+  /// 当前协作模式 value(空则不渲染模式按钮)与菜单回调。
   final String? modeValue;
   final VoidCallback? onPickMode;
 
@@ -199,16 +198,25 @@ class _InputBar extends StatelessWidget {
     this.onPickUsage,
   });
 
+  /// 模式 → 图标(随模式变化,plan/yolo 高亮警示色)。
+  static const _modeIcons = {
+    'build': Icons.build,
+    'edit': Icons.edit_note,
+    'plan': Icons.checklist,
+    'yolo': Icons.bolt,
+  };
+
   @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
     final mode = modeValue;
     final modeHot = mode == 'plan' || mode == 'yolo';
+    final modeIcon = _modeIcons[mode] ?? Icons.tune;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
           decoration: BoxDecoration(
             color: colors.card,
             borderRadius: BorderRadius.circular(EmberRadius.control + 4),
@@ -227,25 +235,25 @@ class _InputBar extends StatelessWidget {
                   hintText: running ? '继续输入以排队后续修改' : '向 ZCode 提问…',
                   border: InputBorder.none,
                   isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 ),
                 textInputAction: TextInputAction.newline,
               ),
               Row(
                 children: [
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.add,
-                        size: 22, color: colors.textMuted),
+                  _barButton(
+                    context,
+                    icon: Icons.add,
                     tooltip: 'Skills / 命令 / 附件',
                     onPressed: sending ? null : onPlusMenu,
                   ),
                   if (mode != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.shield_outlined,
-                          size: 20,
-                          color: modeHot ? colors.warn : colors.textMuted),
+                    _barButton(
+                      context,
+                      icon: modeIcon,
                       tooltip: '协作模式 · $mode',
+                      color: modeHot ? colors.warn : colors.textMuted,
                       onPressed: sending ? null : onPickMode,
                     ),
                   if (queueCount > 0)
@@ -253,36 +261,32 @@ class _InputBar extends StatelessWidget {
                       padding: const EdgeInsets.only(left: 2),
                       child: Text('√$queueCount',
                           style: TextStyle(
-                              fontSize: 11,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w600,
                               color: colors.textMuted)),
                     ),
                   const Spacer(),
                   if (onPickUsage != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.donut_small,
-                          size: 20, color: colors.textMuted),
+                    _barButton(
+                      context,
+                      icon: Icons.donut_small,
                       tooltip: '上下文与用量',
                       onPressed: onPickUsage,
                     ),
                   if (onPickModel != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.view_in_ar,
-                          size: 20, color: colors.textMuted),
+                    _barButton(
+                      context,
+                      icon: Icons.view_in_ar,
                       tooltip: '模型',
                       onPressed: onPickModel,
                     ),
                   if (onPickThought != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.psychology,
-                          size: 20, color: colors.textMuted),
+                    _barButton(
+                      context,
+                      icon: Icons.psychology,
                       tooltip: '思考档',
                       onPressed: onPickThought,
                     ),
-                  const SizedBox(width: 4),
                   _SendOrStop(
                     controller: controller,
                     sending: sending,
@@ -298,10 +302,28 @@ class _InputBar extends StatelessWidget {
       ),
     );
   }
+
+  /// 图标行按钮:零内边距 + 最大压缩密度,高度约为常规 IconButton 一半。
+  Widget _barButton(
+    BuildContext context, {
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+    Color? color,
+  }) {
+    return IconButton(
+      onPressed: onPressed,
+      tooltip: tooltip,
+      visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      padding: EdgeInsets.zero,
+      icon: Icon(icon, size: 19, color: color ?? EmberColors.of(context).textMuted),
+    );
+  }
 }
 
 /// 发送/停止键:会话运行中且输入为空 → 停止方块(桌面同款);其余状态
-/// 为发送箭头(发送在途显转圈)。
+/// 为发送箭头(发送在途显转圈)。与图标行同高。
 class _SendOrStop extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
@@ -328,29 +350,29 @@ class _SendOrStop extends StatelessWidget {
           return IconButton(
             onPressed: onStop,
             tooltip: '停止',
-            style: IconButton.styleFrom(
-                backgroundColor: colors.raise),
-            icon: Icon(Icons.stop, size: 22, color: colors.textSolid),
+            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(backgroundColor: colors.raise),
+            icon: Icon(Icons.stop, size: 20, color: colors.textSolid),
           );
         }
-        return Container(
-          decoration: BoxDecoration(
-            color: colors.primary,
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            onPressed: sending ? null : onSend,
-            tooltip: '发送',
-            icon: sending
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.arrow_upward,
-                    color: Colors.white, size: 20),
-          ),
+        return IconButton(
+          onPressed: sending ? null : onSend,
+          tooltip: '发送',
+          visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+          padding: EdgeInsets.zero,
+          style: IconButton.styleFrom(backgroundColor: colors.primary),
+          icon: sending
+              ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.arrow_upward,
+                  color: Colors.white, size: 19),
         );
       },
     );

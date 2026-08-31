@@ -283,24 +283,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// Opens an auxiliary (side) chat attached to the current session
-  /// (`createSelectionSideSession`) in a fresh ChatPage.
-  Future<void> _openSideChat() async {
-    final sideId = await controller.createSideSession();
-    if (sideId == null || !mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatPage(
-          session: widget.session,
-          scope: widget.scope,
-          workspaceKey: widget.workspaceKey,
-          sessionId: sideId,
-          title: '辅助对话',
-        ),
-      ),
-    );
-  }
-
   void _toast(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context)
@@ -378,6 +360,14 @@ class _ChatPageState extends State<ChatPage> {
   // ------------------------------------------------------------ sheets
 
   void _showModelSheet() {
+    _showSessionConfigSheet(_SheetSection.model);
+  }
+
+  void _showThoughtSheet() {
+    _showSessionConfigSheet(_SheetSection.thought);
+  }
+
+  void _showSessionConfigSheet(_SheetSection section) {
     final sourceGeneration = controller.sourceGeneration;
     final transport = controller.transport;
     final sessionId = controller.sessionId;
@@ -391,6 +381,7 @@ class _ChatPageState extends State<ChatPage> {
         transport: transport,
         prep: controller.prep,
         sessionId: sessionId,
+        section: section,
         draftConfig: controller.draftConfig,
         isSourceCurrent: () => controller.isCurrentForSource(
           sourceGeneration,
@@ -603,112 +594,42 @@ class _ChatPageState extends State<ChatPage> {
               ),
           ],
         ),
-        actions: [
-          if (controller.sessionId != null)
-            IconButton(
-              icon: const Icon(Icons.quickreply_outlined, size: 20),
-              tooltip: '辅助对话',
-              onPressed: _openSideChat,
-            ),
-          // 常驻(草稿态禁用会话级条目):出现/消失会导致右侧布局跳动,
-          // 把会话列表按钮挤出屏幕。
-          PopupMenuButton<String>(
-            onSelected:
-                controller.sessionId == null ? null : _handleOverflowAction,
-            itemBuilder: (context) =>
-                _overflowMenuItems(includeSideChat: false),
-          ),
-        ],
       ),
       body: body,
     );
   }
 
-  // ------------------------------------------------- header overflow
-
-  /// 顶栏溢出菜单:非 embedded(Scaffold)与 embedded 两种布局共用的
-  /// 动作集合与分发;布局差异保留(Scaffold 的辅助对话是独立图标,
-  /// 不进菜单)。会话级条目草稿态禁用而非隐藏,避免右侧布局跳动。
-  List<PopupMenuEntry<String>> _overflowMenuItems(
-          {required bool includeSideChat}) =>
-      [
-        if (includeSideChat)
-          PopupMenuItem(
-              value: 'side',
-              enabled: controller.sessionId != null,
-              child: const Text('辅助对话')),
-        PopupMenuItem(
-            value: 'compact',
-            enabled: controller.sessionId != null,
-            child: const Text('压缩上下文 (compact)')),
-        PopupMenuItem(
-            value: 'usage',
-            enabled: controller.sessionId != null,
-            child: const Text('用量统计')),
-      ];
-
-  void _handleOverflowAction(String action) {
-    switch (action) {
-      case 'side':
-        _openSideChat();
-      case 'compact':
-        controller.compact();
-      case 'usage':
-        _showUsageSheet();
-    }
-  }
-
   // ------------------------------------------------- embedded header
 
-  /// 对话 Tab 顶栏(spec §7.1:设备胶囊 | 会话名 | 停止 + 模型 pill +
-  /// 溢出菜单 | 会话抽屉)。胶囊与抽屉回调由壳注入;会话态驱动的停止/
-  /// pill/溢出菜单在订阅通知处刷新。
+  /// 对话 Tab 顶栏(桌面客户端单行结构):设备胶囊 | 会话标题 | 状态
+  /// 胶囊 | 会话列表。会话设置(模型/思考/模式)在输入区卡片,无溢出
+  /// 菜单;状态胶囊随订阅实时跟进(phase 帧只在 state 上通知)。
   Widget _embeddedHeader(BuildContext context, ConversationState? state) {
-    final colors = EmberColors.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(EmberSpacing.page, EmberSpacing.gapS,
           EmberSpacing.page, EmberSpacing.gapS),
-      child: Column(children: [
-        // 第一行:设备胶囊 | 会话标题 + 所属工作区 | 会话列表(☰ 靠
-        // 第一行最右,第二行留整行给状态与模型)。
-        Row(
-          children: [
-            if (widget.headerLeading != null) widget.headerLeading!,
-            const SizedBox(width: EmberSpacing.gapM),
-            Expanded(child: _embeddedTitle(context)),
-            if (widget.onOpenDrawer != null)
-              IconButton(
-                icon: const Icon(Icons.menu, size: 22),
-                tooltip: '会话列表',
-                onPressed: widget.onOpenDrawer,
-              ),
-          ],
-        ),
-        // 第二行:状态胶囊(左)| 模型 pill + 溢出(顺移到行尾,原 ☰
-        // 的位置)。操作簇放 Expanded+Align:占满剩余宽度、按自然宽度
-        // 右对齐——pill 平时完整显示,只在放不下时才经内部省略收缩
-        // (此前 Spacer+Flexible 对半分剩余空间,长模型名把 pill 挤成
-        // 省略号,真机表现为「模型名彻底丢了」)。
-        Row(
-          children: [
-            // 胶囊随订阅实时跟进:phase 帧只在 state 上通知,页面
-            // build 不会因此重跑(真机:轮次结束后仍显示「工作中」)。
-            if (state == null)
-              _sessionStatusChip(context, state)
-            else
-              AnimatedBuilder(
-                animation: state.controlListenable,
-                builder: (context, _) => _sessionStatusChip(context, state),
-              ),
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: _headerActions(context, state, colors),
-              ),
+      child: Row(
+        children: [
+          if (widget.headerLeading != null) widget.headerLeading!,
+          const SizedBox(width: EmberSpacing.gapM),
+          Expanded(child: _embeddedTitle(context)),
+          // 状态胶囊随订阅实时跟进:phase 帧只在 state 上通知,页面
+          // build 不会因此重跑。
+          if (state == null)
+            _sessionStatusChip(context, state)
+          else
+            AnimatedBuilder(
+              animation: state.controlListenable,
+              builder: (context, _) => _sessionStatusChip(context, state),
             ),
-          ],
-        ),
-      ]),
+          if (widget.onOpenDrawer != null)
+            IconButton(
+              icon: const Icon(Icons.menu, size: 22),
+              tooltip: '会话列表',
+              onPressed: widget.onOpenDrawer,
+            ),
+        ],
+      ),
     );
   }
 
@@ -779,41 +700,6 @@ class _ChatPageState extends State<ChatPage> {
             style: TextStyle(
                 fontSize: EmberType.caption, color: colors.textFaint)),
       ],
-    );
-  }
-
-  /// 停止(isRunning 才出现)+ 模型 pill + 溢出菜单(辅助对话/压缩/
-  /// 用量/计划,原 AppBar 入口)。state 为 null(draft 未订阅)时静态
-  /// 渲染一次,订阅建立后由 AnimatedBuilder 跟进。
-  /// 嵌入式顶栏操作簇:模型/思考/模式已内联进输入区卡片(桌面同款),
-  /// 这里只保留溢出菜单;state 为 null(draft 未订阅)时静态渲染一次,
-  /// 订阅建立后由 AnimatedBuilder 跟进。
-  Widget _headerActions(
-      BuildContext context, ConversationState? state, EmberColors colors) {
-    Widget build() {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
-          // 右侧会话列表入口挤出屏幕。
-          PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, size: 20, color: colors.textMuted),
-            tooltip: '更多',
-            onSelected:
-                controller.sessionId == null ? null : _handleOverflowAction,
-            itemBuilder: (context) => _overflowMenuItems(includeSideChat: true),
-          ),
-        ],
-      );
-    }
-
-    if (state == null) return build();
-    return AnimatedBuilder(
-      animation: Listenable.merge([
-        state.controlListenable,
-        state.configListenable,
-      ]),
-      builder: (context, _) => build(),
     );
   }
 
@@ -1118,7 +1004,7 @@ class _ChatPageState extends State<ChatPage> {
               onStop: controller.stop,
               onPlusMenu: _openPlusSheet,
               onPickModel: _showModelSheet,
-              onPickThought: _showModelSheet,
+              onPickThought: _showThoughtSheet,
               onPickUsage:
                   controller.sessionId == null ? null : _showUsageSheet,
             ),

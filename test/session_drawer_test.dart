@@ -167,6 +167,7 @@ void main() {
         workspacePath: workspacePath,
         currentSessionId: currentSessionId,
         onPick: picked.add,
+        onOpenSideChat: () {},
         onSwitchWorkspace: switchCounts.add,
         onCurrentSessionVanished: () => vanishedCalls.add(1),
         onManageDevices: () {},

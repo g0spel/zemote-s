@@ -394,9 +394,6 @@ class _InsightsSheetState extends State<InsightsSheet> {
   int _fileRequestGeneration = 0;
   final _derived = _InsightsDerivedCache();
 
-  /// 待办面板折叠态(桌面悬浮胶囊样式):收起只显示一行摘要。
-  bool _todoCollapsed = true;
-
   /// 宿主计划(conversationPlansV4):sheet 打开时拉取一次;解析不出
   /// 可识别结构则为 null(隐藏该段),失败静默。
   List<PlanStep>? _hostPlans;
@@ -782,72 +779,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
       _ => ('', EmberColors.of(context).textFaint),
     };
     final hostPlans = _hostPlans;
-
-    // 主清单(胶囊摘要与进度):计划快照 > TodoWrite 待办 > 宿主计划。
-    final primary = planItems != null
-        ? [
-            for (final i in planItems)
-              (
-                title: '${i['content'] ?? i['id'] ?? ''}',
-                done: '${i['status']}' == 'completed',
-              )
-          ]
-        : todoSteps.isNotEmpty
-            ? [
-                for (final s in todoSteps) (title: s.title, done: s.completed)
-              ]
-            : [
-                for (final s in hostPlans ?? const <PlanStep>[])
-                  (title: s.title, done: s.completed)
-              ];
-    final doneCount = primary.where((e) => e.done).length;
-    final headline = primary.isEmpty
-        ? (hasGoal ? goalText : '暂无待办')
-        : primary.firstWhere((e) => !e.done,
-            orElse: () => primary.first).title;
-
     final colors = EmberColors.of(context);
-
-    // 折叠态(桌面悬浮胶囊样式):一行摘要 + 进度,点按展开。
-    if (_todoCollapsed) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(EmberRadius.control),
-          onTap: () => setState(() => _todoCollapsed = false),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: Color.lerp(colors.bg, colors.card, 0.5),
-              borderRadius: BorderRadius.circular(EmberRadius.control),
-              border: Border.all(color: colors.hairline),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.arrow_right_alt,
-                    size: 14, color: colors.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(headline,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 11.5, color: colors.textMuted)),
-                ),
-                if (primary.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text('$doneCount / ${primary.length}',
-                      style: TextStyle(
-                          fontSize: 10.5, color: colors.textFaint)),
-                ],
-                Icon(Icons.keyboard_arrow_down,
-                    size: 14, color: colors.textFaint),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
 
     Widget stepRow({required String title, required bool completed, required bool inProgress}) {
       return Padding(
@@ -959,10 +891,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: () => setState(() => _todoCollapsed = true),
-          child: _panelHeader(context, '待办与计划', () {}),
-        ),
+        _panelHeader(context, '待办与计划', () {}),
         Flexible(
           child: ListView(
             controller: widget.scrollController,
