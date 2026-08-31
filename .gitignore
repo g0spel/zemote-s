@@ -55,3 +55,6 @@ app.*.map.json
 /screenshots/
 /scratch/
 .superpowers/
+
+# 截图生成器的中间产物(成品在 docs/screenshots/)
+test/goldens/
