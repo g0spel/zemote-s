@@ -121,8 +121,7 @@ class RelayClient {
   int _socketGeneration = 0;
   Future<void>? _connectInFlight;
 
-  RelayClient(this.params, {this.onLog, RelaySocketFactory? socketFactory})
-      : _socketFactory = socketFactory;
+  RelayClient(this.params, {this.onLog, this._socketFactory});
 
   void _log(String line) => onLog?.call(line);
 

@@ -12,7 +12,7 @@ SessionEntry _entry(String id, String phase,
     'lastAssistantPreview': preview,
     'lastActivityAt': 0,
     'createdAt': 0,
-    if (pending != null) 'pendingInteraction': pending,
+    'pendingInteraction': ?pending,
   });
 }
 

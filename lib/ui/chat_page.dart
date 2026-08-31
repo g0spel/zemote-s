@@ -101,12 +101,12 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _PendingFile {
+class PendingFile {
   final String fileName;
   final String mime;
   final Uint8List bytes;
 
-  _PendingFile(this.fileName, this.mime, this.bytes);
+  PendingFile(this.fileName, this.mime, this.bytes);
 }
 
 String _guessMime(String fileName) {
@@ -326,7 +326,7 @@ class _ChatPageState extends State<ChatPage> {
         if (mounted && scrollGeneration == _scrollGeneration) {
           _scrollAnimationInFlight = false;
         }
-      }, onError: (_, __) {
+      }, onError: (_, _) {
         if (mounted && scrollGeneration == _scrollGeneration) {
           _scrollAnimationInFlight = false;
         }

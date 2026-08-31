@@ -262,7 +262,9 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
     try {
       await _save({...provider, 'enabled': enabled}, source: source);
       if (!_isCurrentActionSource(source) ||
-          mutationGeneration != _mutationGeneration) return;
+          mutationGeneration != _mutationGeneration) {
+        return;
+      }
       await _load();
     } catch (e) {
       if (_isCurrentActionSource(source) &&
@@ -296,7 +298,9 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
     );
     if (confirmed != true ||
         !_isCurrentActionSource(source) ||
-        mutationGeneration != _mutationGeneration) return;
+        mutationGeneration != _mutationGeneration) {
+      return;
+    }
     try {
       if (!_isCurrentActionSource(source)) return;
       final res = await source.session.channels.call('model-provider',
@@ -308,7 +312,9 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
     } on ChannelRpcError {
       // Fallback: try alternate parameter shape
       if (!_isCurrentActionSource(source) ||
-          mutationGeneration != _mutationGeneration) return;
+          mutationGeneration != _mutationGeneration) {
+        return;
+      }
       try {
         if (!_isCurrentActionSource(source)) return;
         final res = await source.session.channels
@@ -329,7 +335,9 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
       return;
     }
     if (!_isCurrentActionSource(source) ||
-        mutationGeneration != _mutationGeneration) return;
+        mutationGeneration != _mutationGeneration) {
+      return;
+    }
     await _load();
   }
 
@@ -351,11 +359,15 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
     );
     if (added == null ||
         !_isCurrentActionSource(source) ||
-        mutationGeneration != _mutationGeneration) return;
+        mutationGeneration != _mutationGeneration) {
+      return;
+    }
     try {
       await _save(added, source: source);
       if (!_isCurrentActionSource(source) ||
-          mutationGeneration != _mutationGeneration) return;
+          mutationGeneration != _mutationGeneration) {
+        return;
+      }
       await _load();
       if (_isCurrentActionSource(source) &&
           mutationGeneration == _mutationGeneration) {
@@ -393,7 +405,7 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: _providers.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final p = _providers[index];
                       final status = providerStatusOf(p);

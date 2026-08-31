@@ -1170,7 +1170,7 @@ void _injectSnapshot(
     'rows': {
       'window': rows ?? [],
       'totalCount': totalCount,
-      if (firstRowId != null) 'firstRowId': firstRowId,
+      'firstRowId': ?firstRowId,
     },
     ...?snapshot,
   };

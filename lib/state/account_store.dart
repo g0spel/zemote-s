@@ -58,8 +58,7 @@ class Account {
 class AccountStore extends ChangeNotifier {
   final CredentialStorage _storage;
 
-  AccountStore({CredentialStorage storage = const SecureCredentialStorage()})
-      : _storage = storage;
+  AccountStore({this._storage = const SecureCredentialStorage()});
 
   final List<Account> _accounts = [];
   /// 最近使用的设备在前(autoConnect 据此连"上一次连接的设备")。

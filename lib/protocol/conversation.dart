@@ -312,7 +312,7 @@ class ConversationTransport {
           if (config['thought'] != null) 'thoughtLevel': config['thought'],
           if (config['mode'] != null) 'mode': config['mode'],
         },
-        if (runtimeModel != null) 'runtimeModel': runtimeModel,
+        'runtimeModel': ?runtimeModel,
         if (mcpServers != null && mcpServers.isNotEmpty)
           'mcpServers': mcpServers,
     };
@@ -378,15 +378,14 @@ class ConversationTransport {
         'text': text,
         if (attachments != null && attachments.isNotEmpty)
           'attachments': attachments,
-        if (heldQueueDisposition != null)
-          'heldQueueDisposition': heldQueueDisposition,
+        'heldQueueDisposition': ?heldQueueDisposition,
         if (expectedHeldQueueItemIds != null &&
             expectedHeldQueueItemIds.isNotEmpty)
           'expectedHeldQueueItemIds': expectedHeldQueueItemIds,
-        if (automationId != null) 'automationId': automationId,
-        if (offPeakTaskId != null) 'offPeakTaskId': offPeakTaskId,
-        if (offPeakRunType != null) 'offPeakRunType': offPeakRunType,
-        if (botDeliveryTarget != null) 'botDeliveryTarget': botDeliveryTarget,
+        'automationId': ?automationId,
+        'offPeakTaskId': ?offPeakTaskId,
+        'offPeakRunType': ?offPeakRunType,
+        'botDeliveryTarget': ?botDeliveryTarget,
         if (toolDisallowlist != null && toolDisallowlist.isNotEmpty)
           'toolDisallowlist': toolDisallowlist,
       });
@@ -400,9 +399,8 @@ class ConversationTransport {
   }) =>
       sendCommand(sessionId, 'sendGoalCommand', {
         'text': text,
-        if (displayText != null) 'displayText': displayText,
-        if (heldQueueDisposition != null)
-          'heldQueueDisposition': heldQueueDisposition,
+        'displayText': ?displayText,
+        'heldQueueDisposition': ?heldQueueDisposition,
         if (expectedHeldQueueItemIds != null &&
             expectedHeldQueueItemIds.isNotEmpty)
           'expectedHeldQueueItemIds': expectedHeldQueueItemIds,
@@ -604,8 +602,8 @@ class ConversationTransport {
         ...scope,
         'sessionId': sessionId,
         'target': target,
-        if (baseRevision != null) 'baseRevision': baseRevision,
-        if (baseLogEpoch != null) 'baseLogEpoch': baseLogEpoch,
+        'baseRevision': ?baseRevision,
+        'baseLogEpoch': ?baseLogEpoch,
       },
     ]);
   }
@@ -837,10 +835,10 @@ class ConversationTransport {
       sendCommand(sessionId, 'resolveInteraction', {
         'interactionId': interactionId,
         'answer': {
-          if (optionId != null) 'optionId': optionId,
-          if (freeText != null) 'freeText': freeText,
-          if (action != null) 'action': action,
-          if (content != null) 'content': content,
+          'optionId': ?optionId,
+          'freeText': ?freeText,
+          'action': ?action,
+          'content': ?content,
         },
       });
 
@@ -854,7 +852,7 @@ class ConversationTransport {
       {
         ...scope,
         'sessionId': sessionId,
-        if (beforeRowId != null) 'beforeRowId': beforeRowId,
+        'beforeRowId': ?beforeRowId,
         'limit': limit,
       },
     ]);

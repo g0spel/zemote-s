@@ -33,7 +33,7 @@ Future<BridgeSession> pumpPage(WidgetTester tester) async {
       body: AutomationPage(
         bridge: bridge,
         workspace: const {'workspacePath': '/ws', 'label': 'WS'},
-        onOpenTask: (_, __) {},
+        onOpenTask: (_, _) {},
       ),
     ),
   ));

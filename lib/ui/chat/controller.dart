@@ -8,15 +8,14 @@ part of '../chat_page.dart';
 class ChatController {
   ChatController({
     required BridgeSession session,
-    required Map<String, dynamic> scope,
+    required this._scope,
     required this.workspaceKey,
     required this.onChanged,
     required this.onToast,
     this.onSessionInfo,
     this.onRowsChanged,
-    String? sessionId,
-  })  : _scope = scope,
-        _sessionId = sessionId {
+    this._sessionId,
+  }) {
     transport = session.conversation(_scope);
   }
 
@@ -333,9 +332,9 @@ class ChatController {
 
   bool loadingOlder = false;
   String? progress;
-  final List<_PendingFile> _pendingFiles = [];
+  final List<PendingFile> _pendingFiles = [];
 
-  List<_PendingFile> get pendingFiles => _pendingFiles;
+  List<PendingFile> get pendingFiles => _pendingFiles;
 
   void removePendingFileAt(int index) {
     _pendingFiles.removeAt(index);
@@ -354,14 +353,14 @@ class ChatController {
           sourceGeneration, filePickGeneration, _filePickGeneration, transport)) {
         return;
       }
-      final picked = <_PendingFile>[];
+      final picked = <PendingFile>[];
       for (final file in files) {
         final bytes = await file.readAsBytes();
         if (!isCurrentOperation(sourceGeneration, filePickGeneration,
             _filePickGeneration, transport)) {
           return;
         }
-        picked.add(_PendingFile(file.name, _guessMime(file.name), bytes));
+        picked.add(PendingFile(file.name, _guessMime(file.name), bytes));
       }
       if (picked.isEmpty ||
           !isCurrentOperation(sourceGeneration, filePickGeneration,
@@ -380,7 +379,7 @@ class ChatController {
 
   Future<List<Map<String, dynamic>>> _uploadFiles(
     Map<String, dynamic> echo,
-    List<_PendingFile> files,
+    List<PendingFile> files,
     String sessionId, {
     required int sourceGeneration,
     required int sendGeneration,
@@ -495,7 +494,7 @@ class ChatController {
       'ts': DateTime.now().millisecondsSinceEpoch,
       'status': 'sending',
       'attachments': null,
-      'files': List<_PendingFile>.from(_pendingFiles),
+      'files': List<PendingFile>.from(_pendingFiles),
     };
     if (!isCurrentOperation(
         sourceGeneration, sendGeneration, _sendGeneration, transport,
@@ -639,11 +638,11 @@ class ChatController {
           ?.whereType<Map>()
           .cast<Map<String, dynamic>>()
           .toList();
-      final files = (echo['files'] as List<_PendingFile>?) ?? const [];
+      final files = (echo['files'] as List<PendingFile>?) ?? const [];
       if (files.isNotEmpty) {
         progress = '正在上传附件…';
         _notify();
-        final fileList = (echo['files'] as List<_PendingFile>?) ?? [];
+        final fileList = (echo['files'] as List<PendingFile>?) ?? [];
         attachments = await _uploadFiles(
           echo,
           fileList,

@@ -1722,7 +1722,7 @@ class _QueueAction extends StatelessWidget {
 }
 
 class _PendingFilesBar extends StatelessWidget {
-  final List<_PendingFile> files;
+  final List<PendingFile> files;
   final double? uploadProgress;
   final void Function(int index) onRemove;
 

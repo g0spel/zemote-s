@@ -1306,7 +1306,7 @@ class _WorkspaceSwitchSheet extends StatelessWidget {
             child: ListView.separated(
               shrinkWrap: true,
               itemCount: items.length,
-              separatorBuilder: (_, __) =>
+              separatorBuilder: (_, _) =>
                   const Divider(height: 1, indent: 16),
               itemBuilder: (context, index) {
                 final w = items[index];
@@ -1408,7 +1408,7 @@ class _DeviceSwitchSheet extends StatelessWidget {
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: accounts.length,
-                  separatorBuilder: (_, __) =>
+                  separatorBuilder: (_, _) =>
                       const Divider(height: 1, indent: 16),
                   itemBuilder: (context, index) {
                     final account = accounts[index];

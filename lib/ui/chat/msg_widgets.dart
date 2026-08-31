@@ -476,7 +476,9 @@ class _RowWidget extends StatelessWidget {
     controller.dispose();
     if (text == null ||
         text.isEmpty ||
-        (isSourceCurrent != null && !isSourceCurrent!())) return;
+        (isSourceCurrent != null && !isSourceCurrent!())) {
+      return;
+    }
     await onAction(
         '编辑失败', () => transport.editUserQuery(sessionId, _target, text));
   }
@@ -499,8 +501,10 @@ class _RowWidget extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed != true || (isSourceCurrent != null && !isSourceCurrent!()))
+    if (confirmed != true ||
+        (isSourceCurrent != null && !isSourceCurrent!())) {
       return;
+    }
     await onAction('回滚失败', () => transport.applyFileRewind(sessionId, _target));
   }
 
@@ -942,8 +946,10 @@ class _AssistantBubble extends StatelessWidget {
   });
 
   void _setFeedback(String? value) {
-    if (sessionId.isEmpty || (isSourceCurrent != null && !isSourceCurrent!()))
+    if (sessionId.isEmpty ||
+        (isSourceCurrent != null && !isSourceCurrent!())) {
       return;
+    }
     // Optimistic: update the icon instantly; server row.upserted confirms.
     state.optimisticRowUpdate(row['rowId'] as num?, {'feedback': value});
     transport
@@ -1269,7 +1275,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                           cacheWidth: (MediaQuery.sizeOf(context).width *
                                   MediaQuery.devicePixelRatioOf(context))
                               .round(),
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
                         ),
                       ),
                     );

@@ -124,9 +124,9 @@ class AutomationApi {
   }) =>
       _agent('updateAutomation', {
         'automationId': automationId,
-        if (title != null) 'title': title,
-        if (cronExpr != null) 'cronExpr': cronExpr,
-        if (prompt != null) 'prompt': prompt,
+        'title': ?title,
+        'cronExpr': ?cronExpr,
+        'prompt': ?prompt,
       });
 
   /// Off-peak (闲时算力) queue — separate channel, read-only.

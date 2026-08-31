@@ -368,7 +368,7 @@ class ZflowClient {
         'bridgeSessionId': bridgeSessionId,
         'bridgeGeneration': generation,
         'workspaceKey': workspaceKey,
-        if (taskId != null) 'taskId': taskId,
+        'taskId': ?taskId,
       },
       (p) =>
           (p['zcode_type'] == 'workspace-bridge-ready' ||
@@ -500,7 +500,7 @@ class ZflowClient {
       'zcode_type': 'mobile-view-state-update',
       'viewState': {
         'activeWorkspaceKey': workspaceKey,
-        if (taskId != null) 'activeTaskId': taskId,
+        'activeTaskId': ?taskId,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       },
       'deviceInfo': {
@@ -587,12 +587,11 @@ class BridgeSession {
 
   BridgeSession._({
     required Map<String, dynamic> bridge,
-    required void Function(BridgeSession) onDispose,
+    required this._onDispose,
     ChannelClient? channels,
   })  : _bridge = bridge,
         _transport = _placeholderTransport(bridge),
-        _channels = channels ?? ChannelClient(sendBody: (_) {}),
-        _onDispose = onDispose;
+        _channels = channels ?? ChannelClient(sendBody: (_) {});
 
   /// Standalone session with a no-op send path — test scaffold for UI code
   /// that holds a [BridgeSession] without a live relay connection.

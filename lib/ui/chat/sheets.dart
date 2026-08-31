@@ -54,7 +54,9 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
   ) {
     if (_desiredProvider != null &&
         _desiredModel != null &&
-        _desiredThought != null) return;
+        _desiredThought != null) {
+      return;
+    }
     final (provider, model) = modelValue.isNotEmpty
         ? providerModelOf(_prep, modelValue)
         : ('${config['provider'] ?? ''}', '${config['model'] ?? ''}');
@@ -142,7 +144,9 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
       final fresh = await refresh();
       if (!mounted ||
           generation != _refreshGeneration ||
-          !widget.isSourceCurrent()) return;
+          !widget.isSourceCurrent()) {
+        return;
+      }
       setState(() {
         _refreshing = false;
         if (fresh != null) _freshPrep = fresh;
@@ -427,18 +431,21 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
     }
     final queued = _applyQueue.then<dynamic>(
       (_) => runIfCurrent(),
-      onError: (_, __) => runIfCurrent(),
+      onError: (_, _) => runIfCurrent(),
     );
     _applyQueue = queued.then<void>(
       (_) {},
-      onError: (_, __) {},
+      onError: (_, _) {},
     );
     try {
       final res = await queued;
       if (!mounted ||
           applyGeneration != _applyGeneration ||
           transport != widget.transport ||
-          !widget.isSourceCurrent()) return;
+          !widget.isSourceCurrent() ||
+          !context.mounted) {
+        return;
+      }
       if (isRpcRejected(res)) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('被拒绝: ${rpcFailureReason(res)}')));
@@ -560,7 +567,9 @@ class _UsageSheetState extends State<_UsageSheet> {
       );
       if (!mounted ||
           generation != _queryGeneration ||
-          !widget.isSourceCurrent()) return;
+          !widget.isSourceCurrent()) {
+        return;
+      }
       showModalBottomSheet(
         context: context,
         builder: (context) => _JsonSheet(title: '任务用量', data: res),
