@@ -186,8 +186,8 @@ class _InsightsDerivedCache {
   Map<String, dynamic>? goal;
 
   void sync(ConversationState state) {
-    final rowsChanged = !identical(_state, state) ||
-        _rowsVersion != state.rowsVersion;
+    final rowsChanged =
+        !identical(_state, state) || _rowsVersion != state.rowsVersion;
     if (rowsChanged) {
       _state = state;
       _rowsVersion = state.rowsVersion;
@@ -209,24 +209,24 @@ class _InsightsDerivedCache {
     }
 
     final snapshot = state.snapshot;
-    final snapshotChanged = !_snapshotInitialized || !identical(_snapshot, snapshot);
+    final snapshotChanged =
+        !_snapshotInitialized || !identical(_snapshot, snapshot);
     if (snapshotChanged) {
       _snapshotInitialized = true;
       _snapshot = snapshot;
-      planItems = parseInsightList(
-          state.plan ?? const {}, const ['items'], allowEmpty: false);
+      planItems = parseInsightList(state.plan ?? const {}, const ['items'],
+          allowEmpty: false);
       goal = state.goal;
       backgroundWorks = state.backgroundWorks;
       final subsObj = snapshot?['subagents'];
       final subs = subsObj is Map ? subsObj.cast<String, dynamic>() : null;
-      runningSubagents = subs == null
-          ? null
-          : parseInsightList(subs['running'], const []);
+      runningSubagents =
+          subs == null ? null : parseInsightList(subs['running'], const []);
       endedSubagentTotal = (subs?['endedTotal'] as num?)?.toInt() ?? 0;
     }
     if (rowsChanged || snapshotChanged) {
-      bgCount = insightsBgCount(
-          backgroundWorks: backgroundWorks, rows: state.rows);
+      bgCount =
+          insightsBgCount(backgroundWorks: backgroundWorks, rows: state.rows);
     }
   }
 }
@@ -236,6 +236,7 @@ String _insightsTurnKey(
   if (turn == null) return '';
   return '$sessionId|${state.logEpoch ?? ''}|${turn['rowId']}|${turn['entityId']}';
 }
+
 /// 洞察 sheet 把手(spec §7.1):输入区上方常驻的 40×4 圆角条,点击或
 /// 上滑呼出底部 sheet;后台有运行任务时右端浮出「后台 N」计数徽,
 /// 面板数据为空也常驻。公开给测试(与 SessionDrawer 同例)。
@@ -243,15 +244,20 @@ class InsightsHandle extends StatelessWidget {
   final ConversationState state;
   final ConversationTransport transport;
   final String sessionId;
+  final bool Function()? isSourceCurrent;
 
   const InsightsHandle({
     super.key,
     required this.state,
     required this.transport,
     required this.sessionId,
+    this.isSourceCurrent,
   });
 
+  bool _isCurrent() => isSourceCurrent?.call() ?? true;
+
   void _openSheet(BuildContext context) {
+    if (!_isCurrent()) return;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -263,6 +269,7 @@ class InsightsHandle extends StatelessWidget {
           transport: transport,
           sessionId: sessionId,
           scrollController: scrollController,
+          isSourceCurrent: isSourceCurrent,
         ),
       ),
     );
@@ -323,6 +330,7 @@ class InsightsSheet extends StatefulWidget {
   final ConversationState state;
   final ConversationTransport transport;
   final String sessionId;
+  final bool Function()? isSourceCurrent;
 
   /// DraggableScrollableSheet 的滚动控制器,接入各面板主列表,让列表
   /// 区域的拖拽可以展开/收起 sheet。
@@ -334,6 +342,7 @@ class InsightsSheet extends StatefulWidget {
     required this.transport,
     required this.sessionId,
     required this.scrollController,
+    this.isSourceCurrent,
   });
 
   @override
@@ -356,6 +365,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
   String? _loadedTurnKey;
   int _fileRequestGeneration = 0;
   final _derived = _InsightsDerivedCache();
+
+  bool _isSourceCurrent() => widget.isSourceCurrent?.call() ?? true;
 
   @override
   void initState() {
@@ -397,7 +408,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   void _onStateChanged() {
-    if (!mounted) return;
+    if (!mounted || !_isSourceCurrent()) return;
     _syncDerived();
     final turn = _derived.latestCompleted;
     final key = _insightsTurnKey(widget.state, widget.sessionId, turn);
@@ -415,6 +426,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   void _selectTab(int index) {
+    if (!_isSourceCurrent()) return;
     setState(() => _tab = index);
     // Skip when a prefetch for this turn is already in flight.
     if (_tab == _files &&
@@ -432,11 +444,21 @@ class _InsightsSheetState extends State<InsightsSheet> {
     Map<String, dynamic>? target,
     String? key,
   }) async {
-    _syncDerived();
+    final sourceState = widget.state;
+    final sourceTransport = widget.transport;
+    final sourceSessionId = widget.sessionId;
+    if (!_isSourceCurrent()) return;
+    _derived.sync(sourceState);
     target ??= _derived.latestCompleted;
-    key ??= _insightsTurnKey(widget.state, widget.sessionId, target);
-    if (target == null || key.isEmpty) {
-      if (mounted) {
+    final requestKey = _insightsTurnKey(sourceState, sourceSessionId, target);
+    if (target == null ||
+        requestKey.isEmpty ||
+        (key != null && key != requestKey)) {
+      if (mounted &&
+          _isSourceCurrent() &&
+          identical(widget.state, sourceState) &&
+          identical(widget.transport, sourceTransport) &&
+          widget.sessionId == sourceSessionId) {
         setState(() {
           _fileChanges = null;
           _filesError = null;
@@ -446,7 +468,15 @@ class _InsightsSheetState extends State<InsightsSheet> {
       return;
     }
     final requestGeneration = ++_fileRequestGeneration;
-    if (mounted) {
+    bool isCurrent() =>
+        mounted &&
+        requestGeneration == _fileRequestGeneration &&
+        _isSourceCurrent() &&
+        identical(widget.state, sourceState) &&
+        identical(widget.transport, sourceTransport) &&
+        widget.sessionId == sourceSessionId &&
+        _insightsTurnKey(widget.state, widget.sessionId, target) == requestKey;
+    if (mounted && _isSourceCurrent()) {
       setState(() {
         _filesLoading = true;
         _filesError = null;
@@ -455,19 +485,19 @@ class _InsightsSheetState extends State<InsightsSheet> {
     // Fire-once per turn (armed): mark before awaiting so a failed load
     // doesn't retrigger on every streaming state notification — the
     // manual refresh stays available for retries.
-    _loadedTurnKey = key;
+    _loadedTurnKey = requestKey;
     try {
-      final res = await widget.transport.fileChanges(
-        widget.sessionId,
+      final res = await sourceTransport.fileChanges(
+        sourceSessionId,
         target: {'rowId': target['rowId'], 'entityId': target['entityId']},
       );
-      if (!mounted || requestGeneration != _fileRequestGeneration) return;
+      if (!isCurrent()) return;
       setState(() => _fileChanges = res);
     } catch (e) {
-      if (!mounted || requestGeneration != _fileRequestGeneration) return;
+      if (!isCurrent()) return;
       setState(() => _filesError = _fmtRpcError(e));
     } finally {
-      if (mounted && requestGeneration == _fileRequestGeneration) {
+      if (isCurrent()) {
         setState(() => _filesLoading = false);
       }
     }
@@ -567,8 +597,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
     );
   }
 
-  Widget _chip(
-      BuildContext context, int index, IconData icon, String label, int? count) {
+  Widget _chip(BuildContext context, int index, IconData icon, String label,
+      int? count) {
     final selected = _tab == index;
     return Expanded(
       child: GestureDetector(
@@ -586,13 +616,17 @@ class _InsightsSheetState extends State<InsightsSheet> {
             children: [
               Icon(icon,
                   size: 14,
-                  color: selected ? EmberColors.of(context).primary : EmberColors.of(context).textSoft),
+                  color: selected
+                      ? EmberColors.of(context).primary
+                      : EmberColors.of(context).textSoft),
               const SizedBox(width: 4),
               Text(
                 count != null ? '$label $count' : label,
                 style: TextStyle(
                   fontSize: 11.5,
-                  color: selected ? EmberColors.of(context).primary : EmberColors.of(context).textSoft,
+                  color: selected
+                      ? EmberColors.of(context).primary
+                      : EmberColors.of(context).textSoft,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
@@ -603,7 +637,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
     );
   }
 
-  Widget _panelHeader(BuildContext context, String title, VoidCallback onRefresh,
+  Widget _panelHeader(
+      BuildContext context, String title, VoidCallback onRefresh,
       {bool loading = false}) {
     return Row(
       children: [
@@ -666,9 +701,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
     // 会话里有结构化执行计划时只显示计划:宿主侧计划与 TodoWrite 由
     // 同一代理流程驱动,内容一致——此前两段并列显示,用户看到两份
     // 一模一样的清单。无计划时退回 TodoWrite 待办。
-    final todoSteps = planItems != null
-        ? const <PlanStep>[]
-        : (steps ?? const <PlanStep>[]);
+    final todoSteps =
+        planItems != null ? const <PlanStep>[] : (steps ?? const <PlanStep>[]);
     // 会话目标(Goal):快照 goal 对象。文本字段以 goalSet 事件同名的
     // objective 为准(wire 实证),缺失时退 text/goal;status 映射状态徽。
     final goal = _derived.goal;
@@ -687,7 +721,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
       body = Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text('暂无待办',
-            style: TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
+            style: TextStyle(
+                fontSize: 11.5, color: EmberColors.of(context).textFaint)),
       );
     } else {
       body = ListView.builder(
@@ -703,45 +738,45 @@ class _InsightsSheetState extends State<InsightsSheet> {
           if (i < todoSteps.length) {
             final s = todoSteps[i];
             return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  s.completed
-                      ? Icons.check_circle
-                      : s.inProgress
-                          ? Icons.play_circle_outline
-                          : Icons.radio_button_unchecked,
-                  size: 14,
-                  color: s.completed
-                      ? EmberColors.of(context).ok
-                      : s.inProgress
-                          ? EmberColors.of(context).primary
-                          : EmberColors.of(context).textFaint,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    s.title,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: s.completed
-                          ? EmberColors.of(context).textFaint
-                          : EmberColors.of(context).textSolid,
-                      decoration: s.completed ? TextDecoration.lineThrough : null,
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    s.completed
+                        ? Icons.check_circle
+                        : s.inProgress
+                            ? Icons.play_circle_outline
+                            : Icons.radio_button_unchecked,
+                    size: 14,
+                    color: s.completed
+                        ? EmberColors.of(context).ok
+                        : s.inProgress
+                            ? EmberColors.of(context).primary
+                            : EmberColors.of(context).textFaint,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      s.title,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: s.completed
+                            ? EmberColors.of(context).textFaint
+                            : EmberColors.of(context).textSolid,
+                        decoration:
+                            s.completed ? TextDecoration.lineThrough : null,
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          );
+                ],
+              ),
+            );
           }
           // Plan section header before the first plan item.
           if (i == todoSteps.length) {
-            final done = planItems!
-                .where((e) => '${e['status']}' == 'completed')
-                .length;
+            final done =
+                planItems!.where((e) => '${e['status']}' == 'completed').length;
             return Padding(
               padding: const EdgeInsets.only(top: 6, bottom: 2),
               child: Row(
@@ -751,13 +786,13 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   const SizedBox(width: 5),
                   Text('计划进度 · $done / ${planItems.length}',
                       style: TextStyle(
-                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+                          fontSize: 10.5,
+                          color: EmberColors.of(context).textFaint)),
                 ],
               ),
             );
           }
-          final item =
-              planItems![i - todoSteps.length - 1];
+          final item = planItems![i - todoSteps.length - 1];
           final status = '${item['status']}';
           final completed = status == 'completed';
           final inProgress = status == 'inProgress';
@@ -788,8 +823,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                       color: completed
                           ? EmberColors.of(context).textFaint
                           : EmberColors.of(context).textSolid,
-                      decoration:
-                          completed ? TextDecoration.lineThrough : null,
+                      decoration: completed ? TextDecoration.lineThrough : null,
                     ),
                   ),
                 ),
@@ -802,10 +836,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelHeader(
-            context,
-            planItems != null ? '执行计划（Plan 工具）' : '待办（最新 TodoWrite）',
-            () {}),
+        _panelHeader(context,
+            planItems != null ? '执行计划（Plan 工具）' : '待办（最新 TodoWrite）', () {}),
         if (hasGoal)
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
@@ -883,8 +915,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   final fc = (h['fileChanges'] as Map).cast<String, dynamic>();
                   return '+${fc['additions'] ?? 0} −${fc['deletions'] ?? 0} · ${fc['files']} 文件';
                 }).join('；')}',
-                style:
-                    TextStyle(fontSize: 10.5, color: EmberColors.of(context).textFaint),
+                style: TextStyle(
+                    fontSize: 10.5, color: EmberColors.of(context).textFaint),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -893,8 +925,9 @@ class _InsightsSheetState extends State<InsightsSheet> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text('暂无文件变更数据',
-                  style:
-                      TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: EmberColors.of(context).textFaint)),
             )
           else if (entries == null)
             Flexible(child: _jsonFallback(_fileChanges))
@@ -902,8 +935,9 @@ class _InsightsSheetState extends State<InsightsSheet> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text('本回合无文件变更',
-                  style:
-                      TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: EmberColors.of(context).textFaint)),
             )
           else
             Flexible(
@@ -912,8 +946,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 shrinkWrap: true,
                 itemCount: entries.length,
-                itemBuilder: (context, i) =>
-                    _fileTile(context, entries[i]),
+                itemBuilder: (context, i) => _fileTile(context, entries[i]),
               ),
             ),
         ],
@@ -929,6 +962,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
   }
 
   void _showFileDetail(BuildContext context, Map<String, dynamic> e) {
+    if (!_isSourceCurrent()) return;
     final path = e['path'] ?? e['filePath'] ?? e['file'] ?? e['name'] ?? '文件';
     DiffData? diff = extractDiff(e);
     // The real conversationFileChangesV4 payload: items[].patches[] with
@@ -982,6 +1016,7 @@ class _InsightsSheetState extends State<InsightsSheet> {
         }
       }
     }
+    if (!_isSourceCurrent()) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1022,16 +1057,17 @@ class _InsightsSheetState extends State<InsightsSheet> {
             const SizedBox(width: 6),
             Expanded(
               child: Text('$path',
-                  style: const TextStyle(
-                      fontSize: 11, fontFamily: 'monospace'),
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
             ),
             if (adds != null && dels != null)
               Text('+${adds.toInt()} −${dels.toInt()}',
                   style: TextStyle(
-                      fontSize: 10.5, color: EmberColors.of(context).textFaint)),
-            Icon(Icons.chevron_right, size: 14, color: EmberColors.of(context).textFaint),
+                      fontSize: 10.5,
+                      color: EmberColors.of(context).textFaint)),
+            Icon(Icons.chevron_right,
+                size: 14, color: EmberColors.of(context).textFaint),
           ],
         ),
       ),
@@ -1055,19 +1091,24 @@ class _InsightsSheetState extends State<InsightsSheet> {
     String suffix = '';
     if (status == 'running') {
       leading = const SizedBox(
-          width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5));
+          width: 12,
+          height: 12,
+          child: CircularProgressIndicator(strokeWidth: 1.5));
     } else if (status == 'failed') {
-      leading = Icon(Icons.error_outline, size: 13, color: EmberColors.of(context).err);
+      leading = Icon(Icons.error_outline,
+          size: 13, color: EmberColors.of(context).err);
       suffix = ' · 失败';
     } else if (status == 'cancelled') {
-      leading = Icon(Icons.block, size: 13, color: EmberColors.of(context).warn);
+      leading =
+          Icon(Icons.block, size: 13, color: EmberColors.of(context).warn);
       suffix = ' · 已取消';
     } else {
       leading = Icon(Icons.hourglass_bottom,
           size: 13, color: EmberColors.of(context).textFaint);
       suffix = ' · 待取结果';
     }
-    final kindIcon = w['kind'] == 'bash' ? Icons.terminal : Icons.smart_toy_outlined;
+    final kindIcon =
+        w['kind'] == 'bash' ? Icons.terminal : Icons.smart_toy_outlined;
     final endedAt = w['endedAt'];
     final startedAt = w['startedAt'];
     final time = endedAt != null
@@ -1104,9 +1145,12 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final Widget leading;
     if (status == 'running') {
       leading = const SizedBox(
-          width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5));
+          width: 12,
+          height: 12,
+          child: CircularProgressIndicator(strokeWidth: 1.5));
     } else if (status == 'blocked') {
-      leading = Icon(Icons.lock_outline, size: 13, color: EmberColors.of(context).warn);
+      leading = Icon(Icons.lock_outline,
+          size: 13, color: EmberColors.of(context).warn);
     } else {
       leading = Icon(Icons.hourglass_bottom,
           size: 13, color: EmberColors.of(context).textFaint); // waiting
@@ -1125,7 +1169,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
               '${status == 'waiting' ? ' · 等待中' : status == 'blocked' ? ' · 被阻塞' : ''}'
               '${s['startedAt'] != null ? ' · ${_fmtMs(s['startedAt'] as num?)} 开始' : ''}'
               '${summary.trim().isNotEmpty ? '\n$summary' : ''}',
-              style: TextStyle(fontSize: 11, color: EmberColors.of(context).textSoft),
+              style: TextStyle(
+                  fontSize: 11, color: EmberColors.of(context).textSoft),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1143,25 +1188,26 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final status = '${r['status']}';
     final (leading, suffix) = switch (status) {
       'success' => (
-        Icon(Icons.check_circle_outline,
-            size: 13, color: EmberColors.of(context).ok),
-        ' · 已完成'
-      ),
+          Icon(Icons.check_circle_outline,
+              size: 13, color: EmberColors.of(context).ok),
+          ' · 已完成'
+        ),
       'failed' => (
-        Icon(Icons.error_outline, size: 13, color: EmberColors.of(context).err),
-        ' · 失败'
-      ),
+          Icon(Icons.error_outline,
+              size: 13, color: EmberColors.of(context).err),
+          ' · 失败'
+        ),
       'cancelled' => (
-        Icon(Icons.block, size: 13, color: EmberColors.of(context).warn),
-        ' · 已取消'
-      ),
+          Icon(Icons.block, size: 13, color: EmberColors.of(context).warn),
+          ' · 已取消'
+        ),
       _ => (
-        const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(strokeWidth: 1.5)),
-        ''
-      ),
+          const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5)),
+          ''
+        ),
     };
     final summary = '${r['summaryText'] ?? ''}'.trim();
     final endedAt = r['endedAt'];
@@ -1182,7 +1228,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
             child: Text(
               '${summary.isEmpty ? '子代理 · ${r['subagentType'] ?? ''}' : summary}'
               '$suffix$time',
-              style: TextStyle(fontSize: 11, color: EmberColors.of(context).textSoft),
+              style: TextStyle(
+                  fontSize: 11, color: EmberColors.of(context).textSoft),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1205,7 +1252,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
     final endedRows = _derived.endedSubagents;
     final fallbackRunningRows = runningSubs == null
         ? widget.state.rows
-            .where((r) => r['kind'] == 'subagent' && '${r['status']}' == 'running')
+            .where(
+                (r) => r['kind'] == 'subagent' && '${r['status']}' == 'running')
             .toList()
         : const <Map<String, dynamic>>[];
 
@@ -1221,8 +1269,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text('暂无后台任务',
-                style:
-                    TextStyle(fontSize: 11.5, color: EmberColors.of(context).textFaint)),
+                style: TextStyle(
+                    fontSize: 11.5, color: EmberColors.of(context).textFaint)),
           ),
         ],
       );
@@ -1244,7 +1292,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   padding: const EdgeInsets.only(top: 4, bottom: 2),
                   child: Text('运行中的子代理',
                       style: TextStyle(
-                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+                          fontSize: 10.5,
+                          color: EmberColors.of(context).textFaint)),
                 ),
                 if (runningSubs != null)
                   for (final s in runningSubs) _subagentTile(context, s),
@@ -1256,7 +1305,8 @@ class _InsightsSheetState extends State<InsightsSheet> {
                   padding: const EdgeInsets.only(top: 4, bottom: 2),
                   child: Text('已结束的子代理',
                       style: TextStyle(
-                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+                          fontSize: 10.5,
+                          color: EmberColors.of(context).textFaint)),
                 ),
                 for (final r in endedRows) _subagentRowTile(context, r),
                 // Rows outside the loaded window aren't available — the
@@ -1266,14 +1316,16 @@ class _InsightsSheetState extends State<InsightsSheet> {
                     padding: const EdgeInsets.only(top: 2),
                     child: Text('以及更早的 ${endedTotal - endedRows.length} 个子代理',
                         style: TextStyle(
-                            fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+                            fontSize: 10.5,
+                            color: EmberColors.of(context).textFaint)),
                   ),
               ] else if (endedTotal > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text('已结束 $endedTotal 个子代理',
                       style: TextStyle(
-                          fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+                          fontSize: 10.5,
+                          color: EmberColors.of(context).textFaint)),
                 ),
             ],
           ),
@@ -1301,8 +1353,8 @@ class _GoalBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: EmberColors.of(context).ok.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: EmberColors.of(context).ok.withValues(alpha: 0.25)),
+        border: Border.all(
+            color: EmberColors.of(context).ok.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
@@ -1312,16 +1364,16 @@ class _GoalBanner extends StatelessWidget {
           Expanded(
             child: Text(
               objective,
-              style:
-                  TextStyle(fontSize: 12, color: EmberColors.of(context).textSoft),
+              style: TextStyle(
+                  fontSize: 12, color: EmberColors.of(context).textSoft),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (status.isNotEmpty)
             Text(status,
-                style: TextStyle(
-                    fontSize: 11, color: EmberColors.of(context).ok)),
+                style:
+                    TextStyle(fontSize: 11, color: EmberColors.of(context).ok)),
         ],
       ),
     );
@@ -1358,8 +1410,8 @@ class _BackgroundWorksBar extends StatelessWidget {
             child: Text(
               '后台任务 ${works.length} 个运行中: '
               '${works.map((w) => w['title'] ?? w['kind']).join('、')}',
-              style:
-                  TextStyle(fontSize: 11.5, color: EmberColors.of(context).textSoft),
+              style: TextStyle(
+                  fontSize: 11.5, color: EmberColors.of(context).textSoft),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1370,25 +1422,201 @@ class _BackgroundWorksBar extends StatelessWidget {
   }
 }
 
-class _QueueBar extends StatelessWidget {
+class _QueueBar extends StatefulWidget {
   final ConversationState state;
   final ConversationTransport transport;
 
   const _QueueBar({required this.state, required this.transport});
 
   @override
+  State<_QueueBar> createState() => _QueueBarState();
+}
+
+class _QueueBarState extends State<_QueueBar> {
+  int _sourceGeneration = 0;
+  ConversationState? _boundState;
+  ConversationTransport? _boundTransport;
+  String? _boundSessionId;
+
+  String _sessionId(ConversationState state) =>
+      state.snapshot?['sessionId'] as String? ?? '';
+
+  void _syncSourceTarget() {
+    final state = widget.state;
+    final transport = widget.transport;
+    final sessionId = _sessionId(state);
+    if (_boundState == null) {
+      _boundState = state;
+      _boundTransport = transport;
+      _boundSessionId = sessionId;
+      return;
+    }
+    if (!identical(_boundState, state) ||
+        !identical(_boundTransport, transport) ||
+        _boundSessionId != sessionId) {
+      _boundState = state;
+      _boundTransport = transport;
+      _boundSessionId = sessionId;
+      _sourceGeneration++;
+    }
+  }
+
+  bool _isCurrent(
+    int generation,
+    ConversationState state,
+    ConversationTransport transport,
+    String sessionId,
+  ) =>
+      mounted &&
+      generation == _sourceGeneration &&
+      identical(widget.state, state) &&
+      identical(widget.transport, transport) &&
+      _sessionId(widget.state) == sessionId;
+
+  @override
+  void didUpdateWidget(_QueueBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.state, widget.state) ||
+        !identical(oldWidget.transport, widget.transport) ||
+        _sessionId(oldWidget.state) != _sessionId(widget.state)) {
+      _sourceGeneration++;
+    }
+  }
+
+  Future<void> _setAutoDrain(
+    int generation,
+    ConversationState state,
+    ConversationTransport transport,
+    String sessionId,
+    bool value,
+  ) async {
+    if (!_isCurrent(generation, state, transport, sessionId)) return;
+    try {
+      await transport.setAutoDrain(sessionId, value);
+    } catch (_) {}
+  }
+
+  Future<void> _sendQueuedNow(
+    int generation,
+    ConversationState state,
+    ConversationTransport transport,
+    String sessionId,
+    String id,
+  ) async {
+    if (!_isCurrent(generation, state, transport, sessionId)) return;
+    state.optimisticRemoveQueueItem(id);
+    try {
+      await transport.sendQueuedNow(sessionId, id);
+    } catch (_) {}
+  }
+
+  Future<void> _deleteQueuedItem(
+    BuildContext context,
+    int generation,
+    ConversationState state,
+    ConversationTransport transport,
+    String sessionId,
+    String id,
+    String text,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除排队消息？'),
+        content:
+            Text('将删除「$text」', maxLines: 3, overflow: TextOverflow.ellipsis),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: EmberColors.of(context).err),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (!_isCurrent(generation, state, transport, sessionId) ||
+        confirmed != true) {
+      return;
+    }
+    state.optimisticRemoveQueueItem(id);
+    try {
+      await transport.deleteQueueItem(sessionId, id);
+    } catch (_) {}
+  }
+
+  Future<void> _edit(
+    BuildContext context,
+    int generation,
+    ConversationState state,
+    ConversationTransport transport,
+    String sessionId,
+    Map<String, dynamic> item,
+  ) async {
+    final controller = TextEditingController(text: '${item['text'] ?? ''}');
+    final text = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('编辑排队消息'),
+        content: TextField(
+          controller: controller,
+          maxLines: 4,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (text == null ||
+        text.isEmpty ||
+        !_isCurrent(generation, state, transport, sessionId)) {
+      return;
+    }
+    // Optimistic text update; server queue patch confirms.
+    final q = state.queue;
+    if (q != null && q['items'] is List) {
+      final items = [
+        for (final i in q['items'] as List)
+          if (i is Map && '${i['queueItemId']}' == '${item['queueItemId']}')
+            {...i, 'text': text}
+          else
+            i,
+      ];
+      state.optimisticPatch({
+        'queue': {...q, 'items': items},
+      });
+    }
+    try {
+      await transport.editQueueItem(sessionId, '${item['queueItemId']}', text);
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
+    _syncSourceTarget();
+    final state = widget.state;
+    final transport = widget.transport;
     final items = state.queueItems;
     if (items.isEmpty) return const SizedBox.shrink();
-    final sessionId = state.snapshot?['sessionId'] as String? ?? '';
+    final sessionId = _sessionId(state);
+    final generation = _sourceGeneration;
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 4, 14, 0),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: EmberColors.of(context).primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: EmberColors.of(context).primary.withValues(alpha: 0.25)),
+        border: Border.all(
+            color: EmberColors.of(context).primary.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1400,16 +1628,19 @@ class _QueueBar extends StatelessWidget {
               const SizedBox(width: 6),
               Text('排队消息 ${items.length}',
                   style: TextStyle(
-                      fontSize: 12,
-                      color: EmberColors.of(context).primary)),
+                      fontSize: 12, color: EmberColors.of(context).primary)),
               const Spacer(),
               InkWell(
                 onTap: () {
+                  if (!_isCurrent(generation, state, transport, sessionId)) {
+                    return;
+                  }
                   final next = !state.autoDrain;
                   state.optimisticPatch({
                     'queue': {...?state.queue, 'autoDrain': next},
                   });
-                  transport.setAutoDrain(sessionId, next);
+                  unawaited(_setAutoDrain(
+                      generation, state, transport, sessionId, next));
                 },
                 child: Text(
                   state.autoDrain ? '自动发送: 开' : '自动发送: 关',
@@ -1429,7 +1660,8 @@ class _QueueBar extends StatelessWidget {
                     child: Text(
                       '${item['text'] ?? ''}',
                       style: TextStyle(
-                          fontSize: 12, color: EmberColors.of(context).textSoft),
+                          fontSize: 12,
+                          color: EmberColors.of(context).textSoft),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1437,49 +1669,26 @@ class _QueueBar extends StatelessWidget {
                   _QueueAction(
                     icon: Icons.play_arrow,
                     tooltip: '立即发送',
-                    onTap: () {
-                      final id = '${item['queueItemId']}';
-                      state.optimisticRemoveQueueItem(id);
-                      transport.sendQueuedNow(sessionId, id);
-                    },
+                    onTap: () => unawaited(_sendQueuedNow(generation, state,
+                        transport, sessionId, '${item['queueItemId']}')),
                   ),
                   _QueueAction(
                     icon: Icons.edit_outlined,
                     tooltip: '编辑',
-                    onTap: () => _edit(context, sessionId, item),
+                    onTap: () => _edit(
+                        context, generation, state, transport, sessionId, item),
                   ),
                   _QueueAction(
                     icon: Icons.close,
                     tooltip: '删除',
-                    onTap: () async {
-                      final id = '${item['queueItemId']}';
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('删除排队消息？'),
-                          content: Text(
-                              '将删除「${item['text'] ?? ''}」',
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis),
-                          actions: [
-                            TextButton(
-                                onPressed: () =>
-                                    Navigator.pop(context, false),
-                                child: const Text('取消')),
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                  backgroundColor: EmberColors.of(context).err),
-                              onPressed: () =>
-                                  Navigator.pop(context, true),
-                              child: const Text('删除'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirmed != true) return;
-                      state.optimisticRemoveQueueItem(id);
-                      transport.deleteQueueItem(sessionId, id);
-                    },
+                    onTap: () => unawaited(_deleteQueuedItem(
+                        context,
+                        generation,
+                        state,
+                        transport,
+                        sessionId,
+                        '${item['queueItemId']}',
+                        '${item['text'] ?? ''}')),
                   ),
                 ],
               ),
@@ -1487,50 +1696,6 @@ class _QueueBar extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  Future<void> _edit(BuildContext context, String sessionId,
-      Map<String, dynamic> item) async {
-    final controller =
-        TextEditingController(text: '${item['text'] ?? ''}');
-    final text = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('编辑排队消息'),
-        content: TextField(
-          controller: controller,
-          maxLines: 4,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, controller.text.trim()),
-              child: const Text('保存')),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (text == null || text.isEmpty) return;
-    // Optimistic text update; server queue patch confirms.
-    final q = state.queue;
-    if (q != null && q['items'] is List) {
-      final items = [
-        for (final i in q['items'] as List)
-          if (i is Map && '${i['queueItemId']}' == '${item['queueItemId']}')
-            {...i, 'text': text}
-          else
-            i,
-      ];
-      state.optimisticPatch({
-        'queue': {...q, 'items': items},
-      });
-    }
-    await transport.editQueueItem(
-        sessionId, '${item['queueItemId']}', text);
   }
 }
 
@@ -1607,31 +1772,107 @@ class _PendingFilesBar extends StatelessWidget {
 
 // ---------------------------------------------------------------- interactions
 
-class _PendingInteractions extends StatelessWidget {
+@visibleForTesting
+Widget pendingInteractionsForTest({
+  required ConversationState state,
+  required ConversationTransport transport,
+}) =>
+    _PendingInteractions(state: state, transport: transport);
+
+class _PendingInteractions extends StatefulWidget {
   final ConversationState state;
   final ConversationTransport transport;
 
   const _PendingInteractions({required this.state, required this.transport});
 
   @override
+  State<_PendingInteractions> createState() => _PendingInteractionsState();
+}
+
+class _PendingInteractionsState extends State<_PendingInteractions> {
+  int _sourceGeneration = 0;
+  ConversationState? _boundState;
+  ConversationTransport? _boundTransport;
+  String? _boundSessionId;
+
+  String _sessionId(ConversationState state) =>
+      state.snapshot?['sessionId'] as String? ?? '';
+
+  void _syncSourceTarget() {
+    final state = widget.state;
+    final transport = widget.transport;
+    final sessionId = _sessionId(state);
+    if (_boundState == null) {
+      _boundState = state;
+      _boundTransport = transport;
+      _boundSessionId = sessionId;
+      return;
+    }
+    if (!identical(_boundState, state) ||
+        !identical(_boundTransport, transport) ||
+        _boundSessionId != sessionId) {
+      _boundState = state;
+      _boundTransport = transport;
+      _boundSessionId = sessionId;
+      _sourceGeneration++;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _syncSourceTarget();
+  }
+
+  bool _isCurrent(
+    int generation,
+    ConversationState state,
+    ConversationTransport transport,
+    String sessionId,
+  ) =>
+      mounted &&
+      generation == _sourceGeneration &&
+      identical(widget.state, state) &&
+      identical(widget.transport, transport) &&
+      _sessionId(widget.state) == sessionId;
+
+  @override
+  void didUpdateWidget(_PendingInteractions oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncSourceTarget();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    _syncSourceTarget();
+    final state = widget.state;
+    final transport = widget.transport;
     final interactions = state.pendingInteractions;
     if (interactions.isEmpty) return const SizedBox.shrink();
-    final sessionId = state.snapshot?['sessionId'] as String? ?? '';
+    final sessionId = _sessionId(state);
+    final generation = _sourceGeneration;
     return Column(
       children: [
         for (final interaction in interactions)
           _InteractionCard(
+            key: ValueKey('${interaction['interactionId']}'),
             interaction: interaction,
-            onResolve: ({optionId, freeText, action, content}) =>
-                transport.resolveInteraction(
-              sessionId,
-              interaction['interactionId'] as String? ?? '',
-              optionId: optionId,
-              freeText: freeText,
-              action: action,
-              content: content,
-            ),
+            state: state,
+            transport: transport,
+            sessionId: sessionId,
+            onResolve: ({optionId, freeText, action, content}) {
+              if (!_isCurrent(generation, state, transport, sessionId)) {
+                return Future<void>.value();
+              }
+              return transport.resolveInteraction(
+                sessionId,
+                interaction['interactionId'] as String? ?? '',
+                optionId: optionId,
+                freeText: freeText,
+                action: action,
+                content: content,
+              );
+            },
           ),
       ],
     );
@@ -1640,6 +1881,9 @@ class _PendingInteractions extends StatelessWidget {
 
 class _InteractionCard extends StatefulWidget {
   final Map<String, dynamic> interaction;
+  final ConversationState state;
+  final ConversationTransport transport;
+  final String sessionId;
   final Future<dynamic> Function({
     String? optionId,
     String? freeText,
@@ -1647,7 +1891,14 @@ class _InteractionCard extends StatefulWidget {
     Map<String, dynamic>? content,
   }) onResolve;
 
-  const _InteractionCard({required this.interaction, required this.onResolve});
+  const _InteractionCard({
+    super.key,
+    required this.interaction,
+    required this.state,
+    required this.transport,
+    required this.sessionId,
+    required this.onResolve,
+  });
 
   @override
   State<_InteractionCard> createState() => _InteractionCardState();
@@ -1656,9 +1907,24 @@ class _InteractionCard extends StatefulWidget {
 class _InteractionCardState extends State<_InteractionCard> {
   final _freeTextController = TextEditingController();
   bool _busy = false;
+  int _requestGeneration = 0;
+
+  @override
+  void didUpdateWidget(_InteractionCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.interaction['interactionId'] !=
+            widget.interaction['interactionId'] ||
+        !identical(oldWidget.state, widget.state) ||
+        !identical(oldWidget.transport, widget.transport) ||
+        oldWidget.sessionId != widget.sessionId) {
+      _requestGeneration++;
+      _busy = false;
+    }
+  }
 
   @override
   void dispose() {
+    _requestGeneration++;
     _freeTextController.dispose();
     super.dispose();
   }
@@ -1670,6 +1936,7 @@ class _InteractionCardState extends State<_InteractionCard> {
     Map<String, dynamic>? content,
   }) async {
     if (_busy) return;
+    final requestGeneration = ++_requestGeneration;
     setState(() => _busy = true);
     try {
       await widget.onResolve(
@@ -1679,7 +1946,9 @@ class _InteractionCardState extends State<_InteractionCard> {
           content: content);
     } catch (_) {
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && requestGeneration == _requestGeneration) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -1692,9 +1961,8 @@ class _InteractionCardState extends State<_InteractionCard> {
     final questions = payload['questions'];
     final freeText = payload['freeText'] == true;
 
-    final title = kind == 'permission'
-        ? '权限请求 · ${payload['toolName'] ?? ''}'
-        : '等待你的输入';
+    final title =
+        kind == 'permission' ? '权限请求 · ${payload['toolName'] ?? ''}' : '等待你的输入';
 
     final ember = EmberColors.of(context);
     return Container(
@@ -1703,16 +1971,14 @@ class _InteractionCardState extends State<_InteractionCard> {
       decoration: BoxDecoration(
         color: ember.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: ember.primary.withValues(alpha: 0.55)),
+        border: Border.all(color: ember.primary.withValues(alpha: 0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.privacy_tip_outlined,
-                  size: 14, color: ember.primary),
+              Icon(Icons.privacy_tip_outlined, size: 14, color: ember.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1760,10 +2026,8 @@ class _InteractionCardState extends State<_InteractionCard> {
                           // everything else as decline: non-permission
                           // option taps must be sent as an accept.
                           : () => kind == 'permission'
-                              ? _resolve(
-                                  optionId: '${option['optionId']}')
-                              : _resolve(
-                                  action: 'accept', content: {}),
+                              ? _resolve(optionId: '${option['optionId']}')
+                              : _resolve(action: 'accept', content: {}),
                       child: Text(
                         _optionLabel(option),
                         style: const TextStyle(fontSize: 12),
@@ -1798,8 +2062,8 @@ class _InteractionCardState extends State<_InteractionCard> {
                   icon: const Icon(Icons.send, size: 18),
                   onPressed: _busy
                       ? null
-                      : () => _resolve(
-                          freeText: _freeTextController.text.trim()),
+                      : () =>
+                          _resolve(freeText: _freeTextController.text.trim()),
                 ),
               ],
             ),
@@ -1855,8 +2119,8 @@ class _QuestionsViewState extends State<_QuestionsView> {
             index: i,
             question: widget.questions[i],
             busy: widget.busy,
-            selected: _answers['${widget.questions[i]['question']}']
-                ?? const <String>[],
+            selected: _answers['${widget.questions[i]['question']}'] ??
+                const <String>[],
             onChanged: (selected) => setState(() {
               final key = '${widget.questions[i]['question']}';
               if (selected.isEmpty) {

@@ -27,10 +27,12 @@ part 'chat/composer.dart';
 (String, String) providerModelOf(WorkspacePrep? prep, String value) {
   final model =
       value.contains('/') ? value.substring(value.lastIndexOf('/') + 1) : value;
-  for (final v in prep?.option('model')?.options ?? const <ConfigOptionValue>[]) {
+  for (final v
+      in prep?.option('model')?.options ?? const <ConfigOptionValue>[]) {
     if (v.value == value) {
-      final fallbackProvider =
-          value.contains('/') ? value.substring(0, value.lastIndexOf('/')) : value;
+      final fallbackProvider = value.contains('/')
+          ? value.substring(0, value.lastIndexOf('/'))
+          : value;
       return (v.modelProviderId ?? fallbackProvider, model);
     }
   }
@@ -38,7 +40,6 @@ part 'chat/composer.dart';
   if (idx <= 0) return (value, value);
   return (value.substring(0, idx), model);
 }
-
 
 class ChatPage extends StatefulWidget {
   final BridgeSession session;
@@ -61,8 +62,7 @@ class ChatPage extends StatefulWidget {
   /// is echoed back as [onSessionInfo]'s third argument so a late push from
   /// a superseded instance can be recognized and ignored (A10). Never
   /// fires in Scaffold mode.
-  final void Function(String sessionId, String title, int epoch)?
-      onSessionInfo;
+  final void Function(String sessionId, String title, int epoch)? onSessionInfo;
 
   /// Host shell 的会话重建代数(原样经 [onSessionInfo] 带回)。宿主以
   /// ValueKey(epoch) 重建本页,实例存活期间该值不变。
@@ -107,6 +107,10 @@ class _PendingFile {
   _PendingFile(this.fileName, this.mime, this.bytes);
 }
 
+class _StaleChatOperation implements Exception {
+  const _StaleChatOperation();
+}
+
 /// Retires echoes whose server-confirmed userInput rows have arrived.
 /// Counts per text (sending the same text twice must retire exactly two
 /// echoes, not both at the first confirmation), oldest echo first, and
@@ -143,13 +147,107 @@ num? lastUserInputRowId(List<Map<String, dynamic>> rows) {
 }
 
 class _ChatPageState extends State<ChatPage> {
-  late final ConversationTransport _transport;
+  late ConversationTransport _transport;
   ConversationSubscription? _subscription;
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
   String? _sessionId;
   String? _error;
   bool _sending = false;
+
+  /// Monotonic source generation. A source is the widget bridge/scope/session
+  /// tuple; every source switch invalidates callbacks from the previous one.
+  int _sourceGeneration = 0;
+  int _subscribeGeneration = 0;
+  Future<void>? _subscriptionOperation;
+  int _historyGeneration = 0;
+  int _filePickGeneration = 0;
+  int _sendGeneration = 0;
+  int _runGeneration = 0;
+  int _sideChatGeneration = 0;
+  int _skillsGeneration = 0;
+  int _titleGeneration = 0;
+  int _draftPrefsGeneration = 0;
+  int _fileChangesGeneration = 0;
+  int _scrollGeneration = 0;
+  Future<void> _draftPrefsSaveChain = Future.value();
+
+  bool _isCurrentSource(
+    int generation,
+    ConversationTransport transport, {
+    String? sessionId,
+    ConversationSubscription? subscription,
+  }) {
+    return mounted &&
+        generation == _sourceGeneration &&
+        identical(transport, _transport) &&
+        (sessionId == null || sessionId == _sessionId) &&
+        (subscription == null || identical(subscription, _subscription));
+  }
+
+  void _retireCurrentSubscription() {
+    final subscription = _subscription;
+    if (subscription == null) return;
+    _detachSubscription(subscription);
+    _subscriptionOperation = (_subscriptionOperation ?? Future<void>.value())
+        .then<void>((_) async {
+      await subscription.dispose();
+    });
+  }
+
+  void _detachSubscription(ConversationSubscription subscription) {
+    subscription.state.rowsListenable.removeListener(_scrollToBottom);
+    subscription.state.rowsListenable.removeListener(_dedupeEchoes);
+    subscription.state.controlListenable.removeListener(_dedupeEchoes);
+    if (identical(_subscription, subscription)) {
+      _subscription = null;
+      _loadingOlder = false;
+    }
+  }
+
+  bool _sameSource(ChatPage oldWidget) {
+    return identical(oldWidget.session, widget.session) &&
+        oldWidget.workspaceKey == widget.workspaceKey &&
+        mapEquals(oldWidget.scope, widget.scope) &&
+        oldWidget.sessionId == widget.sessionId;
+  }
+
+  void _invalidateOperations() {
+    _sourceGeneration++;
+    _subscribeGeneration++;
+    _historyGeneration++;
+    _filePickGeneration++;
+    _sendGeneration++;
+    _runGeneration++;
+    _sideChatGeneration++;
+    _skillsGeneration++;
+    _titleGeneration++;
+    _draftPrefsGeneration++;
+    _fileChangesGeneration++;
+    _scrollGeneration++;
+    _scrollAnimationInFlight = false;
+  }
+
+  bool _isCurrentOperation(
+    int sourceGeneration,
+    int operationGeneration,
+    int currentOperationGeneration,
+    ConversationTransport transport, {
+    String? sessionId,
+  }) {
+    return _isCurrentSource(sourceGeneration, transport,
+            sessionId: sessionId) &&
+        operationGeneration == currentOperationGeneration;
+  }
+
+  bool _isCurrentForSource(
+    int sourceGeneration,
+    ConversationTransport transport, {
+    String? sessionId,
+  }) =>
+      _isCurrentSource(sourceGeneration, transport, sessionId: sessionId);
+
+  int _beginFileChangesOperation() => ++_fileChangesGeneration;
 
   /// Optimistic echoes for just-sent messages: shown the moment the user
   /// hits send, retired once the server's userInput row arrives (see
@@ -180,6 +278,7 @@ class _ChatPageState extends State<ChatPage> {
         ..addAll(kept));
     }
   }
+
   bool _loadingOlder = false;
   bool _showSlash = false;
   String? _progress;
@@ -234,6 +333,42 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_sameSource(oldWidget)) return;
+
+    _retireCurrentSubscription();
+    final oldTitleSub = _titleSub;
+    _invalidateOperations();
+    _prepGeneration++;
+    _titleSub = null;
+    if (oldTitleSub != null) {
+      oldTitleSub.state.removeListener(_pushSessionInfo);
+      oldTitleSub.dispose();
+    }
+    _sessionId = widget.sessionId;
+    _transport = widget.session.conversation(widget.scope);
+    _pushedSessionId = null;
+    _pushedTitle = null;
+    _error = null;
+    _loadingOlder = false;
+    _prep = null;
+    _prepFetchedAt = null;
+    _skills = [];
+    _skillsLoading = false;
+    _sending = false;
+    _uploadProgress = null;
+    _progress = null;
+    _turnPending = false;
+    _echoes.clear();
+    _pendingFiles.clear();
+    clearGroupRowsCache();
+    if (_sessionId != null) _subscribe();
+    _loadPrep();
+    if (widget.onSessionInfo != null) _watchSessionTitle();
+  }
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     // Reverse list: offset 0 is the newest (bottom) message.
@@ -250,12 +385,14 @@ class _ChatPageState extends State<ChatPage> {
   /// (模型增删后旧缓存照旧,面板"刷新"实际没上线)。
   Future<void> _refreshPrep() async {
     final generation = ++_prepGeneration;
-    final transportGeneration = _transport.prepGeneration;
+    final sourceGeneration = _sourceGeneration;
+    final transport = _transport;
+    final transportGeneration = transport.prepGeneration;
     try {
-      final prep = await _transport.prepareWorkspace(refresh: true);
-      if (mounted &&
-          generation == _prepGeneration &&
-          transportGeneration == _transport.prepGeneration) {
+      final prep = await transport.prepareWorkspace(refresh: true);
+      if (_isCurrentOperation(
+          sourceGeneration, generation, _prepGeneration, transport)) {
+        if (transportGeneration != transport.prepGeneration) return;
         setState(() {
           _prep = prep;
           _prepFetchedAt = DateTime.now();
@@ -267,32 +404,52 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 面板打开时的取数:新鲜(≤5s)直接用,否则强制拉一次;失败退缓存。
   Future<WorkspacePrep?> _fetchPrepForSheet() async {
+    final sourceGeneration = _sourceGeneration;
+    final transport = _transport;
     final fetchedAt = _prepFetchedAt;
     if (fetchedAt != null &&
         DateTime.now().difference(fetchedAt) < const Duration(seconds: 5)) {
       return _prep;
     }
     await _refreshPrep();
+    if (!_isCurrentForSource(sourceGeneration, transport)) return null;
     return _prep;
   }
 
   Future<void> _loadPrep() async {
+    final sourceGeneration = _sourceGeneration;
+    final transport = _transport;
+    final skillsGeneration = ++_skillsGeneration;
     await _refreshPrep();
-    if (mounted) setState(() => _skillsLoading = true);
+    if (!_isCurrentOperation(
+        sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
+      return;
+    }
+    setState(() => _skillsLoading = true);
     try {
-      final skills = await _transport.skills();
-      if (mounted) setState(() => _skills = skills);
+      final skills = await transport.skills();
+      if (_isCurrentOperation(
+          sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
+        setState(() => _skills = skills);
+      }
     } catch (_) {
-      if (mounted) setState(() => _skills = const []);
+      if (_isCurrentOperation(
+          sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
+        setState(() => _skills = const []);
+      }
     } finally {
-      if (mounted) setState(() => _skillsLoading = false);
+      if (_isCurrentOperation(
+          sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
+        setState(() => _skillsLoading = false);
+      }
     }
   }
 
   @override
   void dispose() {
+    _invalidateOperations();
     _prepGeneration++;
-    _subscription?.dispose();
+    _retireCurrentSubscription();
     final titleSub = _titleSub;
     _titleSub = null;
     if (titleSub != null) {
@@ -305,9 +462,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _watchSessionTitle() async {
+    final sourceGeneration = _sourceGeneration;
+    final titleGeneration = ++_titleGeneration;
+    final transport = _transport;
     try {
-      final sub = await _transport.subscribeSessionsIndex();
-      if (!mounted) {
+      final sub = await transport.subscribeSessionsIndex();
+      if (!_isCurrentOperation(
+          sourceGeneration, titleGeneration, _titleGeneration, transport)) {
         await sub.dispose();
         return;
       }
@@ -346,57 +507,72 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _subscribe() async {
     final sessionId = _sessionId;
     if (sessionId == null) return;
-    try {
-      final sw = Stopwatch()..start();
-      final sub = await _transport
-          .subscribe(sessionId)
-          .timeout(const Duration(seconds: 60));
-      final diag = diagLogEnabled.value;
-      if (diag) {
-        debugPrint('[chat] subscribe ack in ${sw.elapsedMilliseconds}ms '
-            'rows=${sub.state.rows.length} '
-            'thought=${sub.state.currentThought} cfg=${sub.state.config}');
-      }
-      var deltaCount = 0;
-      sub.state.addListener(() {
-        deltaCount++;
-        if (diag && deltaCount <= 25) {
-          debugPrint('[chat] delta#$deltaCount +${sw.elapsedMilliseconds}ms '
-              'rows=${sub.state.rows.length} '
-              'running=${sub.state.isRunning} phase=${sub.state.phase}');
+    final sourceGeneration = _sourceGeneration;
+    final subscribeGeneration = ++_subscribeGeneration;
+    final transport = _transport;
+    _retireCurrentSubscription();
+
+    Future<void> start() async {
+      ConversationSubscription? sub;
+      try {
+        if (!_isCurrentOperation(sourceGeneration, subscribeGeneration,
+            _subscribeGeneration, transport, sessionId: sessionId)) {
+          return;
         }
-      });
-      if (!mounted) {
-        await sub.dispose();
-        return;
+        sub = await transport
+            .subscribe(sessionId)
+            .timeout(const Duration(seconds: 60));
+        if (!_isCurrentOperation(sourceGeneration, subscribeGeneration,
+            _subscribeGeneration, transport, sessionId: sessionId)) {
+          _detachSubscription(sub);
+          await sub.dispose();
+          return;
+        }
+        final previous = _subscription;
+        if (previous != null) {
+          _detachSubscription(previous);
+          await previous.dispose();
+          if (!_isCurrentOperation(sourceGeneration, subscribeGeneration,
+              _subscribeGeneration, transport, sessionId: sessionId)) {
+            await sub.dispose();
+            return;
+          }
+        }
+        setState(() {
+          _subscription = sub;
+          _error = null;
+        });
+        sub.state.rowsListenable.addListener(_scrollToBottom);
+        sub.state.rowsListenable.addListener(_dedupeEchoes);
+        sub.state.controlListenable.addListener(_dedupeEchoes);
+        if (sub.state.canLoadOlder) unawaited(_loadOlder());
+      } catch (e) {
+        if (_isCurrentOperation(sourceGeneration, subscribeGeneration,
+            _subscribeGeneration, transport, sessionId: sessionId)) {
+          setState(() => _error = '$e');
+        }
+        if (sub != null) {
+          _detachSubscription(sub);
+          await sub.dispose();
+        }
       }
-      setState(() {
-        _subscription = sub;
-        _error = null;
-      });
-      // Reverse list: opening lands on the newest message by construction
-      // (offset 0 = bottom); the listener below only follows NEW deltas
-      // while the user stays pinned near the bottom.
-      sub.state.rowsListenable.addListener(_scrollToBottom);
-      sub.state.rowsListenable.addListener(_dedupeEchoes);
-      sub.state.controlListenable.addListener(_dedupeEchoes);
-      // The server snapshot is a tail window (can be as few as 3 rows).
-      // The official client shows the full history immediately, so
-      // auto-load the missing older rows once on open.
-      if (sub.state.canLoadOlder) {
-        await _loadOlder();
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
     }
+
+    final previousOperation = _subscriptionOperation?.catchError((_) {});
+    final operation = previousOperation == null
+        ? start()
+        : previousOperation.then<void>((_) => start());
+    _subscriptionOperation = operation.catchError((_) {});
+    await operation;
   }
 
   void _scrollToBottom() {
     if (_scrollCallbackScheduled) return;
+    final scrollGeneration = _scrollGeneration;
     _scrollCallbackScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollCallbackScheduled = false;
-      if (!mounted) return;
+      if (!mounted || scrollGeneration != _scrollGeneration) return;
       final prependTail = _prependScrollPending ? _prependTailRow : null;
       _prependScrollPending = false;
       _prependTailRow = null;
@@ -417,14 +593,18 @@ class _ChatPageState extends State<ChatPage> {
       _scrollAnimationInFlight = true;
       _scrollController
           .animateTo(
-            0,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-          )
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      )
           .then<void>((_) {
-        _scrollAnimationInFlight = false;
+        if (mounted && scrollGeneration == _scrollGeneration) {
+          _scrollAnimationInFlight = false;
+        }
       }, onError: (_, __) {
-        _scrollAnimationInFlight = false;
+        if (mounted && scrollGeneration == _scrollGeneration) {
+          _scrollAnimationInFlight = false;
+        }
       });
     });
   }
@@ -437,8 +617,18 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _run(String errorPrefix, Future<dynamic> Function() run) async {
+    final sourceGeneration = _sourceGeneration;
+    final operationGeneration = ++_runGeneration;
+    final transport = _transport;
+    final sessionId = _sessionId;
+    if (!_isCurrentOperation(sourceGeneration, operationGeneration,
+        _runGeneration, transport, sessionId: sessionId)) {
+      return;
+    }
     try {
       final res = await run();
+      if (!_isCurrentOperation(sourceGeneration, operationGeneration,
+          _runGeneration, transport, sessionId: sessionId)) return;
       if (res is Map &&
           res['status'] != null &&
           res['status'] != 'accepted' &&
@@ -446,7 +636,10 @@ class _ChatPageState extends State<ChatPage> {
         _toast('$errorPrefix: ${res['reasonCode'] ?? res['status']}');
       }
     } catch (e) {
-      _toast('$errorPrefix: $e');
+      if (_isCurrentOperation(sourceGeneration, operationGeneration,
+          _runGeneration, transport, sessionId: sessionId)) {
+        _toast('$errorPrefix: $e');
+      }
     }
   }
 
@@ -455,9 +648,14 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _openSideChat() async {
     final sessionId = _sessionId;
     if (sessionId == null) return;
+    final sourceGeneration = _sourceGeneration;
+    final operationGeneration = ++_sideChatGeneration;
+    final transport = _transport;
     try {
-      final sideId = await _transport.createSelectionSideSession(sessionId);
-      if (!mounted) return;
+      final sideId = await transport.createSelectionSideSession(sessionId);
+      if (!_isCurrentOperation(
+          sourceGeneration, operationGeneration, _sideChatGeneration, transport,
+          sessionId: sessionId)) return;
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ChatPage(
@@ -470,7 +668,11 @@ class _ChatPageState extends State<ChatPage> {
         ),
       );
     } catch (e) {
-      _toast('打开辅助对话失败: $e');
+      if (_isCurrentOperation(
+          sourceGeneration, operationGeneration, _sideChatGeneration, transport,
+          sessionId: sessionId)) {
+        _toast('打开辅助对话失败: $e');
+      }
     }
   }
 
@@ -493,38 +695,70 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _pickFiles() async {
+    final sourceGeneration = _sourceGeneration;
+    final filePickGeneration = ++_filePickGeneration;
+    final transport = _transport;
     try {
       final files = await FilePicker.pickFiles();
+      if (!_isCurrentOperation(
+          sourceGeneration, filePickGeneration, _filePickGeneration, transport))
+        return;
       final picked = <_PendingFile>[];
       for (final file in files) {
         final bytes = await file.readAsBytes();
+        if (!_isCurrentOperation(sourceGeneration, filePickGeneration,
+            _filePickGeneration, transport)) return;
         picked.add(_PendingFile(file.name, _guessMime(file.name), bytes));
       }
-      if (picked.isEmpty) return;
+      if (picked.isEmpty ||
+          !_isCurrentOperation(sourceGeneration, filePickGeneration,
+              _filePickGeneration, transport)) {
+        return;
+      }
       setState(() => _pendingFiles.addAll(picked));
     } catch (e) {
-      _toast('选择文件失败: $e');
+      if (_isCurrentOperation(sourceGeneration, filePickGeneration,
+          _filePickGeneration, transport)) {
+        _toast('选择文件失败: $e');
+      }
     }
   }
 
   Future<List<Map<String, dynamic>>> _uploadFiles(
-      Map<String, dynamic> echo,
-      List<_PendingFile> files,
-      String sessionId) async {
+    Map<String, dynamic> echo,
+    List<_PendingFile> files,
+    String sessionId, {
+    required int sourceGeneration,
+    required int sendGeneration,
+    required ConversationTransport transport,
+  }) async {
     final total = files.length;
     var completed = 0;
     while (files.isNotEmpty) {
+      if (!_isCurrentOperation(
+          sourceGeneration, sendGeneration, _sendGeneration, transport,
+          sessionId: sessionId)) {
+        throw const _StaleChatOperation();
+      }
       final file = files.first;
-      final descriptor = await _transport.attachmentPut(
+      final descriptor = await transport.attachmentPut(
         sessionId,
         fileName: file.fileName,
         mime: file.mime,
         bytes: file.bytes,
         onProgress: (p) {
-          if (!mounted) return;
-          setState(() => _uploadProgress = (completed + p) / total);
+          if (_isCurrentOperation(
+              sourceGeneration, sendGeneration, _sendGeneration, transport,
+              sessionId: sessionId)) {
+            setState(() => _uploadProgress = (completed + p) / total);
+          }
         },
       );
+      if (!_isCurrentOperation(
+          sourceGeneration, sendGeneration, _sendGeneration, transport,
+          sessionId: sessionId)) {
+        throw const _StaleChatOperation();
+      }
       files.removeAt(0);
       completed++;
       final existing = (echo['attachments'] as List?)
@@ -561,17 +795,20 @@ class _ChatPageState extends State<ChatPage> {
     if (text == '/goal pause') {
       _inputController.clear();
       setState(() => _showSlash = false);
-      await _run('暂停目标失败',
-          () => _transport.pauseGoal(_requireSession()));
+      await _run('暂停目标失败', () => _transport.pauseGoal(_requireSession()));
       return;
     }
     if (text == '/goal resume') {
       _inputController.clear();
       setState(() => _showSlash = false);
-      await _run('恢复目标失败',
-          () => _transport.resumeGoal(_requireSession()));
+      await _run('恢复目标失败', () => _transport.resumeGoal(_requireSession()));
       return;
     }
+
+    final sourceGeneration = _sourceGeneration;
+    final sendGeneration = ++_sendGeneration;
+    final transport = _transport;
+    final sourceSessionId = _sessionId;
 
     // held-queue confirmation: when inputRouting is `choice` the user
     // picks whether to clear the held queue or keep it. Asked BEFORE the
@@ -582,6 +819,11 @@ class _ChatPageState extends State<ChatPage> {
         state.inputRoutingMode == 'choice' &&
         state.queueItems.isNotEmpty) {
       heldDisposition = await _askHeldQueueDisposition();
+      if (!_isCurrentOperation(
+          sourceGeneration, sendGeneration, _sendGeneration, transport,
+          sessionId: sourceSessionId)) {
+        return;
+      }
       if (heldDisposition == null) return; // cancelled
     }
 
@@ -596,6 +838,11 @@ class _ChatPageState extends State<ChatPage> {
       'attachments': null,
       'files': List<_PendingFile>.from(_pendingFiles),
     };
+    if (!_isCurrentOperation(
+        sourceGeneration, sendGeneration, _sendGeneration, transport,
+        sessionId: sourceSessionId)) {
+      return;
+    }
     setState(() {
       _echoes.add(echo);
       _inputController.clear();
@@ -606,7 +853,13 @@ class _ChatPageState extends State<ChatPage> {
       _progress = null;
     });
     _scrollToBottom();
-    await _deliverEcho(echo, heldDisposition: heldDisposition);
+    await _deliverEcho(
+      echo,
+      heldDisposition: heldDisposition,
+      sourceGeneration: sourceGeneration,
+      sendGeneration: sendGeneration,
+      transport: transport,
+    );
   }
 
   /// Sends (or re-sends) one echo's message and drives its status:
@@ -616,9 +869,21 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _deliverEcho(
     Map<String, dynamic> echo, {
     String? heldDisposition,
+    required int sourceGeneration,
+    required int sendGeneration,
+    required ConversationTransport transport,
   }) async {
+    var sessionId = _sessionId;
+    bool current() => _isCurrentOperation(
+          sourceGeneration,
+          sendGeneration,
+          _sendGeneration,
+          transport,
+          sessionId: sessionId,
+        );
+
     void mark(String status, [String? error]) {
-      if (!mounted) return;
+      if (!current()) return;
       if (diagLogEnabled.value) {
         debugPrint('[chat] echo → $status${error == null ? '' : ' ($error)'}');
       }
@@ -629,7 +894,6 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     try {
-      var sessionId = _sessionId;
       if (sessionId == null) {
         // 1) create the session (can take a while when the runtime warms).
         // 宿主 createSession schema(.strict())没有 firstInput/attachments
@@ -639,17 +903,21 @@ class _ChatPageState extends State<ChatPage> {
         setState(() => _progress = '正在创建会话（首次可能需要预热）…');
         final sw = Stopwatch()..start();
         try {
-        sessionId = await _transport.createSession(
-          widget.workspaceKey,
-          config: _buildDraftConfig(),
-          timeout: const Duration(seconds: 90),
-        );
-        if (diagLogEnabled.value) {
-          debugPrint('[chat] createSession total ${sw.elapsedMilliseconds}ms'
-              ' → $sessionId');
-        }
-          if (!mounted) return;
+          final created = await transport.createSession(
+            widget.workspaceKey,
+            config: _buildDraftConfig(),
+            timeout: const Duration(seconds: 90),
+          );
+          if (!current()) return;
+          sessionId = created;
+          _adoptCreatedSession(created);
+          if (!current()) return;
+          if (diagLogEnabled.value) {
+            debugPrint('[chat] createSession total ${sw.elapsedMilliseconds}ms'
+                ' → $sessionId');
+          }
         } catch (e) {
+          if (!current()) return;
           log('[chat] createSession failed after '
               '${sw.elapsedMilliseconds}ms: $e');
           mark('failed', '$e');
@@ -657,7 +925,6 @@ class _ChatPageState extends State<ChatPage> {
           return;
         }
         log('[chat] createSession ok in ${sw.elapsedMilliseconds}ms');
-        _adoptCreatedSession(sessionId);
         setState(() => _progress = null);
         // 思考档补丁:宿主 createSession 的 thoughtLevel 不落地(真机
         // 实证:请求带 thoughtLevel:max,任务 meta thoughtLevel 仍为空,
@@ -674,14 +941,15 @@ class _ChatPageState extends State<ChatPage> {
             thought.isNotEmpty) {
           try {
             final swSwitch = Stopwatch()..start();
-            await _transport.switchModelConfig(sessionId,
+            await transport.switchModelConfig(sessionId,
                 provider: provider, model: model, thought: thought);
+            if (!current()) return;
             if (diagLogEnabled.value) {
               debugPrint('[chat] switchModelConfig after create '
                   '${swSwitch.elapsedMilliseconds}ms');
             }
           } catch (e) {
-            if (diagLogEnabled.value) {
+            if (current() && diagLogEnabled.value) {
               debugPrint('[chat] switchModelConfig after create failed: $e');
             }
           }
@@ -689,15 +957,18 @@ class _ChatPageState extends State<ChatPage> {
         // 2) 订阅与发送并行:sendText 是 RPC 直达宿主,不依赖本端订阅;
         // 回复经订阅推送,await 订阅只会白等(真机实测首条慢 ~10s)。
         // 订阅在后台补上,回复从建立完成那一刻开始照收。
+        if (!current()) return;
         unawaited(_subscribe());
       }
+      if (!current()) return;
       final text = '${echo['text']}';
       if (text.startsWith('/goal ')) {
-        final res = await _transport.sendGoalCommand(
+        final res = await transport.sendGoalCommand(
           sessionId,
           text.substring('/goal '.length).trim(),
           heldQueueDisposition: heldDisposition,
         );
+        if (!current()) return;
         if (_ackRejected(res)) {
           mark('failed', _ackReason(res));
           _toast('发送失败: ${_ackReason(res)}');
@@ -706,25 +977,34 @@ class _ChatPageState extends State<ChatPage> {
         mark('sent');
         return;
       }
-      List<Map<String, dynamic>>? attachments =
-          (echo['attachments'] as List?)
-              ?.whereType<Map>()
-              .cast<Map<String, dynamic>>()
-              .toList();
+      List<Map<String, dynamic>>? attachments = (echo['attachments'] as List?)
+          ?.whereType<Map>()
+          .cast<Map<String, dynamic>>()
+          .toList();
       final files = (echo['files'] as List<_PendingFile>?) ?? const [];
       if (files.isNotEmpty) {
-        if (mounted) setState(() => _progress = '正在上传附件…');
+        setState(() => _progress = '正在上传附件…');
         final fileList = (echo['files'] as List<_PendingFile>?) ?? [];
-        attachments = await _uploadFiles(echo, fileList, sessionId);
-        if (mounted) setState(() => _progress = null);
+        attachments = await _uploadFiles(
+          echo,
+          fileList,
+          sessionId,
+          sourceGeneration: sourceGeneration,
+          sendGeneration: sendGeneration,
+          transport: transport,
+        );
+        if (!current()) return;
+        setState(() => _progress = null);
       }
       final swSend = Stopwatch()..start();
-      final res = await _transport.sendText(
-        sessionId,
-        text,
+      final res = await transport.sendText(
+          sessionId,
+          text,
+
         attachments: attachments,
         heldQueueDisposition: heldDisposition,
       );
+      if (!current()) return;
       if (diagLogEnabled.value) {
         debugPrint('[chat] sendText ack in ${swSend.elapsedMilliseconds}ms '
             'res=$res');
@@ -737,10 +1017,11 @@ class _ChatPageState extends State<ChatPage> {
       _turnPending = true;
       mark('sent');
     } catch (e) {
+      if (!current() || e is _StaleChatOperation) return;
       mark('failed', '$e');
       _toast('发送失败: $e');
     } finally {
-      if (mounted) {
+      if (current()) {
         setState(() {
           _sending = false;
           _uploadProgress = null;
@@ -755,20 +1036,40 @@ class _ChatPageState extends State<ChatPage> {
   /// drives the same status machine as the original send.
   Future<void> _retryEcho(Map<String, dynamic> echo) async {
     if (_sending) return;
+    final sourceGeneration = _sourceGeneration;
+    final sendGeneration = ++_sendGeneration;
+    final transport = _transport;
+    final sessionId = _sessionId;
     String? heldDisposition;
     final state = _state;
     if (state != null &&
         state.inputRoutingMode == 'choice' &&
         state.queueItems.isNotEmpty) {
       heldDisposition = await _askHeldQueueDisposition();
+      if (!_isCurrentOperation(
+          sourceGeneration, sendGeneration, _sendGeneration, transport,
+          sessionId: sessionId)) {
+        return;
+      }
       if (heldDisposition == null) return; // cancelled
+    }
+    if (!_isCurrentOperation(
+        sourceGeneration, sendGeneration, _sendGeneration, transport,
+        sessionId: sessionId)) {
+      return;
     }
     setState(() {
       echo['status'] = 'sending';
       echo['error'] = null;
       _sending = true;
     });
-    await _deliverEcho(echo, heldDisposition: heldDisposition);
+    await _deliverEcho(
+      echo,
+      heldDisposition: heldDisposition,
+      sourceGeneration: sourceGeneration,
+      sendGeneration: sendGeneration,
+      transport: transport,
+    );
   }
 
   bool _ackRejected(dynamic res) =>
@@ -793,9 +1094,13 @@ class _ChatPageState extends State<ChatPage> {
   /// prep 到达后按宿主可选项校验,宿主已不提供的值自动丢弃,避免把
   /// 过期模型发给 createSession。
   Future<void> _loadDraftPrefs() async {
+    final sourceGeneration = _sourceGeneration;
+    final draftPrefsGeneration = ++_draftPrefsGeneration;
+    final transport = _transport;
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
+      if (!_isCurrentOperation(sourceGeneration, draftPrefsGeneration,
+          _draftPrefsGeneration, transport)) return;
       setState(() {
         for (final k in const ['model', 'thought', 'mode']) {
           final v = prefs.getString('draft.$k');
@@ -811,7 +1116,8 @@ class _ChatPageState extends State<ChatPage> {
     if (prep == null) return;
     final changed = <String, String>{..._draftConfig};
     for (final entry in changed.entries.toList()) {
-      final option = prep.option(entry.key == 'thought' ? 'thought_level' : entry.key);
+      final option =
+          prep.option(entry.key == 'thought' ? 'thought_level' : entry.key);
       if (option != null &&
           option.options.isNotEmpty &&
           !option.options.any((o) => o.value == entry.value)) {
@@ -822,17 +1128,29 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _saveDraftPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      for (final k in const ['model', 'thought', 'mode']) {
-        final v = _draftConfig[k];
-        if (v == null || v.isEmpty) {
-          await prefs.remove('draft.$k');
-        } else {
-          await prefs.setString('draft.$k', v);
+    final sourceGeneration = _sourceGeneration;
+    final draftPrefsGeneration = ++_draftPrefsGeneration;
+    final transport = _transport;
+    // Keep writes ordered while allowing a newer selection to supersede the
+    // callbacks from an older save operation.
+    _draftPrefsSaveChain = _draftPrefsSaveChain.then((_) async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        if (!_isCurrentOperation(sourceGeneration, draftPrefsGeneration,
+            _draftPrefsGeneration, transport)) return;
+        for (final k in const ['model', 'thought', 'mode']) {
+          final v = _draftConfig[k];
+          if (!_isCurrentOperation(sourceGeneration, draftPrefsGeneration,
+              _draftPrefsGeneration, transport)) return;
+          if (v == null || v.isEmpty) {
+            await prefs.remove('draft.$k');
+          } else {
+            await prefs.setString('draft.$k', v);
+          }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    });
+    await _draftPrefsSaveChain;
   }
 
   /// Builds the createSession `config` payload from the draft selection.
@@ -865,13 +1183,11 @@ class _ChatPageState extends State<ChatPage> {
         content: const Text('立即发送将清空排队消息并插队执行'),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context, 'keepQueueAndSend'),
+            onPressed: () => Navigator.pop(context, 'keepQueueAndSend'),
             child: const Text('排队发送'),
           ),
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, 'clearQueueAndSend'),
+            onPressed: () => Navigator.pop(context, 'clearQueueAndSend'),
             child: const Text('立即发送'),
           ),
         ],
@@ -886,15 +1202,26 @@ class _ChatPageState extends State<ChatPage> {
     final sessionId = _sessionId;
     if (state == null || sessionId == null || _loadingOlder) return;
     if (!state.canLoadOlder) return;
+    final sourceGeneration = _sourceGeneration;
+    final historyGeneration = ++_historyGeneration;
+    final transport = _transport;
+    final subscription = _subscription;
     setState(() => _loadingOlder = true);
     try {
       // The cursor is the protocol state's oldest held row — see
       // ConversationState.oldestRowId.
-      final res = await _transport.rowsRange(
+      final res = await transport.rowsRange(
         sessionId,
         beforeRowId: state.oldestRowId,
         limit: 60,
       );
+      if (!_isCurrentOperation(sourceGeneration, historyGeneration,
+              _historyGeneration, transport,
+              sessionId: sessionId) ||
+          !identical(subscription, _subscription) ||
+          !identical(state, _state)) {
+        return;
+      }
       List? rows;
       int? firstRowId;
       var hasMore = false;
@@ -917,8 +1244,8 @@ class _ChatPageState extends State<ChatPage> {
             .whereType<Map>()
             .map((e) => e.cast<String, dynamic>())
             .toList()
-          ..sort((a, b) => ((a['rowId'] as num?) ?? 0)
-              .compareTo((b['rowId'] as num?) ?? 0));
+          ..sort((a, b) =>
+              ((a['rowId'] as num?) ?? 0).compareTo((b['rowId'] as num?) ?? 0));
         final oldLength = state.rows.length;
         final oldFirstRowId = state.firstRowId;
         state.prependOlderRows(older, firstRowId);
@@ -941,15 +1268,29 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
     } catch (e) {
-      _toast('加载失败: $e');
+      if (_isCurrentOperation(sourceGeneration, historyGeneration,
+              _historyGeneration, transport,
+              sessionId: sessionId) &&
+          identical(subscription, _subscription) &&
+          identical(state, _state)) {
+        _toast('加载失败: $e');
+      }
     } finally {
-      if (mounted) setState(() => _loadingOlder = false);
+      if (_isCurrentOperation(sourceGeneration, historyGeneration,
+              _historyGeneration, transport,
+              sessionId: sessionId) &&
+          identical(subscription, _subscription)) {
+        setState(() => _loadingOlder = false);
+      }
     }
   }
 
   // ------------------------------------------------------------ sheets
 
   void _showModelSheet() {
+    final sourceGeneration = _sourceGeneration;
+    final transport = _transport;
+    final sessionId = _sessionId;
     // 立即用缓存打开(零等待);面板自持刷新——新鲜(≤5s)不发请求,
     // 否则强制拉取,数据到达后原地更新列表(删除的模型随之消失)。
     showModalBottomSheet(
@@ -957,12 +1298,19 @@ class _ChatPageState extends State<ChatPage> {
       isScrollControlled: true,
       builder: (context) => _ModelModeSheet(
         state: _state,
-        transport: _transport,
+        transport: transport,
         prep: _prep,
-        sessionId: _sessionId,
+        sessionId: sessionId,
         draftConfig: _draftConfig,
+        isSourceCurrent: () => _isCurrentForSource(
+          sourceGeneration,
+          transport,
+          sessionId: sessionId,
+        ),
         onRefreshPrep: _fetchPrepForSheet,
         onDraftChange: (key, value) {
+          if (!_isCurrentForSource(sourceGeneration, transport,
+              sessionId: sessionId)) return;
           setState(() => _draftConfig[key] = value);
           _saveDraftPrefs();
         },
@@ -1005,8 +1353,17 @@ class _ChatPageState extends State<ChatPage> {
     final option = _prep?.option('mode');
     final options = option != null && option.options.isNotEmpty
         ? [for (final v in option.options) (v.value, v.name)]
-        : const [('build', 'build'), ('edit', 'edit'), ('plan', 'plan'), ('yolo', 'yolo')];
+        : const [
+            ('build', 'build'),
+            ('edit', 'edit'),
+            ('plan', 'plan'),
+            ('yolo', 'yolo')
+          ];
     final current = _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
+    final sourceGeneration = _sourceGeneration;
+    final sourceTransport = _transport;
+    final sourceSessionId = _sessionId;
+    final sourceState = _state;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1034,19 +1391,30 @@ class _ChatPageState extends State<ChatPage> {
               title: Text(name, style: const TextStyle(fontSize: 13)),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                if (_sessionId == null || _sessionId!.isEmpty) {
+                if (!_isCurrentForSource(sourceGeneration, sourceTransport,
+                    sessionId: sourceSessionId)) return;
+                if (sourceSessionId == null || sourceSessionId.isEmpty) {
                   setState(() => _draftConfig['mode'] = value);
                   _saveDraftPrefs();
                 } else {
                   _run('切换失败', () async {
-                    await _transport.switchCollaborationMode(
-                        _sessionId!, value);
-                    _state?.optimisticPatch({
-                      'config': {
-                        ...?_state!.config,
-                        'mode': value,
-                      },
-                    });
+                    if (!_isCurrentForSource(sourceGeneration, sourceTransport,
+                        sessionId: sourceSessionId)) {
+                      return null;
+                    }
+                    await sourceTransport.switchCollaborationMode(
+                        sourceSessionId, value);
+                    if (_isCurrentForSource(sourceGeneration, sourceTransport,
+                        sessionId: sourceSessionId) &&
+                        identical(_state, sourceState)) {
+                      sourceState?.optimisticPatch({
+                        'config': {
+                          ...?sourceState.config,
+                          'mode': value,
+                        },
+                      });
+                    }
+                    return null;
                   });
                 }
               },
@@ -1067,8 +1435,8 @@ class _ChatPageState extends State<ChatPage> {
         loading: _skillsLoading,
         onSelect: (text) {
           _inputController.text = text;
-          _inputController.selection = TextSelection.collapsed(
-              offset: _inputController.text.length);
+          _inputController.selection =
+              TextSelection.collapsed(offset: _inputController.text.length);
           Navigator.of(sheetContext).pop();
           setState(() => _showSlash = false);
         },
@@ -1085,6 +1453,8 @@ class _ChatPageState extends State<ChatPage> {
     final state = _state;
     final sessionId = _sessionId;
     if (state == null || sessionId == null) return;
+    final sourceGeneration = _sourceGeneration;
+    final transport = _transport;
     showModalBottomSheet(
       context: context,
       builder: (context) => _UsageSheet(
@@ -1092,6 +1462,11 @@ class _ChatPageState extends State<ChatPage> {
         session: widget.session,
         scope: widget.scope,
         sessionId: sessionId,
+        isSourceCurrent: () => _isCurrentForSource(
+          sourceGeneration,
+          transport,
+          sessionId: sessionId,
+        ),
       ),
     );
   }
@@ -1124,10 +1499,10 @@ class _ChatPageState extends State<ChatPage> {
                   [
                     if (state.phase.isNotEmpty) state.phase,
                     state.currentModel,
-                    if (state.currentThought.isNotEmpty)
-                      state.currentThought,
+                    if (state.currentThought.isNotEmpty) state.currentThought,
                   ].where((s) => s.isNotEmpty).join(' · '),
-                  style: TextStyle(fontSize: 11, color: EmberColors.of(context).textFaint),
+                  style: TextStyle(
+                      fontSize: 11, color: EmberColors.of(context).textFaint),
                 ),
               ),
           ],
@@ -1139,7 +1514,7 @@ class _ChatPageState extends State<ChatPage> {
               builder: (context, _) => state.isRunning
                   ? IconButton(
                       icon: Icon(Icons.stop_circle_outlined,
-                      color: EmberColors.of(context).err),
+                          color: EmberColors.of(context).err),
                       tooltip: '停止',
                       onPressed: () =>
                           _run('停止失败', () => _transport.stop(_sessionId!)),
@@ -1165,8 +1540,7 @@ class _ChatPageState extends State<ChatPage> {
                 : (action) {
                     switch (action) {
                       case 'compact':
-                        _run('压缩失败',
-                            () => _transport.compact(_sessionId!));
+                        _run('压缩失败', () => _transport.compact(_sessionId!));
                       case 'usage':
                         _showUsageSheet();
                     }
@@ -1255,7 +1629,9 @@ class _ChatPageState extends State<ChatPage> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(EmberRadius.avatar),
         border: Border.all(
-            color: running ? colors.primary.withValues(alpha: 0.4) : colors.hairline),
+            color: running
+                ? colors.primary.withValues(alpha: 0.4)
+                : colors.hairline),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(running ? Icons.motion_photos_on : Icons.radio_button_unchecked,
@@ -1320,11 +1696,10 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           if (state != null && state.isRunning && _sessionId != null)
             IconButton(
-              icon: Icon(Icons.stop_circle_outlined,
-                  size: 22, color: colors.err),
+              icon:
+                  Icon(Icons.stop_circle_outlined, size: 22, color: colors.err),
               tooltip: '停止',
-              onPressed: () =>
-                  _run('停止失败', () => _transport.stop(_sessionId!)),
+              onPressed: () => _run('停止失败', () => _transport.stop(_sessionId!)),
             ),
           Flexible(child: _modelPill(context, state)),
           // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
@@ -1339,8 +1714,7 @@ class _ChatPageState extends State<ChatPage> {
                       case 'side':
                         _openSideChat();
                       case 'compact':
-                        _run('压缩失败',
-                            () => _transport.compact(_sessionId!));
+                        _run('压缩失败', () => _transport.compact(_sessionId!));
                       case 'usage':
                         _showUsageSheet();
                     }
@@ -1385,8 +1759,7 @@ class _ChatPageState extends State<ChatPage> {
       borderRadius: BorderRadius.circular(EmberRadius.control),
       onTap: _showModelSheet,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: colors.card,
           borderRadius: BorderRadius.circular(EmberRadius.control),
@@ -1409,13 +1782,11 @@ class _ChatPageState extends State<ChatPage> {
               const SizedBox(width: 6),
               Text('|',
                   style: TextStyle(
-                      fontSize: EmberType.caption,
-                      color: colors.textFaint)),
+                      fontSize: EmberType.caption, color: colors.textFaint)),
               const SizedBox(width: 6),
               Text(thought,
                   style: TextStyle(
-                      fontSize: EmberType.body,
-                      color: colors.textMuted)),
+                      fontSize: EmberType.body, color: colors.textMuted)),
             ],
           ],
         ),
@@ -1474,10 +1845,10 @@ class _ChatPageState extends State<ChatPage> {
               color: EmberColors.of(context).err.withValues(alpha: 0.15),
               child: ListTile(
                 dense: true,
-                title: Text('订阅失败: $_error',
-                    style: const TextStyle(fontSize: 12)),
-                trailing: TextButton(
-                    onPressed: _subscribe, child: const Text('重试')),
+                title:
+                    Text('订阅失败: $_error', style: const TextStyle(fontSize: 12)),
+                trailing:
+                    TextButton(onPressed: _subscribe, child: const Text('重试')),
               ),
             ),
           if (state != null)
@@ -1495,7 +1866,8 @@ class _ChatPageState extends State<ChatPage> {
                 ? Center(
                     child: _sessionId == null
                         ? Text('输入消息开始新会话',
-                            style: TextStyle(color: EmberColors.of(context).textFaint))
+                            style: TextStyle(
+                                color: EmberColors.of(context).textFaint))
                         : const CircularProgressIndicator(),
                   )
                 : !state.ready
@@ -1518,24 +1890,26 @@ class _ChatPageState extends State<ChatPage> {
                               !state.canLoadOlder) {
                             return Center(
                                 child: Text('暂无消息',
-                                    style:
-                                        TextStyle(color: EmberColors.of(context).textFaint)));
+                                    style: TextStyle(
+                                        color: EmberColors.of(context)
+                                            .textFaint)));
                           }
                           // Reverse list: index 0 renders at the bottom, so
                           // offset 0 IS the newest message — a freshly
                           // opened chat sits on the latest turn by
                           // construction, and prepended history never
                           // shifts the viewport.
+                          final sourceGeneration = _sourceGeneration;
+                          final sourceTransport = _transport;
+                          final sourceSessionId = _sessionId ?? '';
                           return ListView.builder(
                             controller: _scrollController,
                             reverse: true,
-                            padding:
-                                const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
                             itemCount: itemCount,
                             itemBuilder: (context, index) {
                               if (index < echoCount) {
-                                final e =
-                                    _echoes[echoCount - 1 - index];
+                                final e = _echoes[echoCount - 1 - index];
                                 // Same bubble as a confirmed user row, so
                                 // retiring the echo (real row takes over)
                                 // is visually seamless. 已发送 + 轮次在途
@@ -1552,32 +1926,33 @@ class _ChatPageState extends State<ChatPage> {
                                     if (e['attachments'] != null)
                                       'attachments': e['attachments'],
                                   },
-                                  transport: _transport,
-                                  sessionId: _sessionId ?? '',
+                                  transport: sourceTransport,
+                                  sessionId: sourceSessionId,
+                                  isSourceCurrent: () => _isCurrentForSource(
+                                    sourceGeneration,
+                                    sourceTransport,
+                                    sessionId: sourceSessionId,
+                                  ),
                                   badge: badge,
-                                  onRetry:
-                                      e['status'] == 'failed'
-                                          ? () => _retryEcho(e)
-                                          : null,
+                                  onRetry: e['status'] == 'failed'
+                                      ? () => _retryEcho(e)
+                                      : null,
                                 );
                               }
                               final mi = index - echoCount;
                               if (state.canLoadOlder && mi == groups.length) {
                                 return Center(
                                   child: TextButton.icon(
-                                    onPressed: _loadingOlder
-                                        ? null
-                                        : _loadOlder,
+                                    onPressed:
+                                        _loadingOlder ? null : _loadOlder,
                                     icon: _loadingOlder
                                         ? const SizedBox(
                                             width: 12,
                                             height: 12,
-                                            child:
-                                                CircularProgressIndicator(
-                                                    strokeWidth: 1.5),
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 1.5),
                                           )
-                                        : const Icon(Icons.history,
-                                            size: 14),
+                                        : const Icon(Icons.history, size: 14),
                                     label: const Text('加载更早消息',
                                         style: TextStyle(fontSize: 12)),
                                   ),
@@ -1588,9 +1963,23 @@ class _ChatPageState extends State<ChatPage> {
                                 key: ValueKey(
                                     'g${group.first['rowId'] ?? group.length}'),
                                 rows: group,
-                                transport: _transport,
-                                sessionId: _sessionId ?? '',
+                                transport: sourceTransport,
+                                sessionId: sourceSessionId,
                                 onAction: _run,
+                                isSourceCurrent: () => _isCurrentForSource(
+                                  sourceGeneration,
+                                  sourceTransport,
+                                  sessionId: sourceSessionId,
+                                ),
+                                beginFileChangesOperation:
+                                    _beginFileChangesOperation,
+                                isFileChangesOperationCurrent: (generation) =>
+                                    generation == _fileChangesGeneration &&
+                                    _isCurrentForSource(
+                                      sourceGeneration,
+                                      sourceTransport,
+                                      sessionId: sourceSessionId,
+                                    ),
                                 state: state,
                               );
                             },
@@ -1613,8 +2002,7 @@ class _ChatPageState extends State<ChatPage> {
                   _GoalBanner(state: state),
                   _BackgroundWorksBar(state: state),
                   _QueueBar(state: state, transport: _transport),
-                  _PendingInteractions(
-                      state: state, transport: _transport),
+                  _PendingInteractions(state: state, transport: _transport),
                 ],
               ),
             ),
@@ -1647,7 +2035,8 @@ class _ChatPageState extends State<ChatPage> {
                   const SizedBox(width: 8),
                   Text(_progress!,
                       style: TextStyle(
-                          fontSize: 11, color: EmberColors.of(context).textMuted)),
+                          fontSize: 11,
+                          color: EmberColors.of(context).textMuted)),
                 ],
               ),
             ),
@@ -1655,8 +2044,7 @@ class _ChatPageState extends State<ChatPage> {
             _PendingFilesBar(
               files: _pendingFiles,
               uploadProgress: _uploadProgress,
-              onRemove: (i) =>
-                  setState(() => _pendingFiles.removeAt(i)),
+              onRemove: (i) => setState(() => _pendingFiles.removeAt(i)),
             ),
           if (state != null && _sessionId != null)
             AnimatedBuilder(
@@ -1664,11 +2052,21 @@ class _ChatPageState extends State<ChatPage> {
                 state.rowsListenable,
                 state.backgroundListenable,
               ]),
-              builder: (context, _) => InsightsHandle(
-                state: state,
-                transport: _transport,
-                sessionId: _sessionId!,
-              ),
+              builder: (context, _) {
+                final handleSourceGeneration = _sourceGeneration;
+                final handleTransport = _transport;
+                final handleSessionId = _sessionId;
+                final handleState = state;
+                return InsightsHandle(
+                  state: state,
+                  transport: handleTransport,
+                  sessionId: handleSessionId!,
+                  isSourceCurrent: () =>
+                      _isCurrentForSource(handleSourceGeneration, handleTransport,
+                          sessionId: handleSessionId) &&
+                      identical(_state, handleState),
+                );
+              },
             ),
           // 模式按钮随会话 state 跟进(optimisticPatch/宿主确认都要
           // 重建输入栏;此前 InputBar 不在 state 监听内,远端已切、

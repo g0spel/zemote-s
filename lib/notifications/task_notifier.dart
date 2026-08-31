@@ -21,6 +21,18 @@ class TaskNotifier {
 
   SessionsIndexSubscription? _sub;
   Map<String, String> _prevPhases = {};
+
+  /// Only the newest notifier may own the process-wide notification tap
+  /// handler. Teardown is asynchronous because subscription unsubscribe waits
+  /// for the bridge, so an old notifier can finish after a replacement was
+  /// installed.
+  static final Expando<TaskNotifier> _tapOwners = Expando<TaskNotifier>();
+
+  /// Coalesces repeated dispose calls while preserving the async unsubscribe
+  /// completion for callers that need to await it.
+  Future<void>? _disposeFuture;
+  Future<void>? _startFuture;
+
   /// taskId → lastActivityAt already announced. Stale repeats (identical
   /// preview, e.g. after reconnect snapshots) are suppressed.
   final Map<String, int> _lastNotifiedActivity = {};
@@ -47,6 +59,7 @@ class TaskNotifier {
     required this.notifications,
     required this.onOpenTask,
   }) {
+    _tapOwners[notifications] = this;
     notifications.setTapHandler(_handleTap);
     _lifecycle = AppLifecycleListener(onStateChange: (state) {
       _appResumed = state == AppLifecycleState.resumed;
@@ -57,7 +70,9 @@ class TaskNotifier {
 
   bool get isActive => _active;
 
-  Future<void> start() async {
+  Future<void> start() => _startFuture ??= _start();
+
+  Future<void> _start() async {
     if (_active || _disposed) return;
     _active = true;
     _prevPhases = {};
@@ -65,7 +80,10 @@ class TaskNotifier {
       final transport = bridge.conversation(scope);
       final sub = await transport.subscribeSessionsIndex();
       if (_disposed || !_active) {
-        await sub.dispose();
+        // The subscription may finish after dispose. Do not make dispose wait
+        // for an uncancellable start; release it only while the bridge is
+        // still usable. A disposed bridge has already released its registry.
+        unawaited(_disposeSubscription(sub));
         return;
       }
       _sub = sub;
@@ -73,7 +91,18 @@ class TaskNotifier {
       _onState();
     } catch (_) {
       _active = false;
+      _startFuture = null;
     }
+  }
+
+  Future<void> _disposeSubscription(SessionsIndexSubscription sub) async {
+    if (bridge.isDisposed) return;
+    try {
+      // dispose() sends unsubscribe before its first await. Checking the
+      // bridge immediately before calling it avoids sending unsubscribe on a
+      // bridge that teardown has already released.
+      await sub.dispose();
+    } catch (_) {}
   }
 
   void _onState() {
@@ -116,8 +145,7 @@ class TaskNotifier {
         payload: {'taskId': p.taskId, 'title': p.title},
       ));
     }
-    _seenInteractionIds
-        .removeWhere((id) => !liveInteractionIds.contains(id));
+    _seenInteractionIds.removeWhere((id) => !liveInteractionIds.contains(id));
 
     if (update.hasRunning) {
       _ensurePermission();
@@ -159,24 +187,33 @@ class TaskNotifier {
   }
 
   Future<void> _handleTap(Map<String, dynamic> payload) async {
+    if (!identical(_tapOwners[notifications], this)) return;
     final taskId = payload['taskId'] as String?;
     if (taskId == null || _disposed) return;
     await onOpenTask(taskId, (payload['title'] as String?) ?? taskId);
   }
 
-  Future<void> dispose() async {
+  Future<void> dispose() => _disposeFuture ??= _dispose();
+
+  Future<void> _dispose() async {
     _disposed = true;
     _active = false;
     _trailingTimer?.cancel();
     _lifecycle?.dispose();
+    // subscribeSessionsIndex cannot be cancelled once started. Do not await
+    // _startFuture here: a bridge teardown may release the transport first;
+    // _start() handles a late subscription and releases it when possible.
     final sub = _sub;
     _sub = null;
-    if (sub != null) {
+    if (sub != null && !bridge.isDisposed) {
       sub.state.removeListener(_onState);
       await sub.dispose();
     }
-    _safe(notifications.stopForeground());
-    notifications.setTapHandler(null);
+    if (identical(_tapOwners[notifications], this)) {
+      _tapOwners[notifications] = null;
+      _safe(notifications.stopForeground());
+      notifications.setTapHandler(null);
+    }
   }
 
   void _safe(Future<void> future) {

@@ -73,10 +73,10 @@ void main() {
         'id': 'provider-1',
         'name': 'Provider 1',
         'models': [
-            {
-              'id': 'deleted-model',
-              'name': 'Deleted model',
-            },
+          {
+            'id': 'deleted-model',
+            'name': 'Deleted model',
+          },
         ],
       },
     ]);
@@ -114,5 +114,88 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     h.dispose();
+  });
+
+  testWidgets('旧供应商卡片 source 切换后不再发 save RPC', (tester) async {
+    final h = _ProviderHarness();
+    addTearDown(h.dispose);
+    const oldScope = {
+      'workspacePath': '/old',
+      'workspaceIdentity': 'old-identity',
+    };
+    const nextScope = {
+      'workspacePath': '/new',
+      'workspaceIdentity': 'new-identity',
+    };
+    final provider = <String, dynamic>{
+      'id': 'provider-1',
+      'name': 'Provider 1',
+      'enabled': true,
+      'models': const [],
+    };
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildDarkTheme(),
+      home: ModelProvidersPage(session: h.bridge, scope: oldScope),
+    ));
+    await tester.pump();
+    h.respond(0, [provider]);
+    await tester.pump();
+    await tester.pump();
+    // 完成旧 source 的实时模型请求,确保后续只观察 mutation RPC。
+    for (var round = 0; round < 4; round++) {
+      final before = h.requests.length;
+      for (var i = 1; i < h.requests.length; i++) {
+        if (h.requests[i].method == 'prepareWorkspace') {
+          h.respond(i, {
+            'configOptions': [
+              {'id': 'model', 'options': const []},
+            ],
+          });
+        }
+      }
+      await tester.pump();
+      if (h.requests.length == before) break;
+    }
+
+    final oldSwitch = tester.widget<Switch>(find.byType(Switch));
+    final oldOnChanged = oldSwitch.onChanged!;
+    final oldRequestCount = h.requests.length;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildDarkTheme(),
+      home: ModelProvidersPage(session: h.bridge, scope: nextScope),
+    ));
+    await tester.pump();
+    oldOnChanged(false);
+    await tester.pump();
+
+    expect(
+      h.requests.skip(oldRequestCount).where((r) => r.method == 'save'),
+      isEmpty,
+    );
+
+    // source 切换会启动新 source 的 getAll,其完成后再启动 prep；两拍都
+    // 应答，避免测试结束时留下 ChannelClient 超时计时器。
+    for (var round = 0; round < 4; round++) {
+      final before = h.requests.length;
+      for (var i = oldRequestCount; i < h.requests.length; i++) {
+        final method = h.requests[i].method;
+        if (method == 'getAll') {
+          h.respond(i, const []);
+        } else if (method == 'prepareWorkspace') {
+          h.respond(i, {
+            'configOptions': [
+              {'id': 'model', 'options': const []},
+            ],
+          });
+        }
+      }
+      await tester.pump();
+      if (h.requests.length == before) break;
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    h.dispose();
+    await tester.pump(const Duration(seconds: 40));
   });
 }

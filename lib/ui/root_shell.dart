@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
-import '../protocol/conversation.dart' show SessionEntry;
+import '../protocol/conversation.dart'
+    show SessionEntry, SessionsIndexSubscription;
 import '../protocol/relay_client.dart';
 import '../protocol/zflow_client.dart';
 import '../state/account_store.dart';
@@ -89,6 +90,7 @@ class _RootShellState extends State<RootShell> {
   BridgeSession? _bridge;
   StreamSubscription? _updatedSub;
   TaskNotifier? _taskNotifier;
+  Future<void>? _recentSessionCleanup;
   AppLifecycleListener? _lifecycle;
 
   /// 会话抽屉开关(仅对话 Tab;随会话态复位/切 Tab 一起关闭)。
@@ -155,7 +157,13 @@ class _RootShellState extends State<RootShell> {
     widget.session.removeListener(_onSessionChanged);
     widget.store.removeListener(_onChanged);
     _lifecycle?.dispose();
+    // State.dispose is synchronous; invalidate shell callbacks and session
+    // adoption before releasing notifiers.
+    _chainGeneration++;
+    _sessionEpoch++;
     _teardownDeviceState();
+    _activeSessionId.dispose();
+    _activeSessionTitle.dispose();
     super.dispose();
   }
 
@@ -226,7 +234,7 @@ class _RootShellState extends State<RootShell> {
     try {
       final client = await widget.session.connect(account);
       if (!_isCurrentChain(gen)) return;
-      _resubscribe(client);
+      _resubscribe(client, gen);
       final bootstrap = await client.bootstrap();
       if (!_isCurrentChain(gen)) return;
       final list = bootstrap['workspaces'];
@@ -255,28 +263,51 @@ class _RootShellState extends State<RootShell> {
   }
 
   void _teardownDeviceState() {
-    _updatedSub?.cancel();
+    final updatedSub = _updatedSub;
     _updatedSub = null;
-    _taskNotifier?.dispose();
+    updatedSub?.cancel();
+
+    final taskNotifier = _taskNotifier;
     _taskNotifier = null;
-    _bridge?.dispose();
+    final recentCleanup = _recentSessionCleanup;
+    _recentSessionCleanup = null;
+    final bridge = _bridge;
     _bridge = null;
     _activeWorkspace = null;
+    unawaited(() async {
+      // Release the bridge first. The notifier/recent-session cleanup paths
+      // check this state and skip unsubscribe once the transport is gone;
+      // teardown must not wait behind an uncancellable subscribe/start.
+      bridge?.dispose();
+      try {
+        if (taskNotifier != null) await taskNotifier.dispose();
+      } catch (_) {}
+      try {
+        if (recentCleanup != null) await recentCleanup;
+      } catch (_) {}
+    }());
   }
 
-  void _resubscribe(ZflowClient client) {
+  void _resubscribe(ZflowClient client, int gen) {
     _updatedSub?.cancel();
     _updatedSub = client.workspaceListUpdated.listen((result) {
-      if (!mounted || result is! Map) return;
+      if (!_isCurrentClient(client, gen) || result is! Map) return;
       final list = result['workspaces'];
       if (list is List) setState(() => _workspaces = list);
     });
   }
 
+  bool _isCurrentClient(ZflowClient client, int gen) =>
+      _isCurrentChain(gen) && identical(widget.session.client, client);
+
+  bool _isCurrentBridge(BridgeSession bridge, int gen) =>
+      _isCurrentChain(gen) && identical(_bridge, bridge) && !bridge.isDisposed;
+
   Future<void> _openWorkspace(Map<String, dynamic> workspace, int gen) async {
     final key = workspaceKeyOf(workspace);
     final client = widget.session.client;
     if (key == null || client == null || !_isCurrentChain(gen)) return;
+    _resubscribe(client, gen);
     try {
       final session = await client.openBridge(key);
       if (!_isCurrentChain(gen)) {
@@ -287,48 +318,17 @@ class _RootShellState extends State<RootShell> {
         _bridge = session;
         _activeWorkspace = workspace;
       });
-      _startTaskNotifier(session, workspace);
-      // 进入工作区默认打开最近一个未归档会话(不要落在空白 draft)。
-      // 与抽屉同一条已验证通路:V4 索引订阅(scope 已归一化,directory
-      // 正确下发);等首个快照(上限 4s)取最近未归档条目。listSessions
-      // 是桌面端本地 API,不在 zcode-agent 的 relay 白名单里,不可用。
+      _startTaskNotifier(session, workspace, gen);
+      final recentCleanup = _probeRecentSession(session, workspace, gen);
+      _recentSessionCleanup = recentCleanup;
       try {
-        // 时序:openBridge 返回后宿主侧桥仍在初始化,立即订阅会拿不到
-        // 快照;先 handshake(helloConversationV4/initialize 已建链),再
-        // 订阅,快照到达(ready)即取——无定时等待。
-        final transport = session.conversation(_scopeOf(workspace));
-        await transport.handshake();
-        if (!_isCurrentChain(gen)) return;
-        final sub = await transport.subscribeSessionsIndex();
-        SessionEntry? recent;
-        for (var i = 0; i < 80; i++) {
-          if (!_isCurrentChain(gen)) break;
-          if (sub.state.ready) {
-            for (final e in sub.state.list) {
-              if (!e.isArchived) {
-                recent = e;
-                break;
-              }
-            }
-            break;
-          }
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        }
-        final picked = recent;
-        log('[v4] 最近会话:ready=${sub.state.ready} '
-            '列表=${sub.state.list.length} 选中=${picked?.sessionId ?? '无'}');
-        if (diagLogEnabled.value) {
-          debugPrint('[zflow] recent-session: ready=${sub.state.ready} '
-              'list=${sub.state.list.length} '
-              'picked=${picked?.sessionId ?? 'none'}');
-        }
-        await sub.dispose();
-        if (picked != null && mounted && _isCurrentChain(gen)) {
-          _sessionEpoch++;
-          setState(() => _activeSessionId.value = picked.sessionId);
-        }
+        await recentCleanup;
       } catch (e) {
         log('[诊断] 最近会话打开失败: $e');
+      } finally {
+        if (identical(_recentSessionCleanup, recentCleanup)) {
+          _recentSessionCleanup = null;
+        }
       }
     } catch (e) {
       if (!mounted || !_isCurrentChain(gen)) return;
@@ -337,11 +337,60 @@ class _RootShellState extends State<RootShell> {
     }
   }
 
+  Future<void> _probeRecentSession(
+      BridgeSession session, Map<String, dynamic> workspace, int gen) async {
+    final transport = session.conversation(_scopeOf(workspace));
+    SessionsIndexSubscription? sub;
+    try {
+      await transport.handshake();
+      if (!_isCurrentBridge(session, gen)) return;
+      sub = await transport.subscribeSessionsIndex();
+      if (!_isCurrentBridge(session, gen)) return;
+      SessionEntry? recent;
+      for (var i = 0; i < 80; i++) {
+        if (!_isCurrentBridge(session, gen)) return;
+        if (sub.state.ready) {
+          for (final e in sub.state.list) {
+            if (!e.isArchived) {
+              recent = e;
+              break;
+            }
+          }
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      if (!_isCurrentBridge(session, gen)) return;
+      final picked = recent;
+      log('[v4] 最近会话:ready=${sub.state.ready} '
+          '列表=${sub.state.list.length} 选中=${picked?.sessionId ?? '无'}');
+      if (diagLogEnabled.value) {
+        debugPrint('[zflow] recent-session: ready=${sub.state.ready} '
+            'list=${sub.state.list.length} '
+            'picked=${picked?.sessionId ?? 'none'}');
+      }
+      if (picked != null && _isCurrentBridge(session, gen)) {
+        _sessionEpoch++;
+        setState(() => _activeSessionId.value = picked.sessionId);
+      }
+    } finally {
+      if (sub != null && !session.isDisposed) {
+        await sub.dispose();
+      }
+    }
+  }
+
   /// Background task notifications: while tasks are running, a silent
   /// foreground-service notification shows live progress and completion
   /// alerts route back into the task's chat (Android only).
-  void _startTaskNotifier(BridgeSession bridge, Map<String, dynamic> workspace) {
-    if (!Notifications.isSupported || _taskNotifier != null) return;
+  void _startTaskNotifier(
+      BridgeSession bridge, Map<String, dynamic> workspace, int gen) {
+    if (!Notifications.isSupported) return;
+    final previous = _taskNotifier;
+    if (previous != null) {
+      _taskNotifier = null;
+      unawaited(previous.dispose());
+    }
     final scope = _scopeOf(workspace);
     final workspaceKey = workspaceKeyOf(workspace) ?? '';
     _taskNotifier = TaskNotifier(
@@ -349,8 +398,8 @@ class _RootShellState extends State<RootShell> {
       scope: scope,
       notifications: notificationsService,
       onOpenTask: (taskId, title) async {
-        final navigator = Navigator.of(context);
-        navigator.push(
+        if (!_isCurrentBridge(bridge, gen)) return;
+        Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ChatPage(
               session: bridge,
@@ -366,7 +415,9 @@ class _RootShellState extends State<RootShell> {
   }
 
   /// Opens a task chat pushed on top of the shell (automation run history).
-  void _openTaskChat(BridgeSession bridge, String taskId, String title) {
+  void _openTaskChat(
+      BridgeSession bridge, int gen, String taskId, String title) {
+    if (!_isCurrentBridge(bridge, gen)) return;
     final workspace = _activeWorkspace;
     if (workspace == null) return;
     Navigator.of(context).push(
@@ -484,6 +535,15 @@ class _RootShellState extends State<RootShell> {
     );
   }
 
+  Future<void> _pickWorkspace(Map<String, dynamic> workspace) async {
+    final key = workspaceKeyOf(workspace);
+    if (key == null || widget.session.client == null) return;
+    final gen = ++_chainGeneration;
+    _teardownDeviceState();
+    setState(() => _resetSessionState());
+    await _openWorkspace(workspace, gen);
+  }
+
   /// 同一设备内切换工作区:作废在途链、释放旧 bridge、重开新 bridge。
   Future<void> _switchWorkspace(Map<String, dynamic> workspace) async {
     final key = workspaceKeyOf(workspace);
@@ -566,7 +626,7 @@ class _RootShellState extends State<RootShell> {
                           bridge: bridge,
                           workspace: workspace,
                           onOpenTask: (taskId, title) =>
-                              _openTaskChat(bridge, taskId, title),
+                              _openTaskChat(bridge, _chainGeneration, taskId, title),
                         ),
                   _ => SettingsPage(
                       client: session.client,
@@ -718,7 +778,7 @@ class _RootShellState extends State<RootShell> {
         if (session.client != null) {
           return _WorkspacePicker(
             workspaces: _workspaces,
-            onPick: (w) => _openWorkspace(w, _chainGeneration),
+            onPick: (w) => _pickWorkspace(w),
           );
         }
         return _mutedHint('设备未连接', colors);

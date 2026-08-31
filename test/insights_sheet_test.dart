@@ -278,6 +278,101 @@ void main() {
       await _tearDown(tester, bridge);
     });
 
+    testWidgets('交互项同一 source 重建时保持 busy,不因 closure 变化重置', (tester) async {
+      final (bridge, transport) = _makeBridge();
+      final state = ConversationState()
+        ..snapshot = {
+          'pendingInteractions': [
+            {
+              'interactionId': 'i1',
+              'payload': {
+                'kind': 'permission',
+                'toolName': 'bash',
+                'options': [
+                  {'optionId': 'allowOnce', 'label': '允许一次'},
+                ],
+              },
+            },
+          ],
+        };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: pendingInteractionsForTest(
+            state: state,
+            transport: transport,
+          ),
+        ),
+      ));
+      await tester.tap(find.text('允许一次'));
+      await tester.pump();
+      expect(
+          tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed,
+          isNull);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: pendingInteractionsForTest(
+            state: state,
+            transport: transport,
+          ),
+        ),
+      ));
+      await tester.pump();
+      expect(
+          tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed,
+          isNull);
+      await _tearDown(tester, bridge);
+    });
+
+    testWidgets('source 切换后旧 fileChanges 应答不写回 sheet', (tester) async {
+      final state = ConversationState()
+        ..rows = [
+          {
+            'kind': 'turnHeader',
+            'rowId': 1,
+            'entityId': 'e1',
+            'state': 'completedSuccess',
+            'fileChanges': {'files': 1, 'additions': 1, 'deletions': 0},
+          },
+        ];
+      final channels = ChannelClient(sendBody: (_) {});
+      final bridge = BridgeSession.detached(
+        {'workspaceKey': '/ws-t'},
+        channels: channels,
+      );
+      final transport = ConversationTransport(
+        session: bridge,
+        scope: const {'workspacePath': '/ws-t'},
+      );
+      var current = true;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: InsightsSheet(
+            state: state,
+            transport: transport,
+            sessionId: 's1',
+            scrollController: ScrollController(),
+            isSourceCurrent: () => current,
+          ),
+        ),
+      ));
+      channels.handleMessage(_inFrame(const [ChannelClient.resInitialize, 0]));
+      await tester.pump();
+      _respond(channels, 0, <String, dynamic>{});
+      await tester.pump();
+      _respond(channels, 1, <String, dynamic>{});
+      await tester.pump();
+      current = false;
+      _respond(channels, 2, {
+        'files': [
+          {'path': 'old.dart', 'additions': 1, 'deletions': 0},
+        ],
+      });
+      await tester.pump();
+      expect(find.text('old.dart'), findsNothing);
+      await _tearDown(tester, bridge);
+    });
+
     testWidgets('切「文件」chip:wire 级应答 fileChanges 并渲染文件行', (tester) async {
       final state = ConversationState()
         ..rows = [

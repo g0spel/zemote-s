@@ -41,6 +41,24 @@ List<SessionEntry> filterSessions(List<SessionEntry> entries, String query) {
       .toList(growable: false);
 }
 
+class _DrawerActionSource {
+  final int generation;
+  final BridgeSession bridge;
+  final Map<String, dynamic> scope;
+  final String scopeKey;
+  final Map<String, SessionEntry> targets;
+
+  _DrawerActionSource({
+    required this.generation,
+    required this.bridge,
+    required this.scope,
+    required this.scopeKey,
+    required this.targets,
+  });
+
+  Set<String> get targetIds => targets.keys.toSet();
+}
+
 /// 两档分组(活跃/归档;键序即展示序)。[sorted] 需为 sortSessions 的
 /// 降序输出;归档条目(isArchived)单独成组,其余全入活跃组(置顶项在
 /// 活跃组内排最前,保持 sorted 顺序)。空组剔除,展示文案由调用方按键
@@ -61,8 +79,10 @@ Map<String, List<SessionEntry>> groupSessions(
       active.add(e);
     }
   }
-  return {'active': [...pinned, ...active], 'archived': archived}
-    ..removeWhere((_, v) => v.isEmpty);
+  return {
+    'active': [...pinned, ...active],
+    'archived': archived
+  }..removeWhere((_, v) => v.isEmpty);
 }
 
 const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -164,7 +184,18 @@ class _SessionDrawerState extends State<SessionDrawer> {
   final Set<String> _selected = {};
   bool _acting = false;
 
-  late final ConversationTransport _transport;
+  late ConversationTransport _transport;
+  late BridgeSession _sourceBridge;
+  late Map<String, dynamic> _sourceScope;
+  String _sourceScopeKey = '';
+  int _sourceGeneration = 0;
+  int _subscribeGeneration = 0;
+  int _pinnedGeneration = 0;
+  int _seedGeneration = 0;
+  int _cacheGeneration = 0;
+  int _tasksGeneration = 0;
+  int _managementGeneration = 0;
+  Future<void> _cacheWrite = Future.value();
   SessionsIndexSubscription? _sub;
   List<SessionEntry> _entries = const [];
   bool _ready = false;
@@ -205,6 +236,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
 
   /// 已写过缓存复本的订阅(每个订阅只写首个 ready 快照;write 完成才标记)。
   SessionsIndexSubscription? _cacheSyncedSub;
+  SessionsIndexSubscription? _cachePendingSub;
+  VoidCallback? _subStateListener;
 
   /// 当前内嵌会话是否已在实时列表中出现过(A4 消失检测的基准:draft 采纳
   /// 等场景下列表尚未收录该会话不算消失)。
@@ -232,7 +265,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
     if (diagLogEnabled.value) {
       debugPrint('[zflow] SessionDrawer initState #$hashCode');
     }
-    _transport = widget.bridge.conversation(widget.scope, onLog: log);
+    _sourceBridge = widget.bridge;
+    _sourceScope = Map<String, dynamic>.from(widget.scope);
+    _sourceScopeKey = _scopeKey(_sourceScope);
+    _transport = _sourceBridge.conversation(_sourceScope, onLog: log);
     _subscribe();
     _seedFromCache();
     _loadPinned();
@@ -242,18 +278,113 @@ class _SessionDrawerState extends State<SessionDrawer> {
   @override
   void didUpdateWidget(SessionDrawer oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final nextScopeKey = _scopeKey(widget.scope);
+    final sourceChanged = !identical(oldWidget.bridge, widget.bridge) ||
+        nextScopeKey != _sourceScopeKey;
+    if (oldWidget.currentSessionId != widget.currentSessionId) {
+      _currentSeen = false;
+    }
+    if (sourceChanged) {
+      final oldSub = _detachSubscription();
+      if (oldSub != null) unawaited(oldSub.dispose());
+      _sourceGeneration++;
+      _subscribeGeneration++;
+      _pinnedGeneration++;
+      _seedGeneration++;
+      _cacheGeneration++;
+      _tasksGeneration++;
+      _managementGeneration++;
+      _sourceBridge = widget.bridge;
+      _sourceScope = Map<String, dynamic>.from(widget.scope);
+      _sourceScopeKey = nextScopeKey;
+      _transport = _sourceBridge.conversation(_sourceScope, onLog: log);
+      _loadingTasks = false;
+      _reloadQueued = false;
+      _cacheSyncedSub = null;
+      _cachePendingSub = null;
+      _lastNonEmpty = const [];
+      _entries = const [];
+      _seed = const [];
+      _pinnedIds = const {};
+      _archived = const [];
+      _archivedIds = const {};
+      _activeTaskIds = const {};
+      _activeTasks = const [];
+      _tasksLoaded = false;
+      _currentSeen = false;
+      _acting = false;
+      _managing = false;
+      _selected.clear();
+      _idxProbed = false;
+      _seenIndexIds.clear();
+      setState(() {
+        _ready = false;
+        _error = null;
+      });
+      _subscribe();
+      _seedFromCache();
+      _loadPinned();
+      _loadTasks();
+    }
     // 每次展开都拿最新归属(桌面端可能归档/删除过任务)。
-    if (widget.open && !oldWidget.open) _loadTasks();
+    if (!sourceChanged && widget.open && !oldWidget.open) _loadTasks();
+  }
+
+  String _scopeKey(Map<String, dynamic> scope) =>
+      '${scope['workspacePath'] ?? ''}\u0000${scope['workspaceIdentity'] ?? ''}';
+
+  bool _isCurrentSource(
+          int generation, BridgeSession bridge, String scopeKey) =>
+      mounted &&
+      generation == _sourceGeneration &&
+      identical(bridge, _sourceBridge) &&
+      scopeKey == _sourceScopeKey;
+
+  _DrawerActionSource _captureActionSource(Iterable<String> targetIds) =>
+      _DrawerActionSource(
+        generation: _sourceGeneration,
+        bridge: _sourceBridge,
+        scope: Map<String, dynamic>.from(_sourceScope),
+        scopeKey: _sourceScopeKey,
+        targets: {
+          for (final id in targetIds)
+            if (id.isNotEmpty)
+              for (final entry in [
+                ..._entries,
+                ..._activeTasks,
+                ..._archived,
+                ..._seed,
+              ])
+                if (entry.sessionId == id) id: entry,
+        },
+      );
+
+  bool _isCurrentActionSource(_DrawerActionSource source, String targetId) =>
+      targetId.isNotEmpty &&
+      source.targets.containsKey(targetId) &&
+      _isCurrentSource(source.generation, source.bridge, source.scopeKey);
+
+  SessionsIndexSubscription? _detachSubscription() {
+    final sub = _sub;
+    _sub = null;
+    if (sub != null) {
+      sub.state.removeListener(_subStateListener ?? _onState);
+    }
+    _subStateListener = null;
+    return sub;
   }
 
   @override
   void dispose() {
-    final sub = _sub;
-    _sub = null;
-    if (sub != null) {
-      sub.state.removeListener(_onState);
-      sub.dispose();
-    }
+    _sourceGeneration++;
+    _subscribeGeneration++;
+    _pinnedGeneration++;
+    _seedGeneration++;
+    _cacheGeneration++;
+    _tasksGeneration++;
+    _managementGeneration++;
+    final sub = _detachSubscription();
+    if (sub != null) sub.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -261,18 +392,38 @@ class _SessionDrawerState extends State<SessionDrawer> {
   Future<void> _subscribe() async {
     // 重挂路径异步到达时组件可能已卸载(旧订阅 dispose 要等 unsubscribe 应答)。
     if (!mounted) return;
+    final generation = _sourceGeneration;
+    final bridge = _sourceBridge;
+    final scopeKey = _sourceScopeKey;
+    final requestGeneration = ++_subscribeGeneration;
     setState(() => _error = null);
     try {
       final sub = await _transport.subscribeSessionsIndex();
-      if (!mounted) {
+      if (!_isCurrentSource(generation, bridge, scopeKey) ||
+          requestGeneration != _subscribeGeneration) {
         await sub.dispose();
         return;
       }
+      final previous = _detachSubscription();
+      if (previous != null) unawaited(previous.dispose());
       _sub = sub;
-      sub.state.addListener(_onState);
+      void listener() {
+        if (!_isCurrentSource(generation, bridge, scopeKey) ||
+            requestGeneration != _subscribeGeneration ||
+            !identical(_sub, sub)) {
+          return;
+        }
+        _onState();
+      }
+
+      _subStateListener = listener;
+      sub.state.addListener(listener);
       _onState();
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (_isCurrentSource(generation, bridge, scopeKey) &&
+          requestGeneration == _subscribeGeneration) {
+        setState(() => _error = '$e');
+      }
     }
   }
 
@@ -280,10 +431,16 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 列表元素带 taskId)。失败容错为空集 —— 置顶组退化为不显示,列表
   /// 其余功能不受影响。
   Future<void> _loadPinned() async {
+    final generation = _sourceGeneration;
+    final requestGeneration = ++_pinnedGeneration;
+    final bridge = _sourceBridge;
+    final scope = _sourceScope;
+    final scopeKey = _sourceScopeKey;
     try {
-      final tasks = await widget.bridge.channels
-          .call(Channels.zcodeTask, 'listPinnedTasks', [widget.scope]);
-      if (!mounted) return;
+      final tasks = await bridge.channels
+          .call(Channels.zcodeTask, 'listPinnedTasks', [scope]);
+      if (!_isCurrentSource(generation, bridge, scopeKey) ||
+          requestGeneration != _pinnedGeneration) return;
       setState(() {
         _pinnedIds = {
           for (final t in (tasks is List ? tasks : const <dynamic>[]))
@@ -291,7 +448,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
         };
       });
     } catch (_) {
-      if (mounted) setState(() => _pinnedIds = const {});
+      if (_isCurrentSource(generation, bridge, scopeKey) &&
+          requestGeneration == _pinnedGeneration) {
+        setState(() => _pinnedIds = const {});
+      }
     }
   }
 
@@ -332,8 +492,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
     // 索引移除了此前活跃的会话(桌面端删除/归档):归属集已过期,重拉
     // 后由 _loadTasks 末尾的补判定决定是否复位(在途旧数据不误判存活)。
     if (_tasksLoaded && prevIds.isNotEmpty) {
-      final gone =
-          prevIds.difference(list.map((e) => e.sessionId).toSet());
+      final gone = prevIds.difference(list.map((e) => e.sessionId).toSet());
       if (gone.any(_activeTaskIds.contains)) _loadTasks();
     }
   }
@@ -396,11 +555,20 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 真实数据到达即覆盖。种子条目 phase 清空 —— 状态点以实时为准(裁决),
   /// 缓存里的 running/waiting 可能早已过期。
   Future<void> _seedFromCache() async {
-    final raw = await _cache.read(widget.scope);
+    final generation = _sourceGeneration;
+    final requestGeneration = ++_seedGeneration;
+    final bridge = _sourceBridge;
+    final scope = _sourceScope;
+    final scopeKey = _sourceScopeKey;
+    final raw = await _cache.read(scope);
     if (diagLogEnabled.value) debugPrint('[zflow] seed: ${raw.length} entries');
-    if (!mounted || raw.isEmpty) return;
+    if (!_isCurrentSource(generation, bridge, scopeKey) ||
+        requestGeneration != _seedGeneration ||
+        raw.isEmpty) return;
     setState(() {
-      _seed = [for (final m in raw) SessionEntry({...m, 'phase': ''})];
+      _seed = [
+        for (final m in raw) SessionEntry({...m, 'phase': ''})
+      ];
     });
   }
 
@@ -413,42 +581,49 @@ class _SessionDrawerState extends State<SessionDrawer> {
       return;
     }
     _loadingTasks = true;
+    final generation = _sourceGeneration;
+    final requestGeneration = ++_tasksGeneration;
+    final bridge = _sourceBridge;
+    final scope = _sourceScope;
+    final scopeKey = _sourceScopeKey;
     _lastTasksLoadMs = DateTime.now().millisecondsSinceEpoch;
     try {
-      Future<(bool, dynamic)> call(String method) => widget.bridge.channels
-          .call(Channels.zcodeTask, method, [widget.scope])
+      Future<(bool, dynamic)> call(String method) => bridge.channels
+          .call(Channels.zcodeTask, method, [scope])
           .then((r) => (true, r))
           .catchError((Object _) => (false, const <dynamic>[]));
       final (tasksOk, tasksData) = await call('listTasks');
       // 归档并集:listArchivedTasks 是归档列表的显式来源(listTasks 可能
       // 直接不下发归档条目);条目级 archived 标志若在也并入。
       final (archOk, archData) = await call('listArchivedTasks');
-      if (!mounted) return;
+      if (!_isCurrentSource(generation, bridge, scopeKey) ||
+          requestGeneration != _tasksGeneration) return;
       final list = tasksOk && tasksData is List ? tasksData : const [];
       final archList = archOk && archData is List ? archData : const [];
       SessionEntry entryOf(Map t, {bool archived = false}) => SessionEntry({
-        'sessionId': '${t['taskId']}',
-        'title': '${t['title'] ?? ''}',
-        'phase': '${t['displayStatus'] ?? ''}',
-        'lastActivityAt': (t['updatedAt'] as num?)?.toInt() ??
-            (t['createdAt'] as num?)?.toInt() ??
-            0,
-        'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
-        'hasBackgroundWork': t['hasBackgroundWork'] == true,
-        if (archived) 'archived': 1,
-      });
+            'sessionId': '${t['taskId']}',
+            'title': '${t['title'] ?? ''}',
+            'phase': '${t['displayStatus'] ?? ''}',
+            'lastActivityAt': (t['updatedAt'] as num?)?.toInt() ??
+                (t['createdAt'] as num?)?.toInt() ??
+                0,
+            'createdAt': (t['createdAt'] as num?)?.toInt() ?? 0,
+            'hasBackgroundWork': t['hasBackgroundWork'] == true,
+            if (archived) 'archived': 1,
+          });
       final active = <SessionEntry>[];
       final archived = <SessionEntry>[
         // 归档组主体:listArchivedTasks 的条目本身(listTasks 不下发
         // 归档任务,此前误把 archIds 当标记、归档组因此恒空)。
         for (final t in archList)
-          if (t is Map && t['taskId'] != null) entryOf(t.cast<String, dynamic>(), archived: true),
+          if (t is Map && t['taskId'] != null)
+            entryOf(t.cast<String, dynamic>(), archived: true),
       ];
       final seenArchived = <String>{for (final e in archived) e.sessionId};
       for (final t in list) {
         if (t is! Map) continue;
-        final e = entryOf(t.cast<String, dynamic>(),
-            archived: t['archived'] == true);
+        final e =
+            entryOf(t.cast<String, dynamic>(), archived: t['archived'] == true);
         if (e.isArchived) {
           if (!seenArchived.contains(e.sessionId)) archived.add(e);
         } else {
@@ -484,10 +659,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
     } catch (e) {
       log('[诊断] listTasks 拉取失败: $e');
     } finally {
-      _loadingTasks = false;
-      if (_reloadQueued) {
-        _reloadQueued = false;
-        scheduleMicrotask(_loadTasks);
+      if (_isCurrentSource(generation, bridge, scopeKey) &&
+          requestGeneration == _tasksGeneration) {
+        _loadingTasks = false;
+        if (_reloadQueued && mounted) {
+          _reloadQueued = false;
+          scheduleMicrotask(_loadTasks);
+        }
       }
     }
   }
@@ -497,9 +675,27 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 标记 _cacheSyncedSub:失败或被中断时标记未锁定,下个快照可重试。
   void _syncCache(SessionsIndexSubscription sub) {
     if (!sub.state.ready || _cacheSyncedSub == sub) return;
-    unawaited(_cache
-        .write(widget.scope, [for (final e in _entries) e.raw])
-        .whenComplete(() => _cacheSyncedSub = sub));
+    final generation = _sourceGeneration;
+    final requestGeneration = ++_cacheGeneration;
+    final bridge = _sourceBridge;
+    final scope = _sourceScope;
+    final scopeKey = _sourceScopeKey;
+    _cachePendingSub = sub;
+    final entries = [for (final e in _entries) e.raw];
+    _cacheWrite = _cacheWrite.then((_) async {
+      if (!_isCurrentSource(generation, bridge, scopeKey) ||
+          requestGeneration != _cacheGeneration ||
+          !identical(_cachePendingSub, sub)) {
+        return;
+      }
+      await _cache.write(scope, entries);
+      if (_isCurrentSource(generation, bridge, scopeKey) &&
+          requestGeneration == _cacheGeneration &&
+          identical(_cachePendingSub, sub)) {
+        _cacheSyncedSub = sub;
+        _cachePendingSub = null;
+      }
+    });
   }
 
   /// 活跃显示列表 = 任务条目为主体 + 索引富化(旧版 task_home 骨架):
@@ -526,14 +722,15 @@ class _SessionDrawerState extends State<SessionDrawer> {
     return sortSessions(byId.values.toList());
   }
 
-  List<SessionEntry> get _filtered =>
-      filterSessions(_displayActive, _query);
+  List<SessionEntry> get _filtered => filterSessions(_displayActive, _query);
 
   // ------------------------------------------------------- manage actions
 
-  Map<String, dynamic> _taskArgs(String sessionId, {bool? pinned}) => {
+  Map<String, dynamic> _taskArgs(String sessionId,
+          {bool? pinned, Map<String, dynamic>? scope}) =>
+      {
         'taskId': sessionId,
-        ...widget.scope,
+        ...(scope ?? _sourceScope),
         if (pinned != null) 'pinned': pinned,
       };
 
@@ -545,27 +742,38 @@ class _SessionDrawerState extends State<SessionDrawer> {
     String method,
     String errorPrefix, {
     bool? pinned,
+    _DrawerActionSource? actionSource,
   }) async {
     if (_acting || _selected.isEmpty) return;
+    final selected = Set<String>.from(_selected);
+    final source = actionSource ?? _captureActionSource(selected);
+    if (source.targetIds.length != selected.length ||
+        !selected.every(source.targetIds.contains) ||
+        !selected.every((id) => _isCurrentActionSource(source, id))) return;
+    final managementGeneration = ++_managementGeneration;
     setState(() => _acting = true);
     var failed = 0;
-    for (final id in _selected) {
+    for (final id in selected) {
+      if (!_isCurrentActionSource(source, id) ||
+          managementGeneration != _managementGeneration) return;
       try {
-        await widget.bridge.channels
-            .call(Channels.zcodeTask, method, [_taskArgs(id, pinned: pinned)]);
+        if (!_isCurrentActionSource(source, id)) return;
+        await source.bridge.channels.call(Channels.zcodeTask, method,
+            [_taskArgs(id, pinned: pinned, scope: source.scope)]);
       } catch (_) {
         failed++;
       }
     }
-    if (!mounted) return;
+    if (!_isCurrentSource(source.generation, source.bridge, source.scopeKey) ||
+        managementGeneration != _managementGeneration) return;
     setState(() {
       _acting = false;
       _managing = false;
       _selected.clear();
     });
     if (failed > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$errorPrefix: $failed 项失败')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$errorPrefix: $failed 项失败')));
     }
     // 操作(置顶/归档/删除)改变置顶集与归档集 → 重拉刷新分组。
     unawaited(_loadPinned());
@@ -573,6 +781,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
   }
 
   Future<void> _deleteSelection() async {
+    if (_selected.isEmpty) return;
+    final source = _captureActionSource(_selected);
+    if (!_selected.every((id) => _isCurrentActionSource(source, id))) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -592,7 +803,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
       ),
     );
     if (confirmed != true) return;
-    await _applySelection('deleteTask', '删除失败');
+    await _applySelection('deleteTask', '删除失败', actionSource: source);
   }
 
   // ---------------------------------------------------- single-item actions
@@ -601,6 +812,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
   /// 活跃条目 = 置顶/重命名/归档/删除/查看原始快照;归档条目 =
   /// 取消归档/删除/查看原始快照。批量多选仍走「管理」。
   Future<void> _showItemActions(SessionEntry entry) async {
+    final source = _captureActionSource([entry.sessionId]);
+    if (!_isCurrentActionSource(source, entry.sessionId)) return;
     final colors = EmberColors.of(context);
     final pinned = _pinnedIds.contains(entry.sessionId);
     await showModalBottomSheet<void>(
@@ -626,15 +839,19 @@ class _SessionDrawerState extends State<SessionDrawer> {
             if (!entry.isArchived) ...[
               ListTile(
                 dense: true,
-                leading: Icon(
-                    pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                leading: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined,
                     size: 20),
                 title: Text(pinned ? '取消置顶' : '置顶'),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _itemAction(
-                      'setTaskPinned', entry, '置顶失败',
-                      args: _taskArgs(entry.sessionId, pinned: !pinned));
+                    'setTaskPinned',
+                    entry,
+                    '置顶失败',
+                    actionSource: source,
+                    args: _taskArgs(entry.sessionId,
+                        pinned: !pinned, scope: source.scope),
+                  );
                 },
               ),
               ListTile(
@@ -643,7 +860,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
                 title: const Text('重命名'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _renameEntry(entry);
+                  _renameEntry(entry, source);
                 },
               ),
               ListTile(
@@ -652,7 +869,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
                 title: const Text('归档'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _itemAction('archiveTask', entry, '归档失败');
+                  _itemAction('archiveTask', entry, '归档失败',
+                      actionSource: source);
                 },
               ),
             ] else
@@ -662,7 +880,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
                 title: const Text('取消归档'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _itemAction('unarchiveTask', entry, '取消归档失败');
+                  _itemAction('unarchiveTask', entry, '取消归档失败',
+                      actionSource: source);
                 },
               ),
             ListTile(
@@ -671,12 +890,13 @@ class _SessionDrawerState extends State<SessionDrawer> {
               title: const Text('查看原始快照'),
               onTap: () {
                 Navigator.pop(sheetContext);
+                if (!_isCurrentActionSource(source, entry.sessionId)) return;
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => TaskDetailPage(
                     taskId: entry.sessionId,
                     title: entry.title.isEmpty ? '任务详情' : entry.title,
-                    scope: widget.scope,
-                    session: widget.bridge,
+                    scope: source.scope,
+                    session: source.bridge,
                   ),
                 ));
               },
@@ -684,11 +904,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
             ListTile(
               dense: true,
               leading: Icon(Icons.delete_outline, size: 20, color: colors.err),
-              title:
-                  Text('删除', style: TextStyle(color: colors.err)),
+              title: Text('删除', style: TextStyle(color: colors.err)),
               onTap: () {
                 Navigator.pop(sheetContext);
-                _deleteEntry(entry);
+                _deleteEntry(entry, source);
               },
             ),
           ],
@@ -703,21 +922,31 @@ class _SessionDrawerState extends State<SessionDrawer> {
     SessionEntry entry,
     String errorPrefix, {
     Map<String, dynamic>? args,
+    _DrawerActionSource? actionSource,
   }) async {
+    final source = actionSource ?? _captureActionSource([entry.sessionId]);
+    if (!_isCurrentActionSource(source, entry.sessionId)) return;
+    final managementGeneration = ++_managementGeneration;
+    if (!_isCurrentActionSource(source, entry.sessionId)) return;
     try {
-      await widget.bridge.channels.call(
-          Channels.zcodeTask, method, [args ?? _taskArgs(entry.sessionId)]);
+      await source.bridge.channels.call(Channels.zcodeTask, method,
+          [args ?? _taskArgs(entry.sessionId, scope: source.scope)]);
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentActionSource(source, entry.sessionId) ||
+          managementGeneration != _managementGeneration) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$errorPrefix: $e')));
       return;
     }
+    if (!_isCurrentActionSource(source, entry.sessionId) ||
+        managementGeneration != _managementGeneration) return;
     unawaited(_loadPinned());
     unawaited(_loadTasks());
   }
 
-  Future<void> _renameEntry(SessionEntry entry) async {
+  Future<void> _renameEntry(
+      SessionEntry entry, _DrawerActionSource source) async {
+    if (!_isCurrentActionSource(source, entry.sessionId)) return;
     final controller = TextEditingController(text: entry.title);
     final title = await showDialog<String>(
       context: context,
@@ -730,8 +959,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消')),
+              onPressed: () => Navigator.pop(context), child: const Text('取消')),
           FilledButton(
               onPressed: () => Navigator.pop(context, controller.text.trim()),
               child: const Text('保存')),
@@ -739,17 +967,26 @@ class _SessionDrawerState extends State<SessionDrawer> {
       ),
     );
     controller.dispose();
-    if (title == null || title.isEmpty) return;
+    if (title == null ||
+        title.isEmpty ||
+        !_isCurrentActionSource(source, entry.sessionId)) return;
     await _itemAction('renameTask', entry, '重命名失败',
-        args: {..._taskArgs(entry.sessionId), 'title': title});
+        actionSource: source,
+        args: {
+          ..._taskArgs(entry.sessionId, scope: source.scope),
+          'title': title,
+        });
   }
 
-  Future<void> _deleteEntry(SessionEntry entry) async {
+  Future<void> _deleteEntry(
+      SessionEntry entry, _DrawerActionSource source) async {
+    if (!_isCurrentActionSource(source, entry.sessionId)) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除会话？'),
-        content: Text('将删除「${entry.title.isEmpty ? entry.sessionId : entry.title}」，此操作不可恢复'),
+        content: Text(
+            '将删除「${entry.title.isEmpty ? entry.sessionId : entry.title}」，此操作不可恢复'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -763,8 +1000,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
         ],
       ),
     );
-    if (confirmed != true) return;
-    await _itemAction('deleteTask', entry, '删除失败');
+    if (confirmed != true || !_isCurrentActionSource(source, entry.sessionId))
+      return;
+    await _itemAction('deleteTask', entry, '删除失败', actionSource: source);
   }
 
   // -------------------------------------------------------------- build
@@ -810,8 +1048,8 @@ class _SessionDrawerState extends State<SessionDrawer> {
     return InkWell(
       onTap: () => widget.onSwitchWorkspace(_entries.length),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(EmberSpacing.page,
-            EmberSpacing.gapM, EmberSpacing.page, EmberSpacing.gapM),
+        padding: const EdgeInsets.fromLTRB(EmberSpacing.page, EmberSpacing.gapM,
+            EmberSpacing.page, EmberSpacing.gapM),
         child: Row(
           children: [
             Container(
@@ -821,8 +1059,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
                 color: colors.primary.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(EmberRadius.avatar),
               ),
-              child:
-                  Icon(Icons.folder_open, size: 16, color: colors.primary),
+              child: Icon(Icons.folder_open, size: 16, color: colors.primary),
             ),
             const SizedBox(width: EmberSpacing.gapS),
             Expanded(
@@ -851,8 +1088,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
                 ],
               ),
             ),
-            Icon(Icons.keyboard_arrow_down,
-                size: 20, color: colors.textMuted),
+            Icon(Icons.keyboard_arrow_down, size: 20, color: colors.textMuted),
           ],
         ),
       ),
@@ -866,13 +1102,11 @@ class _SessionDrawerState extends State<SessionDrawer> {
           EmberSpacing.page, 0, EmberSpacing.page, EmberSpacing.gapS),
       child: TextField(
         controller: _searchController,
-        style:
-            TextStyle(fontSize: EmberType.body, color: colors.textSolid),
+        style: TextStyle(fontSize: EmberType.body, color: colors.textSolid),
         decoration: InputDecoration(
           isDense: true,
           hintText: '搜索会话',
-          prefixIcon:
-              Icon(Icons.search, size: 18, color: colors.textFaint),
+          prefixIcon: Icon(Icons.search, size: 18, color: colors.textFaint),
           suffixIcon: _query.isEmpty
               ? null
               : IconButton(
@@ -930,17 +1164,16 @@ class _SessionDrawerState extends State<SessionDrawer> {
             child: OutlinedButton(
               onPressed: _acting
                   ? null
-                  : () => _applySelection('setTaskPinned', '置顶失败',
-                      pinned: true),
+                  : () =>
+                      _applySelection('setTaskPinned', '置顶失败', pinned: true),
               child: const Text('置顶'),
             ),
           ),
           const SizedBox(width: EmberSpacing.gapS),
           Expanded(
             child: OutlinedButton(
-              onPressed: _acting
-                  ? null
-                  : () => _applySelection('archiveTask', '归档失败'),
+              onPressed:
+                  _acting ? null : () => _applySelection('archiveTask', '归档失败'),
               child: const Text('归档'),
             ),
           ),
@@ -1117,90 +1350,88 @@ class _SessionDrawerState extends State<SessionDrawer> {
     // 行按压缩放(spec §5 动效);InkWell 水波保留。
     return EmberPressable(
       child: InkWell(
-      onTap: () {
-        if (_managing) {
-          setState(() => selected
-              ? _selected.remove(entry.sessionId)
-              : _selected.add(entry.sessionId));
-          return;
-        }
-        widget.onPick(entry.sessionId);
-      },
-      onLongPress: () {
-        if (_managing) return;
-        _showItemActions(entry);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: EmberSpacing.cardPad, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected
-              ? colors.primary.withValues(alpha: 0.12)
-              : isCurrent
-                  ? colors.raise.withValues(alpha: 0.6)
-                  : Colors.transparent,
-          borderRadius: BorderRadius.circular(EmberRadius.control),
-        ),
-        child: Row(
-          children: [
-            if (_managing) ...[
-              Icon(
-                selected
-                    ? Icons.check_circle
-                    : Icons.radio_button_unchecked,
-                size: 18,
-                color: selected ? colors.primary : colors.textFaint,
+        onTap: () {
+          if (_managing) {
+            setState(() => selected
+                ? _selected.remove(entry.sessionId)
+                : _selected.add(entry.sessionId));
+            return;
+          }
+          widget.onPick(entry.sessionId);
+        },
+        onLongPress: () {
+          if (_managing) return;
+          _showItemActions(entry);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: EmberSpacing.cardPad, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? colors.primary.withValues(alpha: 0.12)
+                : isCurrent
+                    ? colors.raise.withValues(alpha: 0.6)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(EmberRadius.control),
+          ),
+          child: Row(
+            children: [
+              if (_managing) ...[
+                Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  size: 18,
+                  color: selected ? colors.primary : colors.textFaint,
+                ),
+                const SizedBox(width: EmberSpacing.gapM),
+              ],
+              SizedBox(
+                width: 8,
+                height: 8,
+                child: dot == null
+                    ? null
+                    : DecoratedBox(
+                        decoration:
+                            BoxDecoration(color: dot, shape: BoxShape.circle),
+                      ),
               ),
               const SizedBox(width: EmberSpacing.gapM),
-            ],
-            SizedBox(
-              width: 8,
-              height: 8,
-              child: dot == null
-                  ? null
-                  : DecoratedBox(
-                      decoration:
-                          BoxDecoration(color: dot, shape: BoxShape.circle),
-                    ),
-            ),
-            const SizedBox(width: EmberSpacing.gapM),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.title.isEmpty ? entry.sessionId : entry.title,
-                    style: TextStyle(
-                        fontSize: EmberType.body,
-                        fontWeight:
-                            isCurrent ? FontWeight.w600 : FontWeight.w400,
-                        color: colors.textSolid),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if ((entry.lastAssistantPreview ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 2),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      entry.lastAssistantPreview!,
+                      entry.title.isEmpty ? entry.sessionId : entry.title,
                       style: TextStyle(
-                          fontSize: EmberType.caption,
-                          color: colors.textMuted),
+                          fontSize: EmberType.body,
+                          fontWeight:
+                              isCurrent ? FontWeight.w600 : FontWeight.w400,
+                          color: colors.textSolid),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if ((entry.lastAssistantPreview ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        entry.lastAssistantPreview!,
+                        style: TextStyle(
+                            fontSize: EmberType.caption,
+                            color: colors.textMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: EmberSpacing.gapS),
-            Text(
-              _relativeDayLabel(entry.lastActivityAt),
-              style: TextStyle(fontSize: 10, color: colors.textFaint),
-            ),
-          ],
+              const SizedBox(width: EmberSpacing.gapS),
+              Text(
+                _relativeDayLabel(entry.lastActivityAt),
+                style: TextStyle(fontSize: 10, color: colors.textFaint),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
     );
   }
 
@@ -1226,8 +1457,7 @@ class _SessionDrawerState extends State<SessionDrawer> {
             const SizedBox(width: EmberSpacing.gapS),
             Text('${widget.deviceCount} 台设备',
                 style: TextStyle(
-                    fontSize: EmberType.secondary,
-                    color: colors.textMuted)),
+                    fontSize: EmberType.secondary, color: colors.textMuted)),
             const Spacer(),
             Icon(Icons.chevron_right, size: 16, color: colors.textFaint),
           ],

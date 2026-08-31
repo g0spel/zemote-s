@@ -91,7 +91,22 @@ class ConversationTransport {
     });
   }
 
-  Future<ConversationSubscription> subscribe(String sessionId) async {
+  Future<ConversationSubscription> subscribe(String sessionId) {
+    final inFlight = _subscribeInFlight[sessionId];
+    if (inFlight != null) return inFlight;
+
+    final future = _startSubscription(sessionId);
+    _subscribeInFlight[sessionId] = future;
+    unawaited(future.then<void>(
+      (_) => _clearInFlightSubscription(sessionId, future),
+      onError: (Object error, StackTrace stackTrace) {
+        _clearInFlightSubscription(sessionId, future);
+      },
+    ));
+    return future;
+  }
+
+  Future<ConversationSubscription> _startSubscription(String sessionId) async {
     await handshake();
     final subscription = ConversationSubscription._(this, sessionId);
     try {
@@ -106,8 +121,18 @@ class ConversationTransport {
     return subscription;
   }
 
-  void _untrackSubscription(String sessionId) {
-    _subscriptions.remove(sessionId);
+  void _clearInFlightSubscription(
+      String sessionId, Future<ConversationSubscription> future) {
+    if (identical(_subscribeInFlight[sessionId], future)) {
+      _subscribeInFlight.remove(sessionId);
+    }
+  }
+
+  void _untrackSubscription(
+      String sessionId, ConversationSubscription subscription) {
+    if (identical(_subscriptions[sessionId], subscription)) {
+      _subscriptions.remove(sessionId);
+    }
   }
 
   void dispose() {
@@ -152,6 +177,8 @@ class ConversationTransport {
   /// Live subscriptions by sessionId — source of the current
   /// revision/logEpoch for CAS commands.
   final _subscriptions = <String, ConversationSubscription>{};
+  final _subscribeInFlight =
+      <String, Future<ConversationSubscription>>{};
 
   /// Highest revision seen from command acks (`revisionAtDecision`) —
   /// acks land before the follow-up `state.updated` frame, and the next
@@ -1327,7 +1354,7 @@ class ConversationSubscription extends _SubscriptionBase<ConversationState> {
   @override
   Future<void> _onDispose() async {
     _watchdog?.cancel();
-    _transport._untrackSubscription(sessionId);
+    _transport._untrackSubscription(sessionId, this);
     state.dispose();
   }
 

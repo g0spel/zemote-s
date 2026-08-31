@@ -1,6 +1,42 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:zflow/protocol/channel_client.dart';
 import 'package:zflow/protocol/conversation.dart';
+import 'package:zflow/protocol/ipc_codec.dart';
+import 'package:zflow/protocol/zflow_client.dart';
+
+Uint8List _conversationFrame(List<Object?> header, [Object? data]) {
+  final writer = ValueWriter();
+  encodeValue(writer, header);
+  if (data != null) encodeValue(writer, data);
+  return writer.toBytes();
+}
+
+({int id, String method, Object? args}) _conversationRequest(Uint8List body) {
+  final reader = ValueReader(body);
+  final header = decodeValue(reader) as List;
+  return (
+    id: (header[1] as num).toInt(),
+    method: header[3] as String,
+    args: decodeValue(reader),
+  );
+}
+
+void _respondConversation(ChannelClient channels, int id, Object? result) {
+  channels.handleMessage(
+      _conversationFrame([ChannelClient.resPromiseSuccess, id], result));
+}
+
+void _rejectConversation(ChannelClient channels, int id, Object? error) {
+  channels.handleMessage(
+      _conversationFrame([ChannelClient.resPromiseError, id], error));
+}
+
+Future<void> _flushConversation() => Future<void>.delayed(Duration.zero);
+
 
 void main() {
   group('ConversationState delta application', () {
@@ -900,6 +936,221 @@ void main() {
           rows: const [], totalCount: 10, firstRowId: 3, seq: 1);
       expect(state.oldestRowId, 3);
     });
+  });
+
+  test('a timed-out retry shares the late in-flight subscription', () async {
+    final sent = <Uint8List>[];
+    final channels = ChannelClient(sendBody: sent.add);
+    final bridge = BridgeSession.detached(
+      {'workspaceKey': '/ws'},
+      channels: channels,
+    );
+    final transport = ConversationTransport(
+      session: bridge,
+      scope: const {'workspacePath': '/ws'},
+    );
+    addTearDown(() {
+      transport.dispose();
+      bridge.dispose();
+    });
+    channels.handleMessage(
+        _conversationFrame(const [ChannelClient.resInitialize, 0]));
+
+    final lateFuture = transport.subscribe('session-1');
+    await _flushConversation();
+    var requests = sent.map(_conversationRequest).toList();
+    final hello =
+        requests.singleWhere((r) => r.method == 'helloConversationV4');
+    _respondConversation(channels, hello.id, <String, dynamic>{});
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final initialize =
+        requests.singleWhere((r) => r.method == 'initializeConversationV4');
+    _respondConversation(channels, initialize.id, <String, dynamic>{});
+    await _flushConversation();
+
+    requests = sent.map(_conversationRequest).toList();
+    final subscribeRequests = requests
+        .where((r) => r.method == 'subscribeConversationV4')
+        .toList();
+    expect(subscribeRequests, hasLength(1));
+
+    await expectLater(
+      lateFuture.timeout(Duration.zero),
+      throwsA(isA<TimeoutException>()),
+    );
+
+    final retryFuture = transport.subscribe('session-1');
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    expect(
+      requests.where((r) => r.method == 'subscribeConversationV4'),
+      hasLength(1),
+    );
+    _respondConversation(channels, subscribeRequests.single.id, {
+      'ack': {'subscriptionId': 'shared-sub'},
+    });
+
+    final late = await lateFuture;
+    final retry = await retryFuture;
+    expect(retry, same(late));
+
+    final disposeFuture = retry.dispose();
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final unsubscribe =
+        requests.singleWhere((r) => r.method == 'unsubscribeConversationV4');
+    _respondConversation(channels, unsubscribe.id, <String, dynamic>{});
+    await disposeFuture;
+  });
+
+  test('a failed in-flight subscribe can be retried', () async {
+    final sent = <Uint8List>[];
+    final channels = ChannelClient(sendBody: sent.add);
+    final bridge = BridgeSession.detached(
+      {'workspaceKey': '/ws'},
+      channels: channels,
+    );
+    final transport = ConversationTransport(
+      session: bridge,
+      scope: const {'workspacePath': '/ws'},
+    );
+    addTearDown(() {
+      transport.dispose();
+      bridge.dispose();
+    });
+    channels.handleMessage(
+        _conversationFrame(const [ChannelClient.resInitialize, 0]));
+
+    final failedFuture = transport.subscribe('session-1');
+    await _flushConversation();
+    var requests = sent.map(_conversationRequest).toList();
+    final hello =
+        requests.singleWhere((r) => r.method == 'helloConversationV4');
+    _respondConversation(channels, hello.id, <String, dynamic>{});
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final initialize =
+        requests.singleWhere((r) => r.method == 'initializeConversationV4');
+    _respondConversation(channels, initialize.id, <String, dynamic>{});
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final firstSubscribe =
+        requests.singleWhere((r) => r.method == 'subscribeConversationV4');
+    _rejectConversation(channels, firstSubscribe.id, {'message': 'rejected'});
+    await expectLater(failedFuture, throwsA(isA<ChannelRpcError>()));
+
+    final retryFuture = transport.subscribe('session-1');
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final subscribeRequests = requests
+        .where((r) => r.method == 'subscribeConversationV4')
+        .toList();
+    expect(subscribeRequests, hasLength(2));
+    _respondConversation(channels, subscribeRequests.last.id, {
+      'ack': {'subscriptionId': 'retry-sub'},
+    });
+    final retry = await retryFuture;
+    expect(retry.subscriptionId, 'retry-sub');
+    final disposeFuture = retry.dispose();
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final unsubscribe =
+        requests.singleWhere((r) => r.method == 'unsubscribeConversationV4');
+    _respondConversation(channels, unsubscribe.id, <String, dynamic>{});
+    await disposeFuture;
+  });
+
+  test('disposing an old subscription preserves the replacement mapping', () async {
+    final sent = <Uint8List>[];
+    final channels = ChannelClient(sendBody: sent.add);
+    final bridge = BridgeSession.detached(
+      {'workspaceKey': '/ws'},
+      channels: channels,
+    );
+    final transport = ConversationTransport(
+      session: bridge,
+      scope: const {'workspacePath': '/ws'},
+    );
+    addTearDown(() {
+      transport.dispose();
+      bridge.dispose();
+    });
+    channels.handleMessage(
+        _conversationFrame(const [ChannelClient.resInitialize, 0]));
+
+    final oldFuture = transport.subscribe('session-1');
+    await _flushConversation();
+
+    var requests = sent.map(_conversationRequest).toList();
+    final hello =
+        requests.singleWhere((r) => r.method == 'helloConversationV4');
+    _respondConversation(channels, hello.id, <String, dynamic>{});
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final initialize =
+        requests.singleWhere((r) => r.method == 'initializeConversationV4');
+    _respondConversation(channels, initialize.id, <String, dynamic>{});
+    await _flushConversation();
+
+    requests = sent.map(_conversationRequest).toList();
+    final oldSubscribe = requests
+        .singleWhere((r) => r.method == 'subscribeConversationV4');
+    _respondConversation(channels, oldSubscribe.id, {
+      'ack': {'subscriptionId': 'old-sub'},
+    });
+    final old = await oldFuture;
+
+    final replacementFuture = transport.subscribe('session-1');
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final replacementSubscribe = requests
+        .where((r) => r.method == 'subscribeConversationV4')
+        .last;
+    _respondConversation(channels, replacementSubscribe.id, {
+      'ack': {'subscriptionId': 'replacement-sub'},
+    });
+
+    final replacement = await replacementFuture;
+    replacement.state.applyFrame({
+      'payload': {
+        'kind': 'snapshot',
+        'snapshot': {
+          'revision': 17,
+          'logEpoch': 'epoch-replacement',
+          'rows': {'window': [], 'totalCount': 0},
+        },
+      },
+      'toSeq': 1,
+    }, onGap: () => fail('replacement snapshot should not gap'));
+
+    final oldDispose = old.dispose();
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final oldUnsubscribe = requests.singleWhere(
+      (r) => r.method == 'unsubscribeConversationV4',
+    );
+    _respondConversation(channels, oldUnsubscribe.id, <String, dynamic>{});
+    await oldDispose;
+
+    final commandFuture = transport.sendCommand(
+      'session-1',
+      'setAssistantFeedback',
+      {'rowId': 1, 'feedback': 'like'},
+    );
+    await _flushConversation();
+    requests = sent.map(_conversationRequest).toList();
+    final command = requests.singleWhere(
+      (r) => r.method == 'sendConversationCommandV4',
+    );
+    final envelope = ((command.args as List).single as Map)['envelope'] as Map;
+    expect(envelope['baseRevision'], 17);
+    expect(envelope['baseLogEpoch'], 'epoch-replacement');
+    _respondConversation(channels, command.id, {
+      'status': 'accepted',
+      'revisionAtDecision': 17,
+    });
+    await commandFuture;
   });
 
 }

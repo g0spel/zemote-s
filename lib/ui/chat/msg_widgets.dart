@@ -13,26 +13,20 @@ class _ModeBanner extends StatelessWidget {
     if (!yolo && !plan) return const SizedBox.shrink();
     final colors = EmberColors.of(context);
     final color = yolo ? colors.err : colors.warn;
-    final text = yolo
-        ? 'YOLO 模式 · 全部操作免确认，请确认在工作机上'
-        : '计划模式中 · 只读研究，方案产出后需你确认才会动手';
+    final text =
+        yolo ? 'YOLO 模式 · 全部操作免确认，请确认在工作机上' : '计划模式中 · 只读研究，方案产出后需你确认才会动手';
     return Container(
       width: double.infinity,
       color: color.withValues(alpha: 0.15),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
         children: [
-          Icon(
-              yolo
-                  ? Icons.warning_amber_rounded
-                  : Icons.visibility_outlined,
-              size: 14,
-              color: color),
+          Icon(yolo ? Icons.warning_amber_rounded : Icons.visibility_outlined,
+              size: 14, color: color),
           const SizedBox(width: EmberSpacing.gapS),
           Expanded(
             child: Text(text,
-                style: TextStyle(
-                    fontSize: EmberType.secondary, color: color)),
+                style: TextStyle(fontSize: EmberType.secondary, color: color)),
           ),
         ],
       ),
@@ -72,7 +66,8 @@ class _ReconnectBanner extends StatelessWidget {
                 Expanded(
                   child: Text('连接已断开，正在自动重连…',
                       style: TextStyle(
-                          fontSize: 12, color: EmberColors.of(context).textSoft)),
+                          fontSize: 12,
+                          color: EmberColors.of(context).textSoft)),
                 ),
               ],
             ),
@@ -114,8 +109,8 @@ AssistantTurnParts assistantTurnParts(List<Map<String, dynamic>> rows) {
     if (template != null) {
       final text = buf!.toString().trim();
       if (text.isNotEmpty) {
-        parts.add((kind: 'text', text: text, row: template,
-            streaming: anyStream));
+        parts.add(
+            (kind: 'text', text: text, row: template, streaming: anyStream));
       }
       buf = null;
       template = null;
@@ -154,8 +149,7 @@ AssistantTurnParts assistantTurnParts(List<Map<String, dynamic>> rows) {
 /// after one). Consecutive assistant rows are merged into a single group
 /// EVEN IF the server bumps `turnId` mid-response, so one answer never
 /// splits into several bubbles each carrying its own feedback buttons.
-List<List<Map<String, dynamic>>> _groupRows(
-    List<Map<String, dynamic>> rows) {
+List<List<Map<String, dynamic>>> _groupRows(List<Map<String, dynamic>> rows) {
   final groups = <List<Map<String, dynamic>>>[];
   List<Map<String, dynamic>>? current;
   for (final row in rows) {
@@ -166,9 +160,8 @@ List<List<Map<String, dynamic>>> _groupRows(
       continue;
     }
     final isUser = kind == 'userInput';
-    final startsGroup = isUser ||
-        current == null ||
-        current.first['kind'] == 'userInput';
+    final startsGroup =
+        isUser || current == null || current.first['kind'] == 'userInput';
     if (startsGroup) {
       current = [row];
       groups.add(current);
@@ -210,6 +203,9 @@ class _TurnGroupWidget extends StatelessWidget {
   final String sessionId;
   final Future<void> Function(String, Future<dynamic> Function()) onAction;
   final ConversationState state;
+  final bool Function()? isSourceCurrent;
+  final int Function()? beginFileChangesOperation;
+  final bool Function(int operationGeneration)? isFileChangesOperationCurrent;
 
   const _TurnGroupWidget({
     super.key,
@@ -218,6 +214,9 @@ class _TurnGroupWidget extends StatelessWidget {
     required this.sessionId,
     required this.onAction,
     required this.state,
+    this.isSourceCurrent,
+    this.beginFileChangesOperation,
+    this.isFileChangesOperationCurrent,
   });
 
   /// First error snippet among this turn's failed tool calls — shown on the
@@ -255,7 +254,8 @@ class _TurnGroupWidget extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 2),
       child: Text(text,
-          style: TextStyle(fontSize: 10, color: EmberColors.of(context).textFaint)),
+          style: TextStyle(
+              fontSize: 10, color: EmberColors.of(context).textFaint)),
     );
   }
 
@@ -269,8 +269,8 @@ class _TurnGroupWidget extends StatelessWidget {
     if (first['kind'] == 'userInput') {
       // "Processing" badge: this is the newest user message and its turn
       // is currently running. The badge clears when the turn completes.
-      final processing = state.isRunning &&
-          first['rowId'] == lastUserInputRowId(state.rows);
+      final processing =
+          state.isRunning && first['rowId'] == lastUserInputRowId(state.rows);
       // user message + anything attached to the same turn
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -281,6 +281,7 @@ class _TurnGroupWidget extends StatelessWidget {
             sessionId: sessionId,
             onAction: onAction,
             state: state,
+            isSourceCurrent: isSourceCurrent,
             badge: processing ? 'processing' : null,
           ),
           for (final row in rows.skip(1))
@@ -290,11 +291,10 @@ class _TurnGroupWidget extends StatelessWidget {
               sessionId: sessionId,
               onAction: onAction,
               state: state,
+              isSourceCurrent: isSourceCurrent,
             ),
           if (_timeLabel(context) != null)
-            Align(
-                alignment: Alignment.centerRight,
-                child: _timeLabel(context)),
+            Align(alignment: Alignment.centerRight, child: _timeLabel(context)),
         ],
       );
     }
@@ -321,6 +321,9 @@ class _TurnGroupWidget extends StatelessWidget {
           sessionId: sessionId,
           onAction: onAction,
           state: state,
+          isSourceCurrent: isSourceCurrent,
+          beginFileChangesOperation: beginFileChangesOperation,
+          isFileChangesOperationCurrent: isFileChangesOperationCurrent,
         ));
       } else {
         children.add(_RowWidget(
@@ -330,6 +333,9 @@ class _TurnGroupWidget extends StatelessWidget {
           sessionId: sessionId,
           onAction: onAction,
           state: state,
+          isSourceCurrent: isSourceCurrent,
+          beginFileChangesOperation: beginFileChangesOperation,
+          isFileChangesOperationCurrent: isFileChangesOperationCurrent,
         ));
       }
     }
@@ -337,14 +343,13 @@ class _TurnGroupWidget extends StatelessWidget {
     if (header != null) {
       children.add(_TurnHeader(
         row: header,
-        errorSummary: (header['state'] as String?) == 'failed'
-            ? _errorSummary()
-            : null,
+        errorSummary:
+            (header['state'] as String?) == 'failed' ? _errorSummary() : null,
       ));
     }
     if (_timeLabel(context) != null) {
-      children.add(Align(
-          alignment: Alignment.centerLeft, child: _timeLabel(context)));
+      children.add(
+          Align(alignment: Alignment.centerLeft, child: _timeLabel(context)));
     }
     if (children.isEmpty) return const SizedBox.shrink();
     return Column(
@@ -360,6 +365,9 @@ class _RowWidget extends StatelessWidget {
   final String sessionId;
   final Future<void> Function(String, Future<dynamic> Function()) onAction;
   final ConversationState state;
+  final bool Function()? isSourceCurrent;
+  final int Function()? beginFileChangesOperation;
+  final bool Function(int operationGeneration)? isFileChangesOperationCurrent;
   final bool showFeedback;
 
   /// Delivery badge for user rows (see [_MsgBadge]).
@@ -371,6 +379,9 @@ class _RowWidget extends StatelessWidget {
     required this.sessionId,
     required this.onAction,
     required this.state,
+    this.isSourceCurrent,
+    this.beginFileChangesOperation,
+    this.isFileChangesOperationCurrent,
     this.showFeedback = true,
     this.badge,
   });
@@ -383,6 +394,7 @@ class _RowWidget extends StatelessWidget {
   void _showActions(BuildContext context) {
     final kind = row['kind'];
     if (kind != 'userInput' && kind != 'assistantText') return;
+    if (isSourceCurrent != null && !isSourceCurrent!()) return;
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
@@ -403,8 +415,8 @@ class _RowWidget extends StatelessWidget {
               title: const Text('重试本轮 (retryTurn)'),
               onTap: () {
                 Navigator.pop(context);
-                onAction('重试失败',
-                    () => transport.retryTurn(sessionId, _target));
+                if (isSourceCurrent != null && !isSourceCurrent!()) return;
+                onAction('重试失败', () => transport.retryTurn(sessionId, _target));
               },
             ),
             ListTile(
@@ -412,8 +424,9 @@ class _RowWidget extends StatelessWidget {
               title: const Text('分叉对话 (fork)'),
               onTap: () {
                 Navigator.pop(context);
-                onAction('分叉失败',
-                    () => transport.forkAssistant(sessionId, _target));
+                if (isSourceCurrent != null && !isSourceCurrent!()) return;
+                onAction(
+                    '分叉失败', () => transport.forkAssistant(sessionId, _target));
               },
             ),
             ListTile(
@@ -439,6 +452,7 @@ class _RowWidget extends StatelessWidget {
   }
 
   Future<void> _editQuery(BuildContext context) async {
+    if (isSourceCurrent != null && !isSourceCurrent!()) return;
     final controller =
         TextEditingController(text: row['text'] as String? ?? '');
     final text = await showDialog<String>(
@@ -452,22 +466,23 @@ class _RowWidget extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消')),
+              onPressed: () => Navigator.pop(context), child: const Text('取消')),
           FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, controller.text.trim()),
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
               child: const Text('重发')),
         ],
       ),
     );
     controller.dispose();
-    if (text == null || text.isEmpty) return;
-    await onAction('编辑失败',
-        () => transport.editUserQuery(sessionId, _target, text));
+    if (text == null ||
+        text.isEmpty ||
+        (isSourceCurrent != null && !isSourceCurrent!())) return;
+    await onAction(
+        '编辑失败', () => transport.editUserQuery(sessionId, _target, text));
   }
 
   Future<void> _confirmRewind(BuildContext context) async {
+    if (isSourceCurrent != null && !isSourceCurrent!()) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -484,12 +499,18 @@ class _RowWidget extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed != true) return;
-    await onAction('回滚失败',
-        () => transport.applyFileRewind(sessionId, _target));
+    if (confirmed != true || (isSourceCurrent != null && !isSourceCurrent!()))
+      return;
+    await onAction('回滚失败', () => transport.applyFileRewind(sessionId, _target));
   }
 
+  bool _isCurrentFileOperation(int generation) =>
+      isFileChangesOperationCurrent?.call(generation) ??
+      (isSourceCurrent?.call() ?? true);
+
   Future<void> _showFileChanges(BuildContext context) async {
+    if (isSourceCurrent != null && !isSourceCurrent!()) return;
+    final operationGeneration = beginFileChangesOperation?.call();
     try {
       // The server guard accepts turnHeader targets only — resolve this
       // row's turn header (rows carry the same turnId) and add the
@@ -505,8 +526,8 @@ class _RowWidget extends StatelessWidget {
       }
       if (header == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('该回合没有可查询的文件变更')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('该回合没有可查询的文件变更')));
         }
         return;
       }
@@ -514,13 +535,21 @@ class _RowWidget extends StatelessWidget {
         sessionId,
         target: {'rowId': header['rowId'], 'entityId': header['entityId']},
       );
-      if (!context.mounted) return;
+      if (!context.mounted ||
+          (isSourceCurrent != null && !isSourceCurrent!()) ||
+          (operationGeneration != null &&
+              !_isCurrentFileOperation(operationGeneration))) {
+        return;
+      }
       showModalBottomSheet(
         context: context,
         builder: (context) => _JsonSheet(title: '文件变更', data: changes),
       );
     } catch (e) {
-      if (context.mounted) {
+      if (context.mounted &&
+          (isSourceCurrent == null || isSourceCurrent!()) &&
+          (operationGeneration == null ||
+              _isCurrentFileOperation(operationGeneration))) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('获取失败: $e')));
       }
@@ -530,11 +559,19 @@ class _RowWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final widget_ = switch (row['kind']) {
-      'userInput' => _UserBubble(row: row, transport: transport,
-          sessionId: sessionId, badge: badge),
+      'userInput' => _UserBubble(
+          row: row,
+          transport: transport,
+          sessionId: sessionId,
+          badge: badge,
+          isSourceCurrent: isSourceCurrent),
       'assistantText' => _AssistantBubble(
-          row: row, transport: transport, sessionId: sessionId,
-          state: state, showFeedback: showFeedback),
+          row: row,
+          transport: transport,
+          sessionId: sessionId,
+          state: state,
+          showFeedback: showFeedback,
+          isSourceCurrent: isSourceCurrent),
       'reasoning' => _ReasoningTile(
           text: row['text'] as String? ?? '',
           streaming: row['state'] == 'streaming'),
@@ -569,17 +606,20 @@ class _MsgBadge extends StatelessWidget {
     switch (status) {
       case 'sending':
         content = Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.schedule, size: 11, color: EmberColors.of(context).textFaint),
+          Icon(Icons.schedule,
+              size: 11, color: EmberColors.of(context).textFaint),
           const SizedBox(width: 3),
           Text('发送中',
-              style: TextStyle(fontSize: 9.5, color: EmberColors.of(context).textFaint)),
+              style: TextStyle(
+                  fontSize: 9.5, color: EmberColors.of(context).textFaint)),
         ]);
       case 'sent':
         content = Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.check, size: 11, color: EmberColors.of(context).textFaint),
           const SizedBox(width: 3),
           Text('已发送',
-              style: TextStyle(fontSize: 9.5, color: EmberColors.of(context).textFaint)),
+              style: TextStyle(
+                  fontSize: 9.5, color: EmberColors.of(context).textFaint)),
         ]);
       case 'processing':
         content = Row(mainAxisSize: MainAxisSize.min, children: [
@@ -589,9 +629,8 @@ class _MsgBadge extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 1.4)),
           const SizedBox(width: 3),
           Text('处理中',
-              style: TextStyle(
-                  fontSize: 9.5,
-                  color: EmberColors.of(context).run)),
+              style:
+                  TextStyle(fontSize: 9.5, color: EmberColors.of(context).run)),
         ]);
       default: // failed
         content = Row(mainAxisSize: MainAxisSize.min, children: [
@@ -599,9 +638,8 @@ class _MsgBadge extends StatelessWidget {
               size: 12, color: EmberColors.of(context).err),
           const SizedBox(width: 3),
           Text('发送失败 · 点击重试',
-              style: TextStyle(
-                  fontSize: 9.5,
-                  color: EmberColors.of(context).err)),
+              style:
+                  TextStyle(fontSize: 9.5, color: EmberColors.of(context).err)),
         ]);
     }
     if (!failed) {
@@ -625,6 +663,7 @@ class _UserBubble extends StatelessWidget {
   final Map<String, dynamic> row;
   final ConversationTransport transport;
   final String sessionId;
+  final bool Function()? isSourceCurrent;
 
   /// Delivery badge (see [_MsgBadge]); null renders none.
   final String? badge;
@@ -638,6 +677,7 @@ class _UserBubble extends StatelessWidget {
     required this.sessionId,
     this.badge,
     this.onRetry,
+    this.isSourceCurrent,
   });
 
   @override
@@ -652,8 +692,7 @@ class _UserBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: EmberColors.of(context).primary,
                 borderRadius: const BorderRadius.only(
@@ -673,6 +712,7 @@ class _UserBubble extends StatelessWidget {
                           attachment: a.cast<String, dynamic>(),
                           transport: transport,
                           sessionId: sessionId,
+                          isSourceCurrent: isSourceCurrent,
                         ),
                   if (text.isNotEmpty)
                     SelectableText(text,
@@ -695,11 +735,13 @@ class _AttachmentView extends StatefulWidget {
   final Map<String, dynamic> attachment;
   final ConversationTransport transport;
   final String sessionId;
+  final bool Function()? isSourceCurrent;
 
   const _AttachmentView({
     required this.attachment,
     required this.transport,
     required this.sessionId,
+    this.isSourceCurrent,
   });
 
   @override
@@ -709,6 +751,7 @@ class _AttachmentView extends StatefulWidget {
 class _AttachmentViewState extends State<_AttachmentView> {
   Uint8List? _imageBytes;
   bool _failed = false;
+  int _loadGeneration = 0;
 
   bool get _isImage =>
       '${widget.attachment['mime'] ?? ''}'.startsWith('image/');
@@ -719,15 +762,43 @@ class _AttachmentViewState extends State<_AttachmentView> {
     if (_isImage) _load();
   }
 
+  @override
+  void didUpdateWidget(covariant _AttachmentView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.transport != widget.transport ||
+        oldWidget.sessionId != widget.sessionId ||
+        oldWidget.attachment['ref'] != widget.attachment['ref']) {
+      _loadGeneration++;
+      _imageBytes = null;
+      _failed = false;
+      if (_isImage) _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _loadGeneration++;
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     final ref = widget.attachment['ref'] as String?;
-    if (ref == null) return;
+    final sessionId = widget.sessionId;
+    final transport = widget.transport;
+    bool current() =>
+        mounted &&
+        generation == _loadGeneration &&
+        transport == widget.transport &&
+        sessionId == widget.sessionId &&
+        (widget.isSourceCurrent?.call() ?? true);
+    if (ref == null || !current()) return;
     try {
-      final res = await widget.transport
-          .attachmentRead(widget.sessionId, ref: ref);
-      if (mounted) setState(() => _imageBytes = res.bytes);
+      final res = await transport.attachmentRead(sessionId, ref: ref);
+      if (!current()) return;
+      setState(() => _imageBytes = res.bytes);
     } catch (_) {
-      if (mounted) setState(() => _failed = true);
+      if (current()) setState(() => _failed = true);
     }
   }
 
@@ -758,7 +829,8 @@ class _AttachmentViewState extends State<_AttachmentView> {
     }
     if (_failed) {
       return Text('[图片加载失败] $fileName',
-          style: TextStyle(fontSize: 11, color: EmberColors.of(context).textFaint));
+          style: TextStyle(
+              fontSize: 11, color: EmberColors.of(context).textFaint));
     }
     if (_imageBytes == null) {
       return const Padding(
@@ -779,8 +851,7 @@ class _AttachmentViewState extends State<_AttachmentView> {
           fit: BoxFit.cover,
           // Decode at DISPLAY size, not source size — a 12MP photo is
           // ~48MB RGBA at full decode; this caps it at 220 logical px.
-          cacheWidth:
-              (220 * MediaQuery.devicePixelRatioOf(context)).round(),
+          cacheWidth: (220 * MediaQuery.devicePixelRatioOf(context)).round(),
         ),
       ),
     );
@@ -835,7 +906,8 @@ class _StreamingMarkdownState extends State<_StreamingMarkdown> {
   }
 
   @override
-  Widget build(BuildContext context) => ZflowMarkdown(_renderedText, fontSize: 13);
+  Widget build(BuildContext context) =>
+      ZflowMarkdown(_renderedText, fontSize: 13);
 }
 
 @visibleForTesting
@@ -858,6 +930,7 @@ class _AssistantBubble extends StatelessWidget {
   final String sessionId;
   final ConversationState state;
   final bool showFeedback;
+  final bool Function()? isSourceCurrent;
 
   const _AssistantBubble({
     required this.row,
@@ -865,20 +938,24 @@ class _AssistantBubble extends StatelessWidget {
     required this.sessionId,
     required this.state,
     this.showFeedback = true,
+    this.isSourceCurrent,
   });
 
   void _setFeedback(String? value) {
-    if (sessionId.isEmpty) return;
+    if (sessionId.isEmpty || (isSourceCurrent != null && !isSourceCurrent!()))
+      return;
     // Optimistic: update the icon instantly; server row.upserted confirms.
     state.optimisticRowUpdate(row['rowId'] as num?, {'feedback': value});
-    transport.setAssistantFeedback(
-      sessionId,
-      {
-        'rowId': row['rowId'],
-        if (row['entityId'] != null) 'entityId': row['entityId'],
-      },
-      value,
-    );
+    transport
+        .setAssistantFeedback(
+          sessionId,
+          {
+            'rowId': row['rowId'],
+            if (row['entityId'] != null) 'entityId': row['entityId'],
+          },
+          value,
+        )
+        .catchError((_) {});
   }
 
   @override
@@ -932,8 +1009,8 @@ class _AssistantBubble extends StatelessWidget {
                   _FeedbackButton(
                     icon: Icons.thumb_down_alt_outlined,
                     active: feedback == 'dislike',
-                    onTap: () => _setFeedback(
-                        feedback == 'dislike' ? null : 'dislike'),
+                    onTap: () =>
+                        _setFeedback(feedback == 'dislike' ? null : 'dislike'),
                   ),
                   // 回合时间戳(桌面端约定:行尾小字,今天只给时刻)。
                   Text(_messageTimeLabel(rowTs),
@@ -988,7 +1065,10 @@ class _FeedbackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       icon: Icon(icon,
-          size: 15, color: active ? EmberColors.of(context).primary : EmberColors.of(context).textFaint),
+          size: 15,
+          color: active
+              ? EmberColors.of(context).primary
+              : EmberColors.of(context).textFaint),
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
     );
@@ -1142,8 +1222,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                   children: [
                     Text(_open ? '▾ ' : '▸ ',
                         style: TextStyle(
-                            fontSize: EmberType.caption,
-                            color: e.textFaint)),
+                            fontSize: EmberType.caption, color: e.textFaint)),
                     Icon(icon, size: 12, color: color),
                     const SizedBox(width: 4),
                     Flexible(
@@ -1190,8 +1269,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                           cacheWidth: (MediaQuery.sizeOf(context).width *
                                   MediaQuery.devicePixelRatioOf(context))
                               .round(),
-                          errorBuilder: (_, __, ___) =>
-                              const SizedBox.shrink(),
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                         ),
                       ),
                     );
@@ -1225,7 +1303,8 @@ class _ToolCallTileState extends State<_ToolCallTile> {
             child: SelectableText(
               display,
               style: TextStyle(
-                  fontFamily: 'monospace', fontSize: 11,
+                  fontFamily: 'monospace',
+                  fontSize: 11,
                   color: EmberColors.of(context).textSolid),
             ),
           ),
@@ -1362,9 +1441,7 @@ class _TurnHeaderState extends State<_TurnHeader> {
     final errSummary = widget.errorSummary?.trim();
     final liveLabel = _fmtDuration(liveMs);
     final label = switch (state) {
-      'running' => liveLabel.isEmpty
-          ? '本轮执行中'
-          : '本轮执行中 · $liveLabel',
+      'running' => liveLabel.isEmpty ? '本轮执行中' : '本轮执行中 · $liveLabel',
       'completedSuccess' => [
           '本轮完成',
           if (duration.isNotEmpty) duration,
@@ -1397,8 +1474,7 @@ class _TurnHeaderState extends State<_TurnHeader> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 11,
-                    color: color.withValues(alpha: 0.9)),
+                    fontSize: 11, color: color.withValues(alpha: 0.9)),
               ),
             ),
           ),
@@ -1468,8 +1544,7 @@ class _TimelineMarkerWidget extends StatelessWidget {
     return Center(
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 6),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(20),
@@ -1519,8 +1594,7 @@ class _SubagentTile extends StatelessWidget {
               children: [
                 Text('子代理 · ${row['subagentType'] ?? ''}',
                     style: const TextStyle(fontSize: 12)),
-                Text(
-                    '${row['status'] ?? ''}  ${row['summaryText'] ?? ''}',
+                Text('${row['status'] ?? ''}  ${row['summaryText'] ?? ''}',
                     style: TextStyle(
                         fontSize: 11, color: EmberColors.of(context).textFaint),
                     maxLines: 2,
@@ -1552,10 +1626,10 @@ class _ContextUsageBar extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final ratio = (used / max).clamp(0.0, 1.0);
-    final color =
-        ratio > 0.8 ? EmberColors.of(context).warn : EmberColors.of(context).primary;
-    String fmt(int v) =>
-        v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
+    final color = ratio > 0.8
+        ? EmberColors.of(context).warn
+        : EmberColors.of(context).primary;
+    String fmt(int v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
       child: Row(
@@ -1581,4 +1655,3 @@ class _ContextUsageBar extends StatelessWidget {
     );
   }
 }
-

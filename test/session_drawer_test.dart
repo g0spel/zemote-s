@@ -40,7 +40,6 @@ void _respond(ChannelClient channels, int id, Object? result) => channels
   return (header, args);
 }
 
-
 /// 按 channel.method 应答其最小 wire id(替代手写 id 序列:抽屉初始化
 /// 的并行 RPC(listTasks/listArchivedTasks/listPinnedTasks)顺序不稳,
 /// 字面量 id 一加请求就全体错位)。
@@ -64,7 +63,6 @@ int? respondMethod(ChannelClient channels, List<Uint8List> sent, String method,
   }
   return null;
 }
-
 
 /// 按方法应答最新的一条请求(重拉产生的新 wire id 大于初次请求;
 /// respondMethod 总命中首条已应答的旧请求,答不到重拉)。
@@ -111,10 +109,9 @@ int listenerId(List<Uint8List> sent) {
   return -1;
 }
 
-
 /// 应答所有未应答的 reqPromise(空结果),消化超时定时器。
-Future<void> drainPending(ChannelClient channels, List<Uint8List> sent,
-    WidgetTester tester) async {
+Future<void> drainPending(
+    ChannelClient channels, List<Uint8List> sent, WidgetTester tester) async {
   while (true) {
     final pending = <int>[];
     for (final body in sent) {
@@ -152,15 +149,15 @@ void main() {
       'sessionId': 's2',
       'title': '重构 API',
       'phase': 'idle',
-      'lastActivityAt': now.subtract(const Duration(days: 2)).millisecondsSinceEpoch,
+      'lastActivityAt':
+          now.subtract(const Duration(days: 2)).millisecondsSinceEpoch,
       'createdAt': 1,
     },
   ];
 
   /// 按 wire id 找已发出的请求并解码。
-  (Object?, Object?) requestById(int id) => sent
-      .map(_decodeRequest)
-      .firstWhere((r) => (r.$1 as List)[1] == id);
+  (Object?, Object?) requestById(int id) =>
+      sent.map(_decodeRequest).firstWhere((r) => (r.$1 as List)[1] == id);
 
   SessionDrawer buildDrawer(String workspacePath, {String? currentSessionId}) =>
       SessionDrawer(
@@ -178,8 +175,7 @@ void main() {
       );
 
   /// 应答 id1 的 listPinnedTasks([pinned] 为服务端任务列表,元素带 taskId)。
-  void respondPinned(List<Object?> pinned) =>
-      _respond(channels, 1, pinned);
+  void respondPinned(List<Object?> pinned) => _respond(channels, 1, pinned);
 
   Future<void> pumpDrawer(WidgetTester tester,
       {List<Object?> pinned = const []}) async {
@@ -224,7 +220,10 @@ void main() {
     await tester.pump();
     // wire 帧{kind,topic,subscriptionId,frame};内层逻辑帧同样携带
     // subscriptionId(_acceptLogicalFrame 以它过滤)。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, listenerId(sent)], {
+    channels.handleMessage(_inFrame([
+      ChannelClient.resEventFire,
+      listenerId(sent)
+    ], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -332,8 +331,8 @@ void main() {
     while (true) {
       final p2 = respondMethod(channels, sent, 'listPinnedTasks',
           result: const [], skip: skip);
-      final t1 =
-          respondMethod(channels, sent, 'listTasks', result: const [], skip: skip);
+      final t1 = respondMethod(channels, sent, 'listTasks',
+          result: const [], skip: skip);
       final t2 = respondMethod(channels, sent, 'listArchivedTasks',
           result: const [], skip: skip);
       if (p2 == null && t1 == null && t2 == null) break;
@@ -350,24 +349,23 @@ void main() {
     await tester.pump(const Duration(seconds: 40));
   });
 
-  testWidgets('打开抽屉先播种离线缓存;实时数据到达即覆盖;状态点以实时为准',
-      (tester) async {
+  testWidgets('打开抽屉先播种离线缓存;实时数据到达即覆盖;状态点以实时为准', (tester) async {
     // 状态点 = 会话行内 8×8 且非空的 SizedBox(种子条目 child 为 null)。
     final statusDotFinder = find.byWidgetPredicate((w) =>
         w is SizedBox && w.width == 8 && w.height == 8 && w.child != null);
     SharedPreferences.setMockInitialValues({
       const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
           jsonEncode([
-            {
-              'sessionId': 'cached-1',
-              'title': '离线缓存会话',
-              // 缓存里的过期运行态:种子显示,但状态点以实时为准(裁决)。
-              'phase': 'running',
-              'lastActivityAt':
-                  now.subtract(const Duration(days: 1)).millisecondsSinceEpoch,
-              'createdAt': 1,
-            },
-          ]),
+        {
+          'sessionId': 'cached-1',
+          'title': '离线缓存会话',
+          // 缓存里的过期运行态:种子显示,但状态点以实时为准(裁决)。
+          'phase': 'running',
+          'lastActivityAt':
+              now.subtract(const Duration(days: 1)).millisecondsSinceEpoch,
+          'createdAt': 1,
+        },
+      ]),
     });
 
     channels = ChannelClient(sendBody: (body) => sent.add(body));
@@ -412,7 +410,10 @@ void main() {
     expect(statusDotFinder, findsNothing);
 
     // 实时快照到达 → 覆盖种子;running 条目恢复状态点。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, listenerId(sent)], {
+    channels.handleMessage(_inFrame([
+      ChannelClient.resEventFire,
+      listenerId(sent)
+    ], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -434,7 +435,7 @@ void main() {
     await tester.pump();
     final prefs = await SharedPreferences.getInstance();
     final stored = jsonDecode(prefs.getString(
-        const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}))!)
+            const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}))!)
         as List;
     expect(stored.first['sessionId'], 's1');
 
@@ -502,7 +503,10 @@ void main() {
 
   /// 推一张 sessions-index 快照(逐帧走真实 wire 路径)。
   void pushSnapshot(List<Object?> sessions) {
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, listenerId(sent)], {
+    channels.handleMessage(_inFrame([
+      ChannelClient.resEventFire,
+      listenerId(sent)
+    ], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -521,21 +525,19 @@ void main() {
     SharedPreferences.setMockInitialValues({
       const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
           jsonEncode([
-            {
-              'sessionId': 'cached-1',
-              'title': '离线缓存会话',
-              'phase': '',
-              'lastActivityAt': now.millisecondsSinceEpoch,
-              'createdAt': 1,
-            },
-          ]),
+        {
+          'sessionId': 'cached-1',
+          'title': '离线缓存会话',
+          'phase': '',
+          'lastActivityAt': now.millisecondsSinceEpoch,
+          'createdAt': 1,
+        },
+      ]),
     });
     await pumpDrawerHandshake(tester, '/ws-t');
     // 订阅请求应答错误 → _error 态(id 按方法名解析)。
-    final subId = sent
-        .map(_decodeRequest)
-        .map((r) => r.$1 as List)
-        .firstWhere((h) =>
+    final subId = sent.map(_decodeRequest).map((r) => r.$1 as List).firstWhere(
+        (h) =>
             h[0] == ChannelClient.reqPromise &&
             h[3] == 'subscribeSessionsIndexV4')[1] as int;
     channels.handleMessage(_inFrame(
@@ -569,10 +571,8 @@ void main() {
   testWidgets('订阅失败且无种子:仍显示错误页', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await pumpDrawerHandshake(tester, '/ws-t');
-    final subId = sent
-        .map(_decodeRequest)
-        .map((r) => r.$1 as List)
-        .firstWhere((h) =>
+    final subId = sent.map(_decodeRequest).map((r) => r.$1 as List).firstWhere(
+        (h) =>
             h[0] == ChannelClient.reqPromise &&
             h[3] == 'subscribeSessionsIndexV4')[1] as int;
     channels.handleMessage(_inFrame(
@@ -593,14 +593,14 @@ void main() {
     SharedPreferences.setMockInitialValues({
       const SessionListCache().keyFor(const {'workspacePath': '/ws-t'}):
           jsonEncode([
-            {
-              'sessionId': 'cached-1',
-              'title': '离线缓存会话',
-              'phase': '',
-              'lastActivityAt': now.millisecondsSinceEpoch,
-              'createdAt': 1,
-            },
-          ]),
+        {
+          'sessionId': 'cached-1',
+          'title': '离线缓存会话',
+          'phase': '',
+          'lastActivityAt': now.millisecondsSinceEpoch,
+          'createdAt': 1,
+        },
+      ]),
     });
     await pumpDrawerWithoutSnapshot(tester, '/ws-t');
     expect(find.text('离线缓存会话'), findsOneWidget);
@@ -639,7 +639,10 @@ void main() {
 
     // s1 被删除/归档:增量推送把它从索引移除 → 触发归属重拉 → 复位回调。
     // 宿主语义:删除后任务不再出现在 listTasks(deleted 排除)。
-    channels.handleMessage(_inFrame([ChannelClient.resEventFire, listenerId(sent)], {
+    channels.handleMessage(_inFrame([
+      ChannelClient.resEventFire,
+      listenerId(sent)
+    ], {
       'kind': 'complete',
       'topic': 'sessions-index//ws-t',
       'subscriptionId': 'sub-test',
@@ -707,8 +710,7 @@ void main() {
     await tester.pump(const Duration(seconds: 40));
   });
 
-  testWidgets('抽屉打开并行拉取 listPinnedTasks,命中会话渲染进置顶组',
-      (tester) async {
+  testWidgets('抽屉打开并行拉取 listPinnedTasks,命中会话渲染进置顶组', (tester) async {
     await pumpDrawer(tester, pinned: [
       {'taskId': 's2'}, // s2 原属「更早」,置顶后进置顶组
     ]);
@@ -736,8 +738,7 @@ void main() {
     await tester.pump(const Duration(seconds: 40));
   });
 
-  testWidgets('listPinnedTasks 失败容错为空集:列表照常活跃组渲染',
-      (tester) async {
+  testWidgets('listPinnedTasks 失败容错为空集:列表照常活跃组渲染', (tester) async {
     await pumpDrawerHandshake(tester, '/ws-t');
     channels.handleMessage(_inFrame(
         [ChannelClient.resPromiseError, 1], {'message': 'pinned exploded'}));
@@ -756,6 +757,53 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();
     await tester.pump(const Duration(seconds: 40));
+  });
+
+  testWidgets('延迟条目操作在 source 切换后不发送旧 RPC', (tester) async {
+    await pumpDrawer(tester);
+    final oldBridge = bridge;
+    final oldChannels = channels;
+    final oldRequestStart = sent.length;
+
+    await tester.longPress(find.text('修复登录'));
+    await tester.pump();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    final archiveTile =
+        tester.widget<ListTile>(find.widgetWithText(ListTile, '归档'));
+    final oldArchiveAction = archiveTile.onTap!;
+
+    final nextSent = <Uint8List>[];
+    final nextChannels = ChannelClient(sendBody: nextSent.add);
+    final nextBridge = BridgeSession.detached(
+      {'workspaceKey': '/ws-new'},
+      channels: nextChannels,
+    );
+    channels = nextChannels;
+    bridge = nextBridge;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: buildDrawer('/ws-new')),
+    ));
+    await tester.pump();
+
+    // 旧 action sheet 的回调保留旧 source,切换后执行也不能发送。
+    oldArchiveAction();
+    await tester.pump();
+
+    bool hasMethod(Iterable<Uint8List> bodies, String method) =>
+        bodies.any((body) {
+          final (header, _) = _decodeRequest(body);
+          final h = header as List;
+          return h[0] == ChannelClient.reqPromise && h[3] == method;
+        });
+    expect(hasMethod(sent.skip(oldRequestStart), 'archiveTask'), isFalse);
+    expect(hasMethod(nextSent, 'archiveTask'), isFalse);
+
+    await drainPending(nextChannels, nextSent, tester);
+    await drainPending(oldChannels, sent, tester);
+    await tester.pumpWidget(const SizedBox.shrink());
+    oldBridge.dispose();
+    nextBridge.dispose();
+    await tester.pump(const Duration(seconds: 80));
   });
 
   testWidgets('置顶操作完成后重拉置顶集,条目随即进置顶组', (tester) async {
