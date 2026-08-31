@@ -135,13 +135,41 @@ List<Map<String, dynamic>> endedSubagentRows(List<Map<String, dynamic>> rows) {
       .toList();
 }
 
+/// 容错解析 conversationPlansV4 响应(桌面计划)。宿主形状未承诺:接受
+/// `{plans|items|steps|todos: [...]}`、裸数组或单个计划对象;条目沿用
+/// PlanStep 的宽容解析(all-or-nothing)。无可识别结构返回 null(UI 隐藏
+/// 该段,不报错)。Pure for tests.
+List<PlanStep>? parseHostPlans(Object? res) {
+  Object? list = res;
+  if (res is Map) {
+    for (final k in const ['plans', 'items', 'steps', 'todos']) {
+      final v = res[k];
+      if (v is List) {
+        list = v;
+        break;
+      }
+    }
+  }
+  if (list is Map) {
+    final one = _parsePlanStep(list, 0);
+    return one == null ? null : [one];
+  }
+  if (list is! List || list.isEmpty) return null;
+  final steps = <PlanStep>[];
+  for (var i = 0; i < list.length; i++) {
+    final s = _parsePlanStep(list[i], i);
+    if (s == null) return null;
+    steps.add(s);
+  }
+  return steps;
+}
+
 /// The latest turnHeader of a COMPLETED turn (`state: completedSuccess`
 /// with a usable {rowId, entityId}) — the official client's armed target
 /// for file-changes loading. A still-running turn must not be queried: the
 /// server guard races the streaming revision and rejects it as stale.
 /// Pure for tests.
-Map<String, dynamic>? latestCompletedTurn(List<Map<String, dynamic>> rows) {
-  for (final r in rows.reversed) {
+Map<String, dynamic>? latestCompletedTurn(List<Map<String, dynamic>> rows) {  for (final r in rows.reversed) {
     if (r['kind'] != 'turnHeader' || r['state'] != 'completedSuccess') {
       continue;
     }
@@ -366,6 +394,14 @@ class _InsightsSheetState extends State<InsightsSheet> {
   int _fileRequestGeneration = 0;
   final _derived = _InsightsDerivedCache();
 
+  /// 待办面板折叠态(桌面悬浮胶囊样式):收起只显示一行摘要。
+  bool _todoCollapsed = true;
+
+  /// 宿主计划(conversationPlansV4):sheet 打开时拉取一次;解析不出
+  /// 可识别结构则为 null(隐藏该段),失败静默。
+  List<PlanStep>? _hostPlans;
+  bool _hostPlansLoading = false;
+
   bool _isSourceCurrent() => widget.isSourceCurrent?.call() ?? true;
 
   @override
@@ -374,6 +410,23 @@ class _InsightsSheetState extends State<InsightsSheet> {
     _syncDerived();
     widget.state.addListener(_onStateChanged);
     _onStateChanged();
+    _loadHostPlans();
+  }
+
+  /// 宿主计划拉取:响应形状未承诺,parseHostPlans 容错;失败按无计划
+  /// 处理,不打扰面板其余功能。
+  Future<void> _loadHostPlans() async {
+    if (_hostPlans != null || _hostPlansLoading) return;
+    _hostPlansLoading = true;
+    try {
+      final res = await widget.transport.plans(widget.sessionId);
+      if (!mounted || !_isSourceCurrent()) return;
+      setState(() => _hostPlans = parseHostPlans(res));
+    } catch (_) {
+      if (mounted) setState(() => _hostPlans = const []);
+    } finally {
+      _hostPlansLoading = false;
+    }
   }
 
   void _syncDerived() {
@@ -396,6 +449,9 @@ class _InsightsSheetState extends State<InsightsSheet> {
       _fileChanges = null;
       _filesError = null;
       _filesLoading = false;
+      _hostPlans = null;
+      _hostPlansLoading = false;
+      _loadHostPlans();
     }
     _syncDerived();
     _onStateChanged();
@@ -637,14 +693,23 @@ class _InsightsSheetState extends State<InsightsSheet> {
     );
   }
 
+  /// 待办面板内的小节标题(计划进度/待办/计划)。
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+    );
+  }
+
   Widget _panelHeader(
       BuildContext context, String title, VoidCallback onRefresh,
       {bool loading = false}) {
     return Row(
       children: [
         Text(title,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-        const Spacer(),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),        const Spacer(),
         if (loading)
           const SizedBox(
               width: 12,
@@ -716,164 +781,196 @@ class _InsightsSheetState extends State<InsightsSheet> {
       'verified' => ('已验证', EmberColors.of(context).ok),
       _ => ('', EmberColors.of(context).textFaint),
     };
-    final Widget body;
-    if (todoSteps.isEmpty && planItems == null) {
-      body = Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text('暂无待办',
-            style: TextStyle(
-                fontSize: 11.5, color: EmberColors.of(context).textFaint)),
-      );
-    } else {
-      body = ListView.builder(
-        controller: widget.scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        shrinkWrap: true,
-        // +1 slot is the plan-section header — only when a plan exists
-        // (todos without a plan snapshot must not dereference it).
-        itemCount: todoSteps.length +
-            (planItems?.length ?? 0) +
-            (planItems != null ? 1 : 0),
-        itemBuilder: (context, i) {
-          if (i < todoSteps.length) {
-            final s = todoSteps[i];
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    s.completed
-                        ? Icons.check_circle
-                        : s.inProgress
-                            ? Icons.play_circle_outline
-                            : Icons.radio_button_unchecked,
-                    size: 14,
-                    color: s.completed
-                        ? EmberColors.of(context).ok
-                        : s.inProgress
-                            ? EmberColors.of(context).primary
-                            : EmberColors.of(context).textFaint,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      s.title,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: s.completed
-                            ? EmberColors.of(context).textFaint
-                            : EmberColors.of(context).textSolid,
-                        decoration:
-                            s.completed ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-          // Plan section header before the first plan item.
-          if (i == todoSteps.length) {
-            final done =
-                planItems!.where((e) => '${e['status']}' == 'completed').length;
-            return Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 2),
-              child: Row(
-                children: [
-                  Icon(Icons.flag_outlined,
-                      size: 12, color: EmberColors.of(context).primary),
-                  const SizedBox(width: 5),
-                  Text('计划进度 · $done / ${planItems.length}',
-                      style: TextStyle(
-                          fontSize: 10.5,
-                          color: EmberColors.of(context).textFaint)),
-                ],
-              ),
-            );
-          }
-          final item = planItems![i - todoSteps.length - 1];
-          final status = '${item['status']}';
-          final completed = status == 'completed';
-          final inProgress = status == 'inProgress';
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
+    final hostPlans = _hostPlans;
+
+    // 主清单(胶囊摘要与进度):计划快照 > TodoWrite 待办 > 宿主计划。
+    final primary = planItems != null
+        ? [
+            for (final i in planItems)
+              (
+                title: '${i['content'] ?? i['id'] ?? ''}',
+                done: '${i['status']}' == 'completed',
+              )
+          ]
+        : todoSteps.isNotEmpty
+            ? [
+                for (final s in todoSteps) (title: s.title, done: s.completed)
+              ]
+            : [
+                for (final s in hostPlans ?? const <PlanStep>[])
+                  (title: s.title, done: s.completed)
+              ];
+    final doneCount = primary.where((e) => e.done).length;
+    final headline = primary.isEmpty
+        ? (hasGoal ? goalText : '暂无待办')
+        : primary.firstWhere((e) => !e.done,
+            orElse: () => primary.first).title;
+
+    final colors = EmberColors.of(context);
+
+    // 折叠态(桌面悬浮胶囊样式):一行摘要 + 进度,点按展开。
+    if (_todoCollapsed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(EmberRadius.control),
+          onTap: () => setState(() => _todoCollapsed = false),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: Color.lerp(colors.bg, colors.card, 0.5),
+              borderRadius: BorderRadius.circular(EmberRadius.control),
+              border: Border.all(color: colors.hairline),
+            ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  completed
-                      ? Icons.check_circle
-                      : inProgress
-                          ? Icons.play_circle_outline
-                          : Icons.radio_button_unchecked,
-                  size: 14,
-                  color: completed
-                      ? EmberColors.of(context).ok
-                      : inProgress
-                          ? EmberColors.of(context).primary
-                          : EmberColors.of(context).textFaint,
-                ),
+                Icon(Icons.arrow_right_alt,
+                    size: 14, color: colors.primary),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
-                    '${item['content'] ?? item['id'] ?? ''}',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: completed
-                          ? EmberColors.of(context).textFaint
-                          : EmberColors.of(context).textSolid,
-                      decoration: completed ? TextDecoration.lineThrough : null,
-                    ),
-                  ),
+                  child: Text(headline,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 11.5, color: colors.textMuted)),
                 ),
+                if (primary.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Text('$doneCount / ${primary.length}',
+                      style: TextStyle(
+                          fontSize: 10.5, color: colors.textFaint)),
+                ],
+                Icon(Icons.keyboard_arrow_down,
+                    size: 14, color: colors.textFaint),
               ],
             ),
-          );
-        },
+          ),
+        ),
       );
+    }
+
+    Widget stepRow({required String title, required bool completed, required bool inProgress}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              completed
+                  ? Icons.check_circle
+                  : inProgress
+                      ? Icons.play_circle_outline
+                      : Icons.radio_button_unchecked,
+              size: 14,
+              color: completed
+                  ? colors.ok
+                  : inProgress
+                      ? colors.primary
+                      : colors.textFaint,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: completed ? colors.textFaint : colors.textSolid,
+                  decoration: completed ? TextDecoration.lineThrough : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final sections = <Widget>[];
+    if (hasGoal) {
+      sections.add(Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(EmberRadius.control),
+            border: Border.all(color: colors.hairline),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.adjust, size: 13, color: colors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(goalText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11.5, color: colors.textSolid)),
+              ),
+              if (goalLabel.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Text(goalLabel,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: goalColor)),
+              ],
+            ],
+          ),
+        ),
+      ));
+    }
+    if (planItems != null) {
+      final done =
+          planItems.where((e) => '${e['status']}' == 'completed').length;
+      sections.add(_sectionLabel('计划进度 · $done / ${planItems.length}'));
+      for (final item in planItems) {
+        final status = '${item['status']}';
+        sections.add(stepRow(
+          title: '${item['content'] ?? item['id'] ?? ''}',
+          completed: status == 'completed',
+          inProgress: status == 'inProgress',
+        ));
+      }
+    } else if (todoSteps.isNotEmpty) {
+      sections.add(_sectionLabel('待办（最新 TodoWrite）'));
+      for (final s in todoSteps) {
+        sections.add(stepRow(
+            title: s.title,
+            completed: s.completed,
+            inProgress: s.inProgress));
+      }
+    }
+    if (hostPlans != null && hostPlans.isNotEmpty) {
+      sections.add(_sectionLabel('计划（宿主）'));
+      for (final s in hostPlans) {
+        sections.add(stepRow(
+            title: s.title,
+            completed: s.completed,
+            inProgress: s.inProgress));
+      }
+    }
+    if (sections.isEmpty) {
+      sections.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text('暂无待办',
+            style: TextStyle(fontSize: 11.5, color: colors.textFaint)),
+      ));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelHeader(context,
-            planItems != null ? '执行计划（Plan 工具）' : '待办（最新 TodoWrite）', () {}),
-        if (hasGoal)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(EmberRadius.control),
-                border: Border.all(color: EmberColors.of(context).hairline),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.adjust,
-                      size: 13, color: EmberColors.of(context).primary),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(goalText,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: EmberColors.of(context).textSolid)),
-                  ),
-                  if (goalLabel.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Text(goalLabel,
-                        style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w600,
-                            color: goalColor)),
-                  ],
-                ],
-              ),
-            ),
+        InkWell(
+          onTap: () => setState(() => _todoCollapsed = true),
+          child: _panelHeader(context, '待办与计划', () {}),
+        ),
+        Flexible(
+          child: ListView(
+            controller: widget.scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            shrinkWrap: true,
+            children: sections,
           ),
-        Flexible(child: body),
+        ),
       ],
     );
   }

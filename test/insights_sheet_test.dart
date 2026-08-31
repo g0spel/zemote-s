@@ -90,6 +90,34 @@ void main() {
     });
   });
 
+  group('parseHostPlans(conversationPlansV4 容错解析,纯函数)', () {
+    test('解析 {plans: [{title, status}]} 数组', () {
+      final plans = parseHostPlans({
+        'plans': [
+          {'title': 'e141 联合风险预算', 'status': 'in_progress'},
+          {'title': 'e140 订单在途', 'status': 'completed'},
+        ],
+      });
+      expect(plans, hasLength(2));
+      expect(plans![0].title, 'e141 联合风险预算');
+      expect(plans[0].inProgress, isTrue);
+      expect(plans[1].completed, isTrue);
+    });
+
+    test('解析裸数组与字符串条目', () {
+      final plans = parseHostPlans(['第一战役', '第二战役']);
+      expect(plans, hasLength(2));
+      expect(plans![0].title, '第一战役');
+    });
+
+    test('未知形状返回 null(UI 隐藏该段)', () {
+      expect(parseHostPlans({'foo': 'bar'}), isNull);
+      expect(parseHostPlans(null), isNull);
+      expect(parseHostPlans({'plans': [42]}), isNull,
+          reason: '条目非对象/字符串 → 全部丢弃');
+    });
+  });
+
   group('InsightsHandle(输入区上方把手)', () {
     Future<BridgeSession> pumpHandle(
         WidgetTester tester, ConversationState state) async {
@@ -242,6 +270,9 @@ void main() {
           },
         ];
       final (bridge, _) = await pumpSheet(tester, state);
+      // 默认折叠为胶囊(桌面同款):点开后列出全部步骤。
+      await tester.tap(find.text('写解析器'));
+      await tester.pump();
       expect(find.text('调研协议'), findsOneWidget);
       expect(find.text('写解析器'), findsOneWidget);
       expect(find.text('待办 2'), findsOneWidget);

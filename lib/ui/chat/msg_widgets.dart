@@ -346,6 +346,19 @@ class _TurnGroupWidget extends StatelessWidget {
         errorSummary:
             (header['state'] as String?) == 'failed' ? _errorSummary() : null,
       ));
+      // 文件变更条(桌面同款):回合有文件改动时显示可点卡片。
+      final fileChanges = header['fileChanges'];
+      if (fileChanges is Map &&
+          ((fileChanges['files'] as num?)?.toInt() ?? 0) > 0) {
+        children.add(_FileChangesCard(
+          header: header,
+          transport: transport,
+          sessionId: sessionId,
+          beginFileChangesOperation: beginFileChangesOperation,
+          isFileChangesOperationCurrent: isFileChangesOperationCurrent,
+          isSourceCurrent: isSourceCurrent,
+        ));
+      }
     }
     if (_timeLabel(context) != null) {
       children.add(
@@ -508,56 +521,34 @@ class _RowWidget extends StatelessWidget {
     await onAction('回滚失败', () => transport.applyFileRewind(sessionId, _target));
   }
 
-  bool _isCurrentFileOperation(int generation) =>
-      isFileChangesOperationCurrent?.call(generation) ??
-      (isSourceCurrent?.call() ?? true);
-
   Future<void> _showFileChanges(BuildContext context) async {
-    if (isSourceCurrent != null && !isSourceCurrent!()) return;
-    final operationGeneration = beginFileChangesOperation?.call();
-    try {
-      // The server guard accepts turnHeader targets only — resolve this
-      // row's turn header (rows carry the same turnId) and add the
-      // Zod-required baseRevision/baseLogEpoch.
-      final turnId = row['turnId'];
-      Map<String, dynamic>? header;
-      for (final r in state.rows) {
-        if (r['kind'] == 'turnHeader' &&
-            r['rowId'] != null &&
-            r['entityId'] is String) {
-          if (turnId == null || r['turnId'] == turnId) header = r;
-        }
-      }
-      if (header == null) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('该回合没有可查询的文件变更')));
-        }
-        return;
-      }
-      final changes = await transport.fileChanges(
-        sessionId,
-        target: {'rowId': header['rowId'], 'entityId': header['entityId']},
-      );
-      if (!context.mounted ||
-          (isSourceCurrent != null && !isSourceCurrent!()) ||
-          (operationGeneration != null &&
-              !_isCurrentFileOperation(operationGeneration))) {
-        return;
-      }
-      showModalBottomSheet(
-        context: context,
-        builder: (context) => _JsonSheet(title: '文件变更', data: changes),
-      );
-    } catch (e) {
-      if (context.mounted &&
-          (isSourceCurrent == null || isSourceCurrent!()) &&
-          (operationGeneration == null ||
-              _isCurrentFileOperation(operationGeneration))) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('获取失败: $e')));
+    // The server guard accepts turnHeader targets only — resolve this
+    // row's turn header (rows carry the same turnId).
+    final turnId = row['turnId'];
+    Map<String, dynamic>? header;
+    for (final r in state.rows) {
+      if (r['kind'] == 'turnHeader' &&
+          r['rowId'] != null &&
+          r['entityId'] is String) {
+        if (turnId == null || r['turnId'] == turnId) header = r;
       }
     }
+    if (header == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('该回合没有可查询的文件变更')));
+      }
+      return;
+    }
+    await showTurnFileChangesSheet(
+      context,
+      transport: transport,
+      sessionId: sessionId,
+      header: header,
+      beginFileChangesOperation: beginFileChangesOperation,
+      isFileChangesOperationCurrent: isFileChangesOperationCurrent,
+      isSourceCurrent: isSourceCurrent,
+    );
   }
 
   @override
@@ -1651,6 +1642,264 @@ class _SubagentTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 回合文件变更的查看器:拉取 conversationFileChangesV4 并展示。解析出
+/// 文件清单时用结构化列表(路径 + 增删行数,桌面变更条同款信息),形状
+/// 未知时回退原始 JSON。
+Future<void> showTurnFileChangesSheet(
+  BuildContext context, {
+  required ConversationTransport transport,
+  required String sessionId,
+  required Map<String, dynamic> header,
+  int Function()? beginFileChangesOperation,
+  bool Function(int generation)? isFileChangesOperationCurrent,
+  bool Function()? isSourceCurrent,
+}) async {
+  if (isSourceCurrent != null && !isSourceCurrent()) return;
+  final operationGeneration = beginFileChangesOperation?.call();
+  try {
+    final changes = await transport.fileChanges(
+      sessionId,
+      target: {'rowId': header['rowId'], 'entityId': header['entityId']},
+    );
+    if (!context.mounted ||
+        (isSourceCurrent != null && !isSourceCurrent()) ||
+        (operationGeneration != null &&
+            !(isFileChangesOperationCurrent?.call(operationGeneration) ??
+                true))) {
+      return;
+    }
+    final entries = parseFileChangeEntries(changes);
+    if (entries == null) {
+      showModalBottomSheet(
+        context: context,
+        builder: (context) => _JsonSheet(title: '文件变更', data: changes),
+      );
+      return;
+    }
+    final adds = (header['fileChanges']?['additions'] as num?)?.toInt();
+    final dels = (header['fileChanges']?['deletions'] as num?)?.toInt();
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => _FileChangesSheet(
+        entries: entries,
+        additions: adds,
+        deletions: dels,
+      ),
+    );
+  } catch (e) {
+    if (context.mounted &&
+        (isSourceCurrent == null || isSourceCurrent()) &&
+        (operationGeneration == null ||
+            (isFileChangesOperationCurrent?.call(operationGeneration) ??
+                true))) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('获取失败: $e')));
+    }
+  }
+}
+
+/// 解析文件变更响应为条目(path/状态/增删)。形状未知返回 null(回退
+/// 原始 JSON 展示)。
+List<({String path, int? additions, int? deletions})>?
+    parseFileChangeEntries(Object? changes) {
+  List? list;
+  if (changes is List) {
+    list = changes;
+  } else if (changes is Map) {
+    for (final k in const ['files', 'changes', 'entries', 'items']) {
+      final v = changes[k];
+      if (v is List && v.isNotEmpty) {
+        list = v;
+        break;
+      }
+    }
+    if (list == null && changes['path'] != null) list = [changes];
+  }
+  if (list == null) return null;
+  final entries = <({String path, int? additions, int? deletions})>[];
+  for (final item in list) {
+    if (item is! Map) return null;
+    final path = '${item['path'] ?? item['file'] ?? item['name'] ?? ''}';
+    if (path.isEmpty) return null;
+    entries.add((
+      path: path,
+      additions: (item['additions'] as num?)?.toInt() ??
+          (item['added'] as num?)?.toInt(),
+      deletions: (item['deletions'] as num?)?.toInt() ??
+          (item['removed'] as num?)?.toInt(),
+    ));
+  }
+  return entries.isEmpty ? null : entries;
+}
+
+/// 回合内文件变更卡(桌面 `› N 个文件已更改 +312 -2` 样式):点击拉取
+/// 明细并展示。
+class _FileChangesCard extends StatelessWidget {
+  final Map<String, dynamic> header;
+  final ConversationTransport transport;
+  final String sessionId;
+  final int Function()? beginFileChangesOperation;
+  final bool Function(int generation)? isFileChangesOperationCurrent;
+  final bool Function()? isSourceCurrent;
+
+  const _FileChangesCard({
+    required this.header,
+    required this.transport,
+    required this.sessionId,
+    this.beginFileChangesOperation,
+    this.isFileChangesOperationCurrent,
+    this.isSourceCurrent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    final fileChanges = header['fileChanges'] as Map? ?? const {};
+    final files = (fileChanges['files'] as num?)?.toInt() ?? 0;
+    final adds = (fileChanges['additions'] as num?)?.toInt();
+    final dels = (fileChanges['deletions'] as num?)?.toInt();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(EmberRadius.control),
+        onTap: () => showTurnFileChangesSheet(
+          context,
+          transport: transport,
+          sessionId: sessionId,
+          header: header,
+          beginFileChangesOperation: beginFileChangesOperation,
+          isFileChangesOperationCurrent: isFileChangesOperationCurrent,
+          isSourceCurrent: isSourceCurrent,
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: Color.lerp(colors.bg, colors.card, 0.5),
+            borderRadius: BorderRadius.circular(EmberRadius.control),
+            border: Border.all(color: colors.hairline),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.chevron_right, size: 14, color: colors.textFaint),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('$files 个文件已更改',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: colors.textSolid)),
+              ),
+              if (adds != null && adds > 0)
+                Text('+$adds',
+                    style: TextStyle(fontSize: 12, color: colors.ok)),
+              if (dels != null && dels > 0) ...[
+                const SizedBox(width: 6),
+                Text('-$dels',
+                    style: TextStyle(fontSize: 12, color: colors.err)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 结构化文件变更明细(桌面变更面板样式):统计头 + 路径/增删行。
+class _FileChangesSheet extends StatelessWidget {
+  final List<({String path, int? additions, int? deletions})> entries;
+  final int? additions;
+  final int? deletions;
+
+  const _FileChangesSheet({
+    required this.entries,
+    this.additions,
+    this.deletions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 12, 0, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: EmberSpacing.page),
+              child: Row(
+                children: [
+                  Text('文件变更 · ${entries.length}',
+                      style: TextStyle(
+                          fontSize: EmberType.body,
+                          fontWeight: FontWeight.w600,
+                          color: colors.textSolid)),
+                  const Spacer(),
+                  if (additions != null && additions! > 0)
+                    Text('+$additions',
+                        style: TextStyle(fontSize: 12.5, color: colors.ok)),
+                  if (deletions != null && deletions! > 0) ...[
+                    const SizedBox(width: 8),
+                    Text('-$deletions',
+                        style: TextStyle(fontSize: 12.5, color: colors.err)),
+                  ],
+                ],
+              ),
+            ),
+            const Divider(height: 16),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: entries.length,
+                itemBuilder: (context, i) {
+                  final e = entries[i];
+                  final name =
+                      e.path.split('/').where((p) => p.isNotEmpty).last;
+                  final dir = e.path.substring(
+                      0, e.path.length - name.length);
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(Icons.insert_drive_file_outlined,
+                        size: 16, color: colors.textFaint),
+                    title: Text(name,
+                        style: TextStyle(
+                            fontSize: 12.5, color: colors.textSolid)),
+                    subtitle: dir.isEmpty
+                        ? null
+                        : Text(dir,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 10.5, color: colors.textFaint)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (e.additions != null && e.additions! > 0)
+                          Text('+${e.additions}',
+                              style: TextStyle(
+                                  fontSize: 11.5, color: colors.ok)),
+                        if (e.deletions != null && e.deletions! > 0) ...[
+                          const SizedBox(width: 6),
+                          Text('-${e.deletions}',
+                              style: TextStyle(
+                                  fontSize: 11.5, color: colors.err)),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

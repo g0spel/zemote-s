@@ -559,6 +559,15 @@ class ConversationTransport {
           String sessionId, Map<String, dynamic> target) =>
       sendCommand(sessionId, 'applyFileRewind', {'target': target});
 
+  /// 会话计划(桌面 conversationPlansV4)。响应形状宿主未承诺——调用方
+  /// 需容错解析,解析失败按"无结构化计划"处理,不得崩溃。
+  Future<dynamic> plans(String sessionId) async {
+    await handshake();
+    return _channels.call(channel, 'conversationPlansV4', [
+      {...scope, 'sessionId': sessionId},
+    ]);
+  }
+
   /// File-changes query. baseRevision/baseLogEpoch are read from the live
   /// subscription internally: the server guard requires them to EXACTLY
   /// match the publisher snapshot, so callers must not cache a value.

@@ -494,6 +494,48 @@ class _UsageSheetState extends State<_UsageSheet> {
   bool _querying = false;
   int _queryGeneration = 0;
 
+  /// 上下文容量头(桌面 ○ 面板同款):用量/上限 + 百分比 + 进度条。
+  Widget _contextCapacityHeader(Map<dynamic, dynamic> contextWindow) {
+    final used = (contextWindow['usedTokens'] as num?) ?? 0;
+    final max = (contextWindow['maxTokens'] as num?) ?? 0;
+    final percent = max > 0 ? (used / max * 100) : 0.0;
+    final colors = EmberColors.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text('上下文容量',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textSolid)),
+            const Spacer(),
+            Text(
+              '${formatTokenCount(used)} / ${formatTokenCount(max)}'
+              '${max > 0 ? ' (${percent.toStringAsFixed(1)}%)' : ''}',
+              style: TextStyle(fontSize: 11, color: colors.textMuted),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: SizedBox(
+            height: 6,
+            child: LinearProgressIndicator(
+              value: max > 0 ? (used / max).clamp(0.0, 1.0) : 0,
+              backgroundColor: colors.hairline,
+              color: percent >= 90 ? colors.err : colors.primary,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
+    );
+  }
+
   @override
   void dispose() {
     _queryGeneration++;
@@ -524,10 +566,7 @@ class _UsageSheetState extends State<_UsageSheet> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
             if (contextWindow is Map) ...[
-              _UsageRow(
-                  '上下文',
-                  '${formatTokenCount((contextWindow['usedTokens'] as num?) ?? 0)}'
-                      ' / ${formatTokenCount((contextWindow['maxTokens'] as num?) ?? 0)} tokens'),
+              _contextCapacityHeader(contextWindow),
             ],
             if (cumulative is Map) ...[
               _UsageRow('累计输入', '${formatTokenCount(netInput)} tokens'),
@@ -545,6 +584,18 @@ class _UsageSheetState extends State<_UsageSheet> {
                 icon: const Icon(Icons.query_stats, size: 16),
                 label: const Text('查询任务级用量 (getTaskTokenUsage)'),
                 onPressed: _querying ? null : _queryTaskUsage,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.savings_outlined, size: 16),
+                label: const Text('剩余额度(5小时/每周/工具调用/MCP)'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => UsagePage(session: widget.session)),
+                ),
               ),
             ),
           ],

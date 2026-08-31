@@ -16,6 +16,7 @@ import 'delayed_banner.dart';
 import 'diff_view.dart';
 import 'markdown_view.dart';
 import 'theme.dart';
+import 'usage_page.dart';
 
 part 'chat/msg_widgets.dart';
 part 'chat/insights.dart';
