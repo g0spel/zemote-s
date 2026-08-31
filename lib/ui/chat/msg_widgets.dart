@@ -1103,8 +1103,8 @@ class _ReasoningTile extends StatefulWidget {
 }
 
 class _ReasoningTileState extends State<_ReasoningTile> {
-  /// 桌面同款默认折叠为单行条;流式期间保持展开跟随输出。
-  late bool _open = widget.streaming;
+  /// 默认展开（用户裁定）；折叠时显示一行预览。
+  bool _open = true;
 
   @override
   Widget build(BuildContext context) {
@@ -1188,8 +1188,8 @@ class _ToolCallTile extends StatefulWidget {
 }
 
 class _ToolCallTileState extends State<_ToolCallTile> {
-  /// 桌面同款默认折叠为单行条(图标+工具名+一行预览)。
-  bool _open = false;
+  /// 默认展开（用户裁定）；折叠时显示一行预览。
+  bool _open = true;
 
   @override
   Widget build(BuildContext context) {
