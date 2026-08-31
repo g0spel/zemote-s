@@ -165,6 +165,64 @@ num? lastUserInputRowId(List<Map<String, dynamic>> rows) {
   return null;
 }
 
+/// 工作中胶囊的本轮用时(用户裁定):文字随秒自跳,起点取最近一条
+/// 用户输入行的时间戳(协议 ts 优先,回落视图层到达戳);行时间戳
+/// 缺失时从首次观察到运行中起计。仅在运行中存在,随胶囊消失而销毁。
+class _WorkingLabel extends StatefulWidget {
+  final ConversationState? state;
+  final Color color;
+
+  const _WorkingLabel({required this.state, required this.color});
+
+  @override
+  State<_WorkingLabel> createState() => _WorkingLabelState();
+}
+
+class _WorkingLabelState extends State<_WorkingLabel> {
+  Timer? _ticker;
+  DateTime? _fallbackStart;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String _elapsedLabel() {
+    int? startMs;
+    final rows = widget.state?.rows ?? const [];
+    for (final row in rows.reversed) {
+      if (row['kind'] != 'userInput') continue;
+      startMs = _rowTsOf(row);
+      if (startMs != null) break;
+    }
+    final now = DateTime.now();
+    final start = startMs != null
+        ? DateTime.fromMillisecondsSinceEpoch(startMs)
+        : (_fallbackStart ??= now);
+    final s = now.difference(start).inSeconds.clamp(0, 24 * 3600);
+    final m = s ~/ 60;
+    return m > 0 ? '$m:${(s % 60).toString().padLeft(2, '0')}' : '${s}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text('工作中 · ${_elapsedLabel()}',
+        style: TextStyle(
+            fontSize: EmberType.caption,
+            fontWeight: FontWeight.w600,
+            color: widget.color));
+  }
+}
+
 /// 聊天页视图:输入框、滚动、菜单与对话框。会话数据、订阅、发送机、
 /// 管理命令的所有权在 [ChatController](同库 part 文件 chat/controller),
 /// 经 onChanged 收到重绘通知。
@@ -656,11 +714,14 @@ class _ChatPageState extends State<ChatPage> {
         Icon(running ? Icons.motion_photos_on : Icons.radio_button_unchecked,
             size: 12, color: color),
         const SizedBox(width: 4),
-        Text(running ? '工作中' : '空闲',
-            style: TextStyle(
-                fontSize: EmberType.caption,
-                fontWeight: FontWeight.w600,
-                color: color)),
+        if (running)
+          _WorkingLabel(state: state, color: color)
+        else
+          Text('空闲',
+              style: TextStyle(
+                  fontSize: EmberType.caption,
+                  fontWeight: FontWeight.w600,
+                  color: color)),
       ]),
     );
   }

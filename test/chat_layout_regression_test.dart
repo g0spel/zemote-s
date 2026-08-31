@@ -289,7 +289,8 @@ void main() {
     });
     await tester.pump(const Duration(milliseconds: 150));
     await tester.pump(const Duration(milliseconds: 150));
-    expect(find.text('工作中'), findsOneWidget);
+    // 运行中带本轮用时后缀(用户裁定):「工作中 · Ns」。
+    expect(find.textContaining('工作中'), findsOneWidget);
 
     // 轮次结束:仅 state.updated 增量(无任何页面 setState)。胶囊必须
     // 经自身订阅监听翻转为「空闲」——真机症状:结束后仍显示工作中。
@@ -318,7 +319,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 150));
     expect(find.text('空闲'), findsOneWidget,
         reason: '轮次结束帧后胶囊应实时翻转为空闲');
-    expect(find.text('工作中'), findsNothing);
+    expect(find.textContaining('工作中'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();

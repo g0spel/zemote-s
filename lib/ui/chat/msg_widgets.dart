@@ -1135,9 +1135,13 @@ class _ReasoningTileState extends State<_ReasoningTile> {
                 padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                 child: Row(
                   children: [
-                    Text('$arrow${widget.streaming ? '思考中…' : '思考过程'}',
+                    Text('$arrow${widget.streaming ? '思考中…' : '思考'}',
                         style: TextStyle(
-                            fontSize: EmberType.caption, color: e.textFaint)),
+                            // 标签加大(用户裁定:可读性优先),预览仍
+                            // 保持小字弱化。
+                            fontSize: EmberType.body,
+                            fontWeight: FontWeight.w600,
+                            color: e.textSoft)),
                     if (!_open && preview.isNotEmpty) ...[
                       const SizedBox(width: 6),
                       Expanded(
@@ -1165,10 +1169,88 @@ class _ReasoningTileState extends State<_ReasoningTile> {
   }
 }
 
-/// Tool call block. Ember look matches [_ReasoningTile]: tile one step
+/// 工具族的强调色(用户裁定:不同工具输出块分色),全部取自 Ember 色板:
+/// todo/计划类主色、执行类(bash)琥珀、写文件类绿色、读/检索类蓝色、
+/// 其余回落主色。err 保留给错误状态,不参与分色。
+Color _toolAccent(String toolName, EmberColors e) {
+  final n = toolName.toLowerCase();
+  if (n.contains('todo') || n.contains('plan')) return e.primary;
+  if (n == 'bash' || n.contains('shell') || n.contains('terminal')) {
+    return e.warn;
+  }
+  if (n.contains('edit') || n.contains('write')) return e.ok;
+  if (n.contains('read') ||
+      n.contains('grep') ||
+      n.contains('glob') ||
+      n.contains('search') ||
+      n.contains('find')) {
+    return e.run;
+  }
+  return e.primary;
+}
+
+/// todo/计划工具输出解析(纯函数,公开给测试):逐个尝试
+/// input/inputText/content/output(含 output.text),全部失败返回 null
+/// (回落原始文本)。复用洞察面板的容错解析器。
+List<PlanStep>? todoStepsOf(Map<String, dynamic> row) {
+  for (final cand in _planPayloadCandidates(row)) {
+    final steps = _planStepsFromValue(cand);
+    if (steps != null) return steps;
+  }
+  return null;
+}
+
+/// 步骤列表块(工具块内的 todo 展示):状态图标 + 标题,完成项划线。
+Widget _todoStepsBlock(BuildContext context, List<PlanStep> steps) {
+  final e = EmberColors.of(context);
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final s in steps)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                Icon(
+                  s.completed
+                      ? Icons.check_circle
+                      : s.inProgress
+                          ? Icons.play_circle_outline
+                          : Icons.radio_button_unchecked,
+                  size: 13,
+                  color: s.completed
+                      ? e.ok
+                      : s.inProgress
+                          ? e.run
+                          : e.textFaint,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    s.title,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: e.textSoft,
+                        decoration: s.completed
+                            ? TextDecoration.lineThrough
+                            : TextDecoration.none),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// 工具调用块。Ember look matches [_ReasoningTile]: tile one step
 /// darker than card, 10pt radius, 3px rail colored by status (success→ok,
-/// error→err, running→run). The tool name is a standalone faint caption row
-/// (▸/▾ prefix, term font) toggling the input/output/error detail.
+/// error→err, running→run). The tool name is a standalone caption row
+/// (▸/▾ prefix, term font, 工具族强调色) toggling the input/output/error
+/// detail.
 class _ToolCallTile extends StatefulWidget {
   final Map<String, dynamic> row;
 
@@ -1203,6 +1285,16 @@ class _ToolCallTileState extends State<_ToolCallTile> {
 
     /// bash 工具保留原始输入输出;其余工具直接展示结果。
     final isBash = toolName.toLowerCase() == 'bash';
+
+    /// 工具族强调色(分色 + 名称着色,用户裁定)。
+    final accent = _toolAccent(toolName, e);
+
+    /// todo/计划工具:输出 JSON 解析成步骤列表展示(用户裁定:不铺
+    /// 原始 JSON)。仅对 todo/计划类工具启用,解析失败回落原始文本。
+    final todoSteps =
+        isBash || !_todoPlanToolName.hasMatch(toolName)
+            ? null
+            : todoStepsOf(row);
 
     final (icon, color) = switch (status) {
       'running' || 'inputStreaming' || 'pendingApproval' => (
@@ -1257,9 +1349,11 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                     Flexible(
                       child: Text(toolName,
                           style: TextStyle(
-                              fontSize: EmberType.caption,
+                              // 名称加大着色(用户裁定:可读性优先),
+                              // 与左侧状态图标、标题族色一致。
+                              fontSize: EmberType.body,
                               fontFamily: EmberFonts.term,
-                              color: e.textFaint),
+                              color: accent),
                           overflow: TextOverflow.ellipsis),
                     ),
                     // 执行状态文字(用户裁定):标题里直接可见,不只靠颜色。
@@ -1295,19 +1389,32 @@ class _ToolCallTileState extends State<_ToolCallTile> {
             ),
             if (_open) ...[
               // 用户裁定:bash 保留原始输入输出,其余工具直接展示结果
-              // (不再铺原始输入/输出 kv)。
+              // (不再铺原始输入/输出 kv);todo/计划工具解析成步骤列表。
               if (isBash) ...[
-                if (inputText.isNotEmpty) _kv(context, '输入', inputText),
-                if (outputText.isNotEmpty) _kv(context, '输出', outputText),
-              ] else if (outputText.isNotEmpty)
+                if (inputText.isNotEmpty) _kv(context, '输入', inputText, accent),
+                if (outputText.isNotEmpty)
+                  _kv(context, '输出', outputText, accent),
+              ] else if (todoSteps != null)
+                _todoStepsBlock(context, todoSteps)
+              else if (outputText.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                  child: SelectableText(
-                    outputText,
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        height: 1.45,
-                        color: EmberColors.of(context).textSoft),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      // 输出块按工具族着色(用户裁定):同一强调色的
+                      // 低透明度底,随明暗主题自动适配。
+                      color: accent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      outputText,
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.45,
+                          color: EmberColors.of(context).textSoft),
+                    ),
                   ),
                 ),
               if (error is Map)
@@ -1351,7 +1458,9 @@ class _ToolCallTileState extends State<_ToolCallTile> {
     );
   }
 
-  Widget _kv(BuildContext context, String label, String value) {
+  Widget _kv(BuildContext context, String label, String value,
+      [Color? accent]) {
+    final e = EmberColors.of(context);
     // Pretty-print JSON input when possible (official shows structured view)
     final display = formatToolValue(value);
     return Padding(
@@ -1361,13 +1470,17 @@ class _ToolCallTileState extends State<_ToolCallTile> {
         children: [
           Text(label,
               style: TextStyle(
-                  fontSize: 10.5, color: EmberColors.of(context).textFaint)),
+                  fontSize: 10.5, color: accent ?? e.textFaint)),
           const SizedBox(height: 2),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: EmberColors.of(context).codeBlockBg,
+              // 工具族分色(用户裁定):有强调色时以低透明度着底,否则
+              // 用共用代码表面。
+              color: accent != null
+                  ? accent.withValues(alpha: 0.1)
+                  : e.codeBlockBg,
               borderRadius: BorderRadius.circular(8),
             ),
             child: SelectableText(
@@ -1375,7 +1488,7 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 11,
-                  color: EmberColors.of(context).textSolid),
+                  color: e.textSolid),
             ),
           ),
         ],

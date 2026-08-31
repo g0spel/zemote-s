@@ -118,6 +118,114 @@ void main() {
     });
   });
 
+  group('cacheHitFractionOf(缓存命中率口径,纯函数)', () {
+    test('优先取宿主下发的 contextWindow.cache.hitRate', () {
+      final fraction = cacheHitFractionOf({
+        'contextWindow': {
+          'usedTokens': 1000,
+          'maxTokens': 200000,
+          'cache': {'hitRate': 0.42, 'inputTokens': 5},
+        },
+        'cumulative': {
+          'inputTokens': 10,
+          'cacheReadTokens': 9999,
+          'cacheWriteTokens': 9999,
+        },
+      });
+      expect(fraction, 0.42,
+          reason: '服务端加权值优先,cumulative 回退不参与');
+    });
+
+    test('无 cache 对象时按桌面回退公式 缓存读 ÷ 输入(写入不进分母)', () {
+      final fraction = cacheHitFractionOf({
+        'cumulative': {
+          'inputTokens': 100,
+          'cacheReadTokens': 80,
+          'cacheWriteTokens': 50,
+          'outputTokens': 10,
+        },
+      });
+      expect(fraction, closeTo(0.8, 1e-9),
+          reason: '80/100,而非 80/(100+50+80)——对齐桌面口径');
+    });
+
+    test('cache.hitRate 为 null 或非数值时回退 cumulative', () {
+      expect(
+        cacheHitFractionOf({
+          'contextWindow': {
+            'cache': {'hitRate': null},
+          },
+          'cumulative': {'inputTokens': 100, 'cacheReadTokens': 25},
+        }),
+        0.25,
+      );
+      expect(
+        cacheHitFractionOf({
+          'contextWindow': {
+            'cache': {'hitRate': '0.9'},
+          },
+          'cumulative': {'inputTokens': 100, 'cacheReadTokens': 25},
+        }),
+        0.25,
+      );
+    });
+
+    test('无数据返回 null(UI 隐藏该行)', () {
+      expect(cacheHitFractionOf({}), isNull);
+      expect(
+        cacheHitFractionOf({
+          'cumulative': {'inputTokens': 0, 'cacheReadTokens': 0},
+        }),
+        isNull,
+        reason: '分母为 0 不产生命中率',
+      );
+    });
+  });
+
+  group('todoStepsOf(todo 工具输出解析,纯函数)', () {
+    test('解析裸数组输出(content/status 形状)', () {
+      final steps = todoStepsOf({
+        'toolName': 'todoread',
+        'output': {
+          'text':
+              '[{"content":"逆向桌面","status":"completed"},{"content":"修正口径","status":"in_progress"}]',
+        },
+      });
+      expect(steps, hasLength(2));
+      expect(steps![0].title, '逆向桌面');
+      expect(steps[0].completed, isTrue);
+      expect(steps[1].inProgress, isTrue);
+    });
+
+    test('解析 {todos: [...]} 包装(输入侧形状)', () {
+      final steps = todoStepsOf({
+        'toolName': 'todowrite',
+        'inputText':
+            '{"todos": [{"content": "发版", "status": "pending"}]}',
+      });
+      expect(steps, hasLength(1));
+      expect(steps![0].title, '发版');
+      expect(steps[0].status, 'pending');
+    });
+
+    test('坏 JSON / 非列表形状返回 null(回落原始文本)', () {
+      expect(
+        todoStepsOf({
+          'toolName': 'todoread',
+          'output': {'text': 'not json'},
+        }),
+        isNull,
+      );
+      expect(
+        todoStepsOf({
+          'toolName': 'todoread',
+          'output': {'text': '{"foo": 1}'},
+        }),
+        isNull,
+      );
+    });
+  });
+
   group('InsightsHandle(输入区上方把手)', () {
     Future<BridgeSession> pumpHandle(
         WidgetTester tester, ConversationState state) async {
@@ -430,14 +538,14 @@ void main() {
       });
       await tester.pump();
       await tester.pump();
-      // 最新完成回合自动装载并展开:回合摘要行 + 逐文件明细都可见。
-      expect(find.text('1 个文件已更改'), findsOneWidget);
+      // 最新完成回合自动装载并展开:回合分组标题行 + 逐文件明细都可见。
+      expect(find.text('回合 1 · 1 个文件已更改'), findsOneWidget);
       expect(find.text('lib/ui/chat_page.dart'), findsOneWidget);
       // 点击摘要行收起明细,再点重开(条目已缓存,不重发请求)。
-      await tester.tap(find.text('1 个文件已更改'));
+      await tester.tap(find.text('回合 1 · 1 个文件已更改'));
       await tester.pump();
       expect(find.text('lib/ui/chat_page.dart'), findsNothing);
-      await tester.tap(find.text('1 个文件已更改'));
+      await tester.tap(find.text('回合 1 · 1 个文件已更改'));
       await tester.pump();
       await tester.pump();
       expect(find.text('lib/ui/chat_page.dart'), findsOneWidget);

@@ -480,10 +480,29 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
   }
 }
 
-/// 用量数字的「万 tokens」单位显示:≥1 万以 x.x 万呈现,小值原样。
-/// (553000 → 55.3 万)
-String formatTokenCount(num v) =>
-    v >= 10000 ? '${(v / 10000).toStringAsFixed(1)} 万' : '$v';
+/// 用量数字的三档单位显示(用户裁定:万/百万/亿,达到数量级自动切换),
+/// 小值原样。(553000 → 55.3 万,6800000 → 6.8 百万,300000000 → 3.0 亿)
+String formatTokenCount(num v) {
+  if (v >= 100000000) return '${(v / 100000000).toStringAsFixed(1)} 亿';
+  if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)} 百万';
+  if (v >= 10000) return '${(v / 10000).toStringAsFixed(1)} 万';
+  return '$v';
+}
+
+/// 平均缓存命中率(0..1 小数),口径对齐桌面 contextCacheUsageFromPayload:
+/// 优先取宿主随 snapshot 下发的 contextWindow.cache.hitRate(按请求加权);
+/// 缺省用桌面回退公式 缓存读 ÷ 输入——缓存写入不进分母。无数据返回 null。
+@visibleForTesting
+double? cacheHitFractionOf(Map<String, dynamic> usage) {
+  final contextWindow = usage['contextWindow'];
+  final cache = contextWindow is Map ? contextWindow['cache'] as Map? : null;
+  final rawServerHit = cache?['hitRate'];
+  if (rawServerHit is num) return rawServerHit.toDouble();
+  final cumulative = usage['cumulative'];
+  final cacheRead = (cumulative?['cacheReadTokens'] as num?) ?? 0;
+  final netInput = (cumulative?['inputTokens'] as num?) ?? 0;
+  return netInput > 0 ? cacheRead / netInput : null;
+}
 
 class _UsageSheet extends StatefulWidget {
   final ConversationState state;
@@ -740,14 +759,10 @@ class _UsageSheetState extends State<_UsageSheet> {
     final usage = widget.state.usage ?? const {};
     final cumulative = usage['cumulative'];
     final contextWindow = usage['contextWindow'];
-    // 平均缓存命中率 = 缓存读取 / (缓存读取 + 缓存写入 + 净输入):
-    // 写入也算未命中的输入侧开销,与桌面端口径一致。
-    final cacheRead = (cumulative?['cacheReadTokens'] as num?) ?? 0;
-    final cacheWrite = (cumulative?['cacheWriteTokens'] as num?) ?? 0;
     final netInput = (cumulative?['inputTokens'] as num?) ?? 0;
-    final cacheDenom = cacheRead + cacheWrite + netInput;
-    final cacheHitRate = cacheDenom > 0
-        ? '${(cacheRead / cacheDenom * 100).toStringAsFixed(1)}%'
+    final hitFraction = cacheHitFractionOf(usage);
+    final cacheHitRate = hitFraction != null
+        ? '${(hitFraction * 100).toStringAsFixed(1)}%'
         : null;
     return SafeArea(
       child: Padding(

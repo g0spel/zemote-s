@@ -81,19 +81,26 @@ List<PlanStep>? _planStepsFromValue(Object? v) {
       return null;
     }
   }
+  // 裸数组(todo 工具常见的输出形状)视同单键列表。
+  if (t is List) return _stepsFromArray(t);
   if (t is! Map) return null;
   for (final k in const ['todos', 'plan', 'steps', 'items']) {
     final arr = t[k];
     if (arr is! List || arr.isEmpty) continue;
-    final steps = <PlanStep>[];
-    for (var i = 0; i < arr.length; i++) {
-      final s = _parsePlanStep(arr[i], i);
-      if (s == null) return null; // all-or-nothing
-      steps.add(s);
-    }
-    return steps;
+    return _stepsFromArray(arr);
   }
   return null;
+}
+
+List<PlanStep>? _stepsFromArray(List arr) {
+  if (arr.isEmpty) return null;
+  final steps = <PlanStep>[];
+  for (var i = 0; i < arr.length; i++) {
+    final s = _parsePlanStep(arr[i], i);
+    if (s == null) return null; // all-or-nothing
+    steps.add(s);
+  }
+  return steps;
 }
 
 /// Heuristic list extraction for insight panels: recognizes a direct list
@@ -207,6 +214,10 @@ class _InsightsDerivedCache {
   int turnFileTotal = 0;
   int bgCount = 0;
   List<Map<String, dynamic>> fileHeaders = const [];
+
+  /// turnHeader rowId → 回合序号(自会话起点从 1 计数),文件面板分组
+  /// 标题用。
+  Map<String, int> turnNumbers = const {};
   List<Map<String, dynamic>> backgroundWorks = const [];
   List<Map<String, dynamic>>? runningSubagents;
   int endedSubagentTotal = 0;
@@ -223,9 +234,13 @@ class _InsightsDerivedCache {
       latestCompleted = latestCompletedTurn(state.rows);
       endedSubagents = endedSubagentRows(state.rows);
       var files = 0;
+      var turnCounter = 0;
       final headers = <Map<String, dynamic>>[];
+      final numbers = <String, int>{};
       for (final row in state.rows) {
         if (row['kind'] != 'turnHeader') continue;
+        turnCounter++;
+        numbers['${row['rowId']}'] = turnCounter;
         final fileChanges = row['fileChanges'];
         if (fileChanges is! Map) continue;
         final count = (fileChanges['files'] as num?)?.toInt() ?? 0;
@@ -233,6 +248,7 @@ class _InsightsDerivedCache {
         if (count > 0) headers.add(row);
       }
       turnFileTotal = files;
+      turnNumbers = numbers;
       fileHeaders = headers.reversed.toList(growable: false);
     }
 
@@ -942,9 +958,17 @@ class _InsightsSheetState extends State<InsightsSheet> {
                 color: EmberColors.of(context).textFaint)),
       );
     } else {
-      body = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [for (final h in headers) _turnFileRow(context, h)],
+      // 接入 sheet 滚动控制器(与目标/后台面板一致):多个回合分组同时
+      // 展开时内容可滚动,不再溢出截断。
+      body = ListView(
+        controller: widget.scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        shrinkWrap: true,
+        children: [
+          for (var i = 0; i < headers.length; i++)
+            _turnFileRow(context, headers[i],
+                _derived.turnNumbers['${headers[i]['rowId']}'])
+        ],
       );
     }
     return Column(
@@ -957,9 +981,11 @@ class _InsightsSheetState extends State<InsightsSheet> {
     );
   }
 
-  /// 回合文件变更行(桌面变更面板样式):摘要行可点,展开后显示该回合
-  /// 逐文件明细;运行中的回合尚不能查询(服务端 stale guard),仅显状态。
-  Widget _turnFileRow(BuildContext context, Map<String, dynamic> header) {
+  /// 回合文件变更行(桌面变更面板样式):「回合 N」分组标题 + 摘要行可
+  /// 点,展开后显示该回合逐文件明细;运行中的回合尚不能查询(服务端
+  /// stale guard),仅显状态。
+  Widget _turnFileRow(BuildContext context, Map<String, dynamic> header,
+      int? turnNumber) {
     final colors = EmberColors.of(context);
     final fc = header['fileChanges'] as Map? ?? const {};
     final files = (fc['files'] as num?)?.toInt() ?? 0;
@@ -985,7 +1011,11 @@ class _InsightsSheetState extends State<InsightsSheet> {
                         fontSize: 10.5, color: colors.textFaint)),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text('$files 个文件已更改',
+                  child: Text(
+                      // 分组标题(用户裁定):回合序号区分多个分组。
+                      turnNumber != null
+                          ? '回合 $turnNumber · $files 个文件已更改'
+                          : '$files 个文件已更改',
                       style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
