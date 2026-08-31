@@ -21,6 +21,7 @@ part 'chat/msg_widgets.dart';
 part 'chat/insights.dart';
 part 'chat/sheets.dart';
 part 'chat/composer.dart';
+part 'chat/controller.dart';
 
 /// 由模型 option value 解析 (provider, model)。provider 必须用宿主
 /// 显式给的 modelProviderId——value 的 "builtin:x/Model" 前缀不是
@@ -108,6 +109,22 @@ class _PendingFile {
   _PendingFile(this.fileName, this.mime, this.bytes);
 }
 
+String _guessMime(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+  return switch (ext) {
+    'png' => 'image/png',
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'gif' => 'image/gif',
+    'webp' => 'image/webp',
+    'svg' => 'image/svg+xml',
+    'pdf' => 'application/pdf',
+    'txt' || 'md' || 'log' => 'text/plain',
+    'json' => 'application/json',
+    'zip' => 'application/zip',
+    _ => 'application/octet-stream',
+  };
+}
+
 class _StaleChatOperation implements Exception {
   const _StaleChatOperation();
 }
@@ -147,183 +164,45 @@ num? lastUserInputRowId(List<Map<String, dynamic>> rows) {
   return null;
 }
 
+/// 聊天页视图:输入框、滚动、菜单与对话框。会话数据、订阅、发送机、
+/// 管理命令的所有权在 [ChatController](同库 part 文件 chat/controller),
+/// 经 onChanged 收到重绘通知。
 class _ChatPageState extends State<ChatPage> {
-  late ConversationTransport _transport;
-  ConversationSubscription? _subscription;
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
-  String? _sessionId;
-  String? _error;
-  bool _sending = false;
-
-  /// Monotonic source generation. A source is the widget bridge/scope/session
-  /// tuple; every source switch invalidates callbacks from the previous one.
-  int _sourceGeneration = 0;
-  int _subscribeGeneration = 0;
-  Future<void>? _subscriptionOperation;
-  int _historyGeneration = 0;
-  int _filePickGeneration = 0;
-  int _sendGeneration = 0;
-  int _runGeneration = 0;
-  int _sideChatGeneration = 0;
-  int _skillsGeneration = 0;
-  int _titleGeneration = 0;
-  int _draftPrefsGeneration = 0;
-  int _fileChangesGeneration = 0;
-  int _scrollGeneration = 0;
-  Future<void> _draftPrefsSaveChain = Future.value();
-
-  bool _isCurrentSource(
-    int generation,
-    ConversationTransport transport, {
-    String? sessionId,
-    ConversationSubscription? subscription,
-  }) {
-    return mounted &&
-        generation == _sourceGeneration &&
-        identical(transport, _transport) &&
-        (sessionId == null || sessionId == _sessionId) &&
-        (subscription == null || identical(subscription, _subscription));
-  }
-
-  void _retireCurrentSubscription() {
-    final subscription = _subscription;
-    if (subscription == null) return;
-    _detachSubscription(subscription);
-    _subscriptionOperation = (_subscriptionOperation ?? Future<void>.value())
-        .then<void>((_) async {
-      await subscription.dispose();
-    });
-  }
-
-  void _detachSubscription(ConversationSubscription subscription) {
-    subscription.state.rowsListenable.removeListener(_scrollToBottom);
-    subscription.state.rowsListenable.removeListener(_dedupeEchoes);
-    subscription.state.controlListenable.removeListener(_dedupeEchoes);
-    if (identical(_subscription, subscription)) {
-      _subscription = null;
-      _loadingOlder = false;
-    }
-  }
-
-  bool _sameSource(ChatPage oldWidget) {
-    return identical(oldWidget.session, widget.session) &&
-        oldWidget.workspaceKey == widget.workspaceKey &&
-        mapEquals(oldWidget.scope, widget.scope) &&
-        oldWidget.sessionId == widget.sessionId;
-  }
-
-  void _invalidateOperations() {
-    _sourceGeneration++;
-    _subscribeGeneration++;
-    _historyGeneration++;
-    _filePickGeneration++;
-    _sendGeneration++;
-    _runGeneration++;
-    _sideChatGeneration++;
-    _skillsGeneration++;
-    _titleGeneration++;
-    _draftPrefsGeneration++;
-    _fileChangesGeneration++;
-    _scrollGeneration++;
-    _scrollAnimationInFlight = false;
-  }
-
-  bool _isCurrentOperation(
-    int sourceGeneration,
-    int operationGeneration,
-    int currentOperationGeneration,
-    ConversationTransport transport, {
-    String? sessionId,
-  }) {
-    return _isCurrentSource(sourceGeneration, transport,
-            sessionId: sessionId) &&
-        operationGeneration == currentOperationGeneration;
-  }
-
-  bool _isCurrentForSource(
-    int sourceGeneration,
-    ConversationTransport transport, {
-    String? sessionId,
-  }) =>
-      _isCurrentSource(sourceGeneration, transport, sessionId: sessionId);
-
-  int _beginFileChangesOperation() => ++_fileChangesGeneration;
-
-  /// Optimistic echoes for just-sent messages: shown the moment the user
-  /// hits send, retired once the server's userInput row arrives (see
-  /// [removeEchoedTexts]). Status evolves sending → sent; a failed echo
-  /// stays for tap-to-retry and is never auto-retired. Never enters
-  /// protocol rows/revisions.
-  final List<Map<String, dynamic>> _echoes = [];
-
-  /// 发送已被宿主接受、但订阅侧行数据尚未到达的窗口。此间最新的已发送
-  /// 气泡与状态胶囊按「处理中/工作中」乐观显示——工作区桥降级冻结时,
-  /// 订阅行可能数十秒后才整体冲刷,反馈不能干等(真机实测)。
-  bool _turnPending = false;
-
-  void _dedupeEchoes() {
-    final state = _state;
-    if (state == null) return;
-    if (_turnPending &&
-        (state.rows.isNotEmpty ||
-            (state.phase.isNotEmpty && state.phase != 'draft'))) {
-      // 轮次已在订阅侧物化(行到达或相位离开 draft),乐观窗口结束。
-      setState(() => _turnPending = false);
-    }
-    if (_echoes.isEmpty) return;
-    final kept = removeEchoedTexts(_echoes, state.rows);
-    if (kept.length != _echoes.length) {
-      setState(() => _echoes
-        ..clear()
-        ..addAll(kept));
-    }
-  }
-
-  bool _loadingOlder = false;
-  bool _showSlash = false;
-  String? _progress;
-  final List<_PendingFile> _pendingFiles = [];
-  double? _uploadProgress;
-  WorkspacePrep? _prep;
-  List<SkillEntry> _skills = [];
-  bool _skillsLoading = false;
-
-  /// Live sessions-index watch driving [ChatPage.onSessionInfo]; only
-  /// mounted in embedded mode. The desktop generates/renames titles
-  /// asynchronously, so the host header needs pushes when it changes.
-  SessionsIndexSubscription? _titleSub;
-  String? _pushedSessionId;
-  String? _pushedTitle;
-
-  /// Draft-mode (no session yet) model/mode/thought selection, passed as
-  /// `config` to createSession on first send.
-  final Map<String, String> _draftConfig = {};
+  late ChatController controller;
 
   /// Whether to keep the view pinned to the newest message. Starts true so
   /// opening the chat lands at the bottom; the user scrolling up unpins it.
   bool _stickToBottom = true;
   bool _scrollCallbackScheduled = false;
   bool _scrollAnimationInFlight = false;
-  bool _prependScrollPending = false;
-  Map<String, dynamic>? _prependTailRow;
 
-  ConversationState? get _state => _subscription?.state;
+  /// 源切换/销毁时作废在途滚动回调(滚动为视图私有,controller 的
+  /// generation 不覆盖它)。
+  int _scrollGeneration = 0;
+  bool _showSlash = false;
 
   @override
   void initState() {
     super.initState();
-    _sessionId = widget.sessionId;
-    _transport = widget.session.conversation(widget.scope);
+    controller = ChatController(
+      session: widget.session,
+      scope: widget.scope,
+      workspaceKey: widget.workspaceKey,
+      sessionId: widget.sessionId,
+      onChanged: () {
+        if (mounted) setState(() {});
+      },
+      onToast: _toast,
+      onSessionInfo: widget.onSessionInfo == null
+          ? null
+          : (sessionId, title) =>
+              widget.onSessionInfo!(sessionId, title, widget.sessionEpoch),
+      onRowsChanged: _scrollToBottom,
+    );
+    controller.start();
     _scrollController.addListener(_onScroll);
-    _loadDraftPrefs();
-    if (_sessionId != null) {
-      _subscribe();
-    }
-    _loadPrep();
-    if (widget.onSessionInfo != null) {
-      _watchSessionTitle();
-    }
     _inputController.addListener(() {
       final text = _inputController.text;
       final show = (text.startsWith('/') || text.startsWith('\$')) &&
@@ -338,36 +217,34 @@ class _ChatPageState extends State<ChatPage> {
   void didUpdateWidget(covariant ChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_sameSource(oldWidget)) return;
-
-    _retireCurrentSubscription();
-    final oldTitleSub = _titleSub;
-    _invalidateOperations();
-    _prepGeneration++;
-    _titleSub = null;
-    if (oldTitleSub != null) {
-      oldTitleSub.state.removeListener(_pushSessionInfo);
-      oldTitleSub.dispose();
-    }
-    _sessionId = widget.sessionId;
-    _transport = widget.session.conversation(widget.scope);
-    _pushedSessionId = null;
-    _pushedTitle = null;
-    _error = null;
-    _loadingOlder = false;
-    _prep = null;
-    _prepFetchedAt = null;
-    _skills = [];
-    _skillsLoading = false;
-    _sending = false;
-    _uploadProgress = null;
-    _progress = null;
-    _turnPending = false;
-    _echoes.clear();
-    _pendingFiles.clear();
+    setState(() => _showSlash = false);
+    controller.reattach(
+      widget.session,
+      widget.scope,
+      widget.workspaceKey,
+      widget.sessionId,
+      watchTitle: widget.onSessionInfo != null,
+    );
+    _scrollGeneration++;
+    _scrollAnimationInFlight = false;
     clearGroupRowsCache();
-    if (_sessionId != null) _subscribe();
-    _loadPrep();
-    if (widget.onSessionInfo != null) _watchSessionTitle();
+  }
+
+  bool _sameSource(ChatPage oldWidget) {
+    return identical(oldWidget.session, widget.session) &&
+        oldWidget.workspaceKey == widget.workspaceKey &&
+        mapEquals(oldWidget.scope, widget.scope) &&
+        oldWidget.sessionId == widget.sessionId;
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    _scrollGeneration++;
+    _scrollAnimationInFlight = false;
+    _inputController.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _onScroll() {
@@ -376,195 +253,41 @@ class _ChatPageState extends State<ChatPage> {
     _stickToBottom = _scrollController.position.pixels <= 40;
   }
 
-  /// prepareWorkspace 最近一次成功拉取时刻(5s 新鲜度窗:窗内重复打开
-  /// 模型面板不再发请求,连开即开)。
-  DateTime? _prepFetchedAt;
-  int _prepGeneration = 0;
-
-  /// 只刷 prepareWorkspace(模型/思考档/模式可选项的实时来源)。
-  /// 必须 refresh: true——传输层有会话级缓存,不带参数会直接返回缓存
-  /// (模型增删后旧缓存照旧,面板"刷新"实际没上线)。
-  Future<void> _refreshPrep() async {
-    final generation = ++_prepGeneration;
-    final sourceGeneration = _sourceGeneration;
-    final transport = _transport;
-    final transportGeneration = transport.prepGeneration;
-    try {
-      final prep = await transport.prepareWorkspace(refresh: true);
-      if (_isCurrentOperation(
-          sourceGeneration, generation, _prepGeneration, transport)) {
-        if (transportGeneration != transport.prepGeneration) return;
-        setState(() {
-          _prep = prep;
-          _prepFetchedAt = DateTime.now();
-        });
-        _validateDraftAgainstPrep();
-      }
-    } catch (_) {}
+  Future<void> _send() async {
+    await controller.send(
+      _inputController.text.trim(),
+      askHeldQueueDisposition: _askHeldQueueDisposition,
+      onCleared: () {
+        _inputController.clear();
+        setState(() => _showSlash = false);
+      },
+      onEchoEnqueued: _scrollToBottom,
+    );
   }
 
-  /// 面板打开时的取数:新鲜(≤5s)直接用,否则强制拉一次;失败退缓存。
-  Future<WorkspacePrep?> _fetchPrepForSheet() async {
-    final sourceGeneration = _sourceGeneration;
-    final transport = _transport;
-    final fetchedAt = _prepFetchedAt;
-    if (fetchedAt != null &&
-        DateTime.now().difference(fetchedAt) < const Duration(seconds: 5)) {
-      return _prep;
+  /// Opens an auxiliary (side) chat attached to the current session
+  /// (`createSelectionSideSession`) in a fresh ChatPage.
+  Future<void> _openSideChat() async {
+    final sideId = await controller.createSideSession();
+    if (sideId == null || !mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          session: widget.session,
+          scope: widget.scope,
+          workspaceKey: widget.workspaceKey,
+          sessionId: sideId,
+          title: '辅助对话',
+        ),
+      ),
+    );
+  }
+
+  void _toast(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
-    await _refreshPrep();
-    if (!_isCurrentForSource(sourceGeneration, transport)) return null;
-    return _prep;
-  }
-
-  Future<void> _loadPrep() async {
-    final sourceGeneration = _sourceGeneration;
-    final transport = _transport;
-    final skillsGeneration = ++_skillsGeneration;
-    await _refreshPrep();
-    if (!_isCurrentOperation(
-        sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
-      return;
-    }
-    setState(() => _skillsLoading = true);
-    try {
-      final skills = await transport.skills();
-      if (_isCurrentOperation(
-          sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
-        setState(() => _skills = skills);
-      }
-    } catch (_) {
-      if (_isCurrentOperation(
-          sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
-        setState(() => _skills = const []);
-      }
-    } finally {
-      if (_isCurrentOperation(
-          sourceGeneration, skillsGeneration, _skillsGeneration, transport)) {
-        setState(() => _skillsLoading = false);
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _invalidateOperations();
-    _prepGeneration++;
-    _retireCurrentSubscription();
-    final titleSub = _titleSub;
-    _titleSub = null;
-    if (titleSub != null) {
-      titleSub.state.removeListener(_pushSessionInfo);
-      titleSub.dispose();
-    }
-    _inputController.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _watchSessionTitle() async {
-    final sourceGeneration = _sourceGeneration;
-    final titleGeneration = ++_titleGeneration;
-    final transport = _transport;
-    try {
-      final sub = await transport.subscribeSessionsIndex();
-      if (!_isCurrentOperation(
-          sourceGeneration, titleGeneration, _titleGeneration, transport)) {
-        await sub.dispose();
-        return;
-      }
-      _titleSub = sub;
-      sub.state.addListener(_pushSessionInfo);
-      _pushSessionInfo();
-    } catch (_) {
-      // Title is header cosmetics only — on failure keep the placeholder.
-    }
-  }
-
-  /// 推送 (sessionId, title, epoch) 给宿主:会话 id 只在变化时推一次
-  /// (draft 采纳后宿主立即回写,标题未生成时带空串);标题有值且变化时
-  /// 再推。epoch 为宿主重建代数,宿主据此丢弃旧实例的迟到推送。
-  void _pushSessionInfo() {
-    final sub = _titleSub;
-    final sessionId = _sessionId;
-    if (sub == null || sessionId == null || !mounted) return;
-    final title = sub.state.sessions[sessionId]?.title ?? '';
-    final idNew = sessionId != _pushedSessionId;
-    final titleNew = title.isNotEmpty && title != _pushedTitle;
-    if (!idNew && !titleNew) return;
-    _pushedSessionId = sessionId;
-    if (titleNew) _pushedTitle = title;
-    widget.onSessionInfo!(sessionId, title, widget.sessionEpoch);
-  }
-
-  /// Draft 首条消息创建会话后的采纳。索引推送(含桌面端生成的标题)可能
-  /// 先于 createSession 返回到达——监听器此刻读到的 _sessionId 还是
-  /// null,之后不会再触发;采纳后必须补跑一次推送。
-  void _adoptCreatedSession(String sessionId) {
-    _sessionId = sessionId;
-    _pushSessionInfo();
-  }
-
-  Future<void> _subscribe() async {
-    final sessionId = _sessionId;
-    if (sessionId == null) return;
-    final sourceGeneration = _sourceGeneration;
-    final subscribeGeneration = ++_subscribeGeneration;
-    final transport = _transport;
-    _retireCurrentSubscription();
-
-    Future<void> start() async {
-      ConversationSubscription? sub;
-      try {
-        if (!_isCurrentOperation(sourceGeneration, subscribeGeneration,
-            _subscribeGeneration, transport, sessionId: sessionId)) {
-          return;
-        }
-        sub = await transport
-            .subscribe(sessionId)
-            .timeout(const Duration(seconds: 60));
-        if (!_isCurrentOperation(sourceGeneration, subscribeGeneration,
-            _subscribeGeneration, transport, sessionId: sessionId)) {
-          _detachSubscription(sub);
-          await sub.dispose();
-          return;
-        }
-        final previous = _subscription;
-        if (previous != null) {
-          _detachSubscription(previous);
-          await previous.dispose();
-          if (!_isCurrentOperation(sourceGeneration, subscribeGeneration,
-              _subscribeGeneration, transport, sessionId: sessionId)) {
-            await sub.dispose();
-            return;
-          }
-        }
-        setState(() {
-          _subscription = sub;
-          _error = null;
-        });
-        sub.state.rowsListenable.addListener(_scrollToBottom);
-        sub.state.rowsListenable.addListener(_dedupeEchoes);
-        sub.state.controlListenable.addListener(_dedupeEchoes);
-        if (sub.state.canLoadOlder) unawaited(_loadOlder());
-      } catch (e) {
-        if (_isCurrentOperation(sourceGeneration, subscribeGeneration,
-            _subscribeGeneration, transport, sessionId: sessionId)) {
-          setState(() => _error = '$e');
-        }
-        if (sub != null) {
-          _detachSubscription(sub);
-          await sub.dispose();
-        }
-      }
-    }
-
-    final previousOperation = _subscriptionOperation?.catchError((_) {});
-    final operation = previousOperation == null
-        ? start()
-        : previousOperation.then<void>((_) => start());
-    _subscriptionOperation = operation.catchError((_) {});
-    await operation;
   }
 
   void _scrollToBottom() {
@@ -574,12 +297,13 @@ class _ChatPageState extends State<ChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollCallbackScheduled = false;
       if (!mounted || scrollGeneration != _scrollGeneration) return;
-      final prependTail = _prependScrollPending ? _prependTailRow : null;
-      _prependScrollPending = false;
-      _prependTailRow = null;
+      final prependTail =
+          controller.prependScrollPending ? controller.prependTailRow : null;
+      controller.prependScrollPending = false;
+      controller.prependTailRow = null;
       if (!_scrollController.hasClients) return;
       if (prependTail != null) {
-        final rows = _state?.rows;
+        final rows = controller.state?.rows;
         final currentTail = rows == null || rows.isEmpty ? null : rows.last;
         if (identical(currentTail, prependTail)) return;
       }
@@ -610,560 +334,7 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  void _toast(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
-    }
-  }
-
-  Future<void> _run(String errorPrefix, Future<dynamic> Function() run) async {
-    final sourceGeneration = _sourceGeneration;
-    final operationGeneration = ++_runGeneration;
-    final transport = _transport;
-    final sessionId = _sessionId;
-    if (!_isCurrentOperation(sourceGeneration, operationGeneration,
-        _runGeneration, transport, sessionId: sessionId)) {
-      return;
-    }
-    try {
-      final res = await run();
-      if (!_isCurrentOperation(sourceGeneration, operationGeneration,
-          _runGeneration, transport, sessionId: sessionId)) return;
-      if (isRpcRejected(res)) {
-        _toast('$errorPrefix: ${rpcFailureReason(res)}');
-      }
-    } catch (e) {
-      if (_isCurrentOperation(sourceGeneration, operationGeneration,
-          _runGeneration, transport, sessionId: sessionId)) {
-        _toast('$errorPrefix: $e');
-      }
-    }
-  }
-
-  /// Opens an auxiliary (side) chat attached to the current session
-  /// (`createSelectionSideSession`) in a fresh ChatPage.
-  Future<void> _openSideChat() async {
-    final sessionId = _sessionId;
-    if (sessionId == null) return;
-    final sourceGeneration = _sourceGeneration;
-    final operationGeneration = ++_sideChatGeneration;
-    final transport = _transport;
-    try {
-      final sideId = await transport.createSelectionSideSession(sessionId);
-      if (!_isCurrentOperation(
-          sourceGeneration, operationGeneration, _sideChatGeneration, transport,
-          sessionId: sessionId)) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ChatPage(
-            session: widget.session,
-            scope: widget.scope,
-            workspaceKey: widget.workspaceKey,
-            sessionId: sideId,
-            title: '辅助对话',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (_isCurrentOperation(
-          sourceGeneration, operationGeneration, _sideChatGeneration, transport,
-          sessionId: sessionId)) {
-        _toast('打开辅助对话失败: $e');
-      }
-    }
-  }
-
   // ------------------------------------------------------------ sending
-
-  String _guessMime(String fileName) {
-    final ext = fileName.split('.').last.toLowerCase();
-    return switch (ext) {
-      'png' => 'image/png',
-      'jpg' || 'jpeg' => 'image/jpeg',
-      'gif' => 'image/gif',
-      'webp' => 'image/webp',
-      'svg' => 'image/svg+xml',
-      'pdf' => 'application/pdf',
-      'txt' || 'md' || 'log' => 'text/plain',
-      'json' => 'application/json',
-      'zip' => 'application/zip',
-      _ => 'application/octet-stream',
-    };
-  }
-
-  Future<void> _pickFiles() async {
-    final sourceGeneration = _sourceGeneration;
-    final filePickGeneration = ++_filePickGeneration;
-    final transport = _transport;
-    try {
-      final files = await FilePicker.pickFiles();
-      if (!_isCurrentOperation(
-          sourceGeneration, filePickGeneration, _filePickGeneration, transport))
-        return;
-      final picked = <_PendingFile>[];
-      for (final file in files) {
-        final bytes = await file.readAsBytes();
-        if (!_isCurrentOperation(sourceGeneration, filePickGeneration,
-            _filePickGeneration, transport)) return;
-        picked.add(_PendingFile(file.name, _guessMime(file.name), bytes));
-      }
-      if (picked.isEmpty ||
-          !_isCurrentOperation(sourceGeneration, filePickGeneration,
-              _filePickGeneration, transport)) {
-        return;
-      }
-      setState(() => _pendingFiles.addAll(picked));
-    } catch (e) {
-      if (_isCurrentOperation(sourceGeneration, filePickGeneration,
-          _filePickGeneration, transport)) {
-        _toast('选择文件失败: $e');
-      }
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _uploadFiles(
-    Map<String, dynamic> echo,
-    List<_PendingFile> files,
-    String sessionId, {
-    required int sourceGeneration,
-    required int sendGeneration,
-    required ConversationTransport transport,
-  }) async {
-    final total = files.length;
-    var completed = 0;
-    while (files.isNotEmpty) {
-      if (!_isCurrentOperation(
-          sourceGeneration, sendGeneration, _sendGeneration, transport,
-          sessionId: sessionId)) {
-        throw const _StaleChatOperation();
-      }
-      final file = files.first;
-      final descriptor = await transport.attachmentPut(
-        sessionId,
-        fileName: file.fileName,
-        mime: file.mime,
-        bytes: file.bytes,
-        onProgress: (p) {
-          if (_isCurrentOperation(
-              sourceGeneration, sendGeneration, _sendGeneration, transport,
-              sessionId: sessionId)) {
-            setState(() => _uploadProgress = (completed + p) / total);
-          }
-        },
-      );
-      if (!_isCurrentOperation(
-          sourceGeneration, sendGeneration, _sendGeneration, transport,
-          sessionId: sessionId)) {
-        throw const _StaleChatOperation();
-      }
-      files.removeAt(0);
-      completed++;
-      final existing = (echo['attachments'] as List?)
-              ?.whereType<Map>()
-              .map((item) => item.cast<String, dynamic>())
-              .toList() ??
-          <Map<String, dynamic>>[];
-      existing.add(descriptor);
-      echo['attachments'] = existing;
-    }
-    return (echo['attachments'] as List?)
-            ?.whereType<Map>()
-            .map((item) => item.cast<String, dynamic>())
-            .toList() ??
-        <Map<String, dynamic>>[];
-  }
-
-  Future<void> _send() async {
-    final text = _inputController.text.trim();
-    if ((text.isEmpty && _pendingFiles.isEmpty) || _sending) return;
-
-    if (text.startsWith('/goal ') && _pendingFiles.isNotEmpty) {
-      _toast('目标命令不支持附件');
-      return;
-    }
-
-    // Slash commands (mirrors the web composer).
-    if (text == '/compact' || text.startsWith('/compact ')) {
-      _inputController.clear();
-      setState(() => _showSlash = false);
-      await _run('压缩失败', () => _transport.compact(_requireSession()));
-      return;
-    }
-    if (text == '/goal pause') {
-      _inputController.clear();
-      setState(() => _showSlash = false);
-      await _run('暂停目标失败', () => _transport.pauseGoal(_requireSession()));
-      return;
-    }
-    if (text == '/goal resume') {
-      _inputController.clear();
-      setState(() => _showSlash = false);
-      await _run('恢复目标失败', () => _transport.resumeGoal(_requireSession()));
-      return;
-    }
-
-    final sourceGeneration = _sourceGeneration;
-    final sendGeneration = ++_sendGeneration;
-    final transport = _transport;
-    final sourceSessionId = _sessionId;
-
-    // held-queue confirmation: when inputRouting is `choice` the user
-    // picks whether to clear the held queue or keep it. Asked BEFORE the
-    // echo goes up so cancelling leaves nothing on screen.
-    String? heldDisposition;
-    final state = _state;
-    if (state != null &&
-        state.inputRoutingMode == 'choice' &&
-        state.queueItems.isNotEmpty) {
-      heldDisposition = await _askHeldQueueDisposition();
-      if (!_isCurrentOperation(
-          sourceGeneration, sendGeneration, _sendGeneration, transport,
-          sessionId: sourceSessionId)) {
-        return;
-      }
-      if (heldDisposition == null) return; // cancelled
-    }
-
-    // Echo goes up the moment the user hits send (WeChat-style): the
-    // message is part of the stream from the start and only its delivery
-    // badge evolves — sending → sent → (processing once the turn runs).
-    // `files` move into the echo so a failed send keeps them for retry.
-    final echo = <String, dynamic>{
-      'text': text,
-      'ts': DateTime.now().millisecondsSinceEpoch,
-      'status': 'sending',
-      'attachments': null,
-      'files': List<_PendingFile>.from(_pendingFiles),
-    };
-    if (!_isCurrentOperation(
-        sourceGeneration, sendGeneration, _sendGeneration, transport,
-        sessionId: sourceSessionId)) {
-      return;
-    }
-    setState(() {
-      _echoes.add(echo);
-      _inputController.clear();
-      _pendingFiles.clear();
-      _sending = true;
-      _uploadProgress = null;
-      _showSlash = false;
-      _progress = null;
-    });
-    _scrollToBottom();
-    await _deliverEcho(
-      echo,
-      heldDisposition: heldDisposition,
-      sourceGeneration: sourceGeneration,
-      sendGeneration: sendGeneration,
-      transport: transport,
-    );
-  }
-
-  /// Sends (or re-sends) one echo's message and drives its status:
-  /// `sending` → `sent` on an accepted ack, `failed` (+reason) on a
-  /// rejection/timeout/error. Handles both the fresh-send path and the
-  /// tap-to-retry path (including re-creating a session in draft mode).
-  Future<void> _deliverEcho(
-    Map<String, dynamic> echo, {
-    String? heldDisposition,
-    required int sourceGeneration,
-    required int sendGeneration,
-    required ConversationTransport transport,
-  }) async {
-    var sessionId = _sessionId;
-    bool current() => _isCurrentOperation(
-          sourceGeneration,
-          sendGeneration,
-          _sendGeneration,
-          transport,
-          sessionId: sessionId,
-        );
-
-    void mark(String status, [String? error]) {
-      if (!current()) return;
-      if (diagLogEnabled.value) {
-        debugPrint('[chat] echo → $status${error == null ? '' : ' ($error)'}');
-      }
-      setState(() {
-        echo['status'] = status;
-        if (error != null) echo['error'] = error;
-      });
-    }
-
-    try {
-      if (sessionId == null) {
-        // 1) create the session (can take a while when the runtime warms).
-        // 宿主 createSession schema(.strict())没有 firstInput/attachments
-        // 字段——早期版本把首条文本塞进 firstInput,被宿主静默剥离,文本
-        // 从未送达(表现为新会话首条大概率收不到回复)。create 只建会话
-        // 并应用草稿的模型/思考档/模式,文本在订阅建立后统一走 sendText。
-        setState(() => _progress = '正在创建会话（首次可能需要预热）…');
-        final sw = Stopwatch()..start();
-        try {
-          final created = await transport.createSession(
-            widget.workspaceKey,
-            config: _buildDraftConfig(),
-            timeout: const Duration(seconds: 90),
-          );
-          if (!current()) return;
-          sessionId = created;
-          _adoptCreatedSession(created);
-          if (!current()) return;
-          if (diagLogEnabled.value) {
-            debugPrint('[chat] createSession total ${sw.elapsedMilliseconds}ms'
-                ' → $sessionId');
-          }
-        } catch (e) {
-          if (!current()) return;
-          log('[chat] createSession failed after '
-              '${sw.elapsedMilliseconds}ms: $e');
-          mark('failed', '$e');
-          _toast('发送失败: $e');
-          return;
-        }
-        log('[chat] createSession ok in ${sw.elapsedMilliseconds}ms');
-        setState(() => _progress = null);
-        // 思考档补丁:宿主 createSession 的 thoughtLevel 不落地(真机
-        // 实证:请求带 thoughtLevel:max,任务 meta thoughtLevel 仍为空,
-        // 会话 config 回读 thought='')。桌面端自身建会话后用
-        // switchModelConfig 应用;此处对齐——建完先应用草稿的模型+
-        // 思考档,再发首条文本。
-        final draft = _buildDraftConfig();
-        final provider = draft?['provider'] as String?;
-        final model = draft?['model'] as String?;
-        final thought = draft?['thought'] as String?;
-        if (provider != null &&
-            model != null &&
-            thought != null &&
-            thought.isNotEmpty) {
-          try {
-            final swSwitch = Stopwatch()..start();
-            await transport.switchModelConfig(sessionId,
-                provider: provider, model: model, thought: thought);
-            if (!current()) return;
-            if (diagLogEnabled.value) {
-              debugPrint('[chat] switchModelConfig after create '
-                  '${swSwitch.elapsedMilliseconds}ms');
-            }
-          } catch (e) {
-            if (current() && diagLogEnabled.value) {
-              debugPrint('[chat] switchModelConfig after create failed: $e');
-            }
-          }
-        }
-        // 2) 订阅与发送并行:sendText 是 RPC 直达宿主,不依赖本端订阅;
-        // 回复经订阅推送,await 订阅只会白等(真机实测首条慢 ~10s)。
-        // 订阅在后台补上,回复从建立完成那一刻开始照收。
-        if (!current()) return;
-        unawaited(_subscribe());
-      }
-      if (!current()) return;
-      final text = '${echo['text']}';
-      if (text.startsWith('/goal ')) {
-        final res = await transport.sendGoalCommand(
-          sessionId,
-          text.substring('/goal '.length).trim(),
-          heldQueueDisposition: heldDisposition,
-        );
-        if (!current()) return;
-        if (_ackRejected(res)) {
-          mark('failed', _ackReason(res));
-          _toast('发送失败: ${_ackReason(res)}');
-          return;
-        }
-        mark('sent');
-        return;
-      }
-      List<Map<String, dynamic>>? attachments = (echo['attachments'] as List?)
-          ?.whereType<Map>()
-          .cast<Map<String, dynamic>>()
-          .toList();
-      final files = (echo['files'] as List<_PendingFile>?) ?? const [];
-      if (files.isNotEmpty) {
-        setState(() => _progress = '正在上传附件…');
-        final fileList = (echo['files'] as List<_PendingFile>?) ?? [];
-        attachments = await _uploadFiles(
-          echo,
-          fileList,
-          sessionId,
-          sourceGeneration: sourceGeneration,
-          sendGeneration: sendGeneration,
-          transport: transport,
-        );
-        if (!current()) return;
-        setState(() => _progress = null);
-      }
-      final swSend = Stopwatch()..start();
-      final res = await transport.sendText(
-          sessionId,
-          text,
-
-        attachments: attachments,
-        heldQueueDisposition: heldDisposition,
-      );
-      if (!current()) return;
-      if (diagLogEnabled.value) {
-        debugPrint('[chat] sendText ack in ${swSend.elapsedMilliseconds}ms '
-            'res=$res');
-      }
-      if (_ackRejected(res)) {
-        mark('failed', _ackReason(res));
-        _toast('发送失败: ${_ackReason(res)}');
-        return;
-      }
-      _turnPending = true;
-      mark('sent');
-    } catch (e) {
-      if (!current() || e is _StaleChatOperation) return;
-      mark('failed', '$e');
-      _toast('发送失败: $e');
-    } finally {
-      if (current()) {
-        setState(() {
-          _sending = false;
-          _uploadProgress = null;
-          _progress = null;
-        });
-      }
-    }
-  }
-
-  /// Tap-to-retry for a failed echo: re-asks the held-queue disposition
-  /// when applicable, re-uploads attachments that never made it, and
-  /// drives the same status machine as the original send.
-  Future<void> _retryEcho(Map<String, dynamic> echo) async {
-    if (_sending) return;
-    final sourceGeneration = _sourceGeneration;
-    final sendGeneration = ++_sendGeneration;
-    final transport = _transport;
-    final sessionId = _sessionId;
-    String? heldDisposition;
-    final state = _state;
-    if (state != null &&
-        state.inputRoutingMode == 'choice' &&
-        state.queueItems.isNotEmpty) {
-      heldDisposition = await _askHeldQueueDisposition();
-      if (!_isCurrentOperation(
-          sourceGeneration, sendGeneration, _sendGeneration, transport,
-          sessionId: sessionId)) {
-        return;
-      }
-      if (heldDisposition == null) return; // cancelled
-    }
-    if (!_isCurrentOperation(
-        sourceGeneration, sendGeneration, _sendGeneration, transport,
-        sessionId: sessionId)) {
-      return;
-    }
-    setState(() {
-      echo['status'] = 'sending';
-      echo['error'] = null;
-      _sending = true;
-    });
-    await _deliverEcho(
-      echo,
-      heldDisposition: heldDisposition,
-      sourceGeneration: sourceGeneration,
-      sendGeneration: sendGeneration,
-      transport: transport,
-    );
-  }
-
-  bool _ackRejected(dynamic res) => isRpcRejected(res);
-
-  String _ackReason(dynamic res) => rpcFailureReason(res);
-
-  String _requireSession() {
-    final sessionId = _sessionId;
-    if (sessionId == null) throw StateError('尚无会话');
-    return sessionId;
-  }
-
-  /// 草稿选择(模型/思考档/模式)持久化:跨启动恢复上次选择。
-  /// prep 到达后按宿主可选项校验,宿主已不提供的值自动丢弃,避免把
-  /// 过期模型发给 createSession。
-  Future<void> _loadDraftPrefs() async {
-    final sourceGeneration = _sourceGeneration;
-    final draftPrefsGeneration = ++_draftPrefsGeneration;
-    final transport = _transport;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!_isCurrentOperation(sourceGeneration, draftPrefsGeneration,
-          _draftPrefsGeneration, transport)) return;
-      setState(() {
-        for (final k in const ['model', 'thought', 'mode']) {
-          final v = prefs.getString('draft.$k');
-          if (v != null && v.isNotEmpty) _draftConfig[k] = v;
-        }
-      });
-      _validateDraftAgainstPrep();
-    } catch (_) {}
-  }
-
-  void _validateDraftAgainstPrep() {
-    final prep = _prep;
-    if (prep == null) return;
-    final changed = <String, String>{..._draftConfig};
-    for (final entry in changed.entries.toList()) {
-      final option =
-          prep.option(entry.key == 'thought' ? 'thought_level' : entry.key);
-      if (option != null &&
-          option.options.isNotEmpty &&
-          !option.options.any((o) => o.value == entry.value)) {
-        _draftConfig.remove(entry.key);
-      }
-    }
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _saveDraftPrefs() async {
-    final sourceGeneration = _sourceGeneration;
-    final draftPrefsGeneration = ++_draftPrefsGeneration;
-    final transport = _transport;
-    // Keep writes ordered while allowing a newer selection to supersede the
-    // callbacks from an older save operation.
-    _draftPrefsSaveChain = _draftPrefsSaveChain.then((_) async {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        if (!_isCurrentOperation(sourceGeneration, draftPrefsGeneration,
-            _draftPrefsGeneration, transport)) return;
-        for (final k in const ['model', 'thought', 'mode']) {
-          final v = _draftConfig[k];
-          if (!_isCurrentOperation(sourceGeneration, draftPrefsGeneration,
-              _draftPrefsGeneration, transport)) return;
-          if (v == null || v.isEmpty) {
-            await prefs.remove('draft.$k');
-          } else {
-            await prefs.setString('draft.$k', v);
-          }
-        }
-      } catch (_) {}
-    });
-    await _draftPrefsSaveChain;
-  }
-
-  /// Builds the createSession `config` payload from the draft selection.
-  Map<String, dynamic>? _buildDraftConfig() {
-    // 未显式改过的项回填 prepareWorkspace 的当前值(用户在 pill/模式按钮
-    // 看到的就是这些值,期望按它建会话;缺省时宿主会用默认档,表现为
-    // "思考等级没按选好的来")。
-    String? pick(String key, String optionId) =>
-        _draftConfig[key] ?? '${_prep?.option(optionId)?.currentValue ?? ''}';
-    final modelValue = _draftConfig['model'] ??
-        '${_prep?.option('model')?.currentValue ?? ''}';
-    final config = <String, dynamic>{};
-    if (modelValue.isNotEmpty) {
-      final (provider, model) = providerModelOf(_prep, modelValue);
-      config['provider'] = provider;
-      config['model'] = model;
-    }
-    final thought = pick('thought', 'thought_level');
-    if (thought != null && thought.isNotEmpty) config['thought'] = thought;
-    final mode = pick('mode', 'mode');
-    if (mode != null && mode.isNotEmpty) config['mode'] = mode;
-    return config.isEmpty ? null : config;
-  }
 
   Future<String?> _askHeldQueueDisposition() {
     return showDialog<String>(
@@ -1185,124 +356,35 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  // ------------------------------------------------------------ history
-
-  Future<void> _loadOlder() async {
-    final state = _state;
-    final sessionId = _sessionId;
-    if (state == null || sessionId == null || _loadingOlder) return;
-    if (!state.canLoadOlder) return;
-    final sourceGeneration = _sourceGeneration;
-    final historyGeneration = ++_historyGeneration;
-    final transport = _transport;
-    final subscription = _subscription;
-    setState(() => _loadingOlder = true);
-    try {
-      // The cursor is the protocol state's oldest held row — see
-      // ConversationState.oldestRowId.
-      final res = await transport.rowsRange(
-        sessionId,
-        beforeRowId: state.oldestRowId,
-        limit: 60,
-      );
-      if (!_isCurrentOperation(sourceGeneration, historyGeneration,
-              _historyGeneration, transport,
-              sessionId: sessionId) ||
-          !identical(subscription, _subscription) ||
-          !identical(state, _state)) {
-        return;
-      }
-      List? rows;
-      int? firstRowId;
-      var hasMore = false;
-      if (res is Map) {
-        final rowsObj = res['rows'];
-        if (rowsObj is Map) {
-          rows = rowsObj['window'] as List? ?? rowsObj['rows'] as List?;
-          firstRowId = (rowsObj['firstRowId'] as num?)?.toInt();
-        } else if (rowsObj is List) {
-          rows = rowsObj;
-        }
-        rows ??= res['items'] as List? ?? res['window'] as List?;
-        firstRowId ??= (res['firstRowId'] as num?)?.toInt();
-        hasMore = res['hasMore'] == true;
-      } else if (res is List) {
-        rows = res;
-      }
-      if (rows != null && rows.isNotEmpty) {
-        final older = rows
-            .whereType<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList()
-          ..sort((a, b) =>
-              ((a['rowId'] as num?) ?? 0).compareTo((b['rowId'] as num?) ?? 0));
-        final oldLength = state.rows.length;
-        final oldFirstRowId = state.firstRowId;
-        state.prependOlderRows(older, firstRowId);
-        if (state.rows.length != oldLength ||
-            state.firstRowId != oldFirstRowId) {
-          _prependScrollPending = true;
-          _prependTailRow = state.rows.isEmpty ? null : state.rows.last;
-        }
-        // Reverse list: prepended history extends the top end without
-        // moving the viewport — no scroll compensation needed.
-        // This batch was the last (server says nothing precedes it): the
-        // earliest message is now held — retire the button immediately.
-        if (!hasMore) state.markHistoryExhausted(true);
-      } else {
-        // Exhausted (the server's hasMore is false): stop offering the
-        // button instead of re-tapping into empty responses.
-        if (!hasMore) state.markHistoryExhausted(true);
-        if (state.rows.isNotEmpty) {
-          _toast('没有更早的消息了');
-        }
-      }
-    } catch (e) {
-      if (_isCurrentOperation(sourceGeneration, historyGeneration,
-              _historyGeneration, transport,
-              sessionId: sessionId) &&
-          identical(subscription, _subscription) &&
-          identical(state, _state)) {
-        _toast('加载失败: $e');
-      }
-    } finally {
-      if (_isCurrentOperation(sourceGeneration, historyGeneration,
-              _historyGeneration, transport,
-              sessionId: sessionId) &&
-          identical(subscription, _subscription)) {
-        setState(() => _loadingOlder = false);
-      }
-    }
-  }
-
   // ------------------------------------------------------------ sheets
 
   void _showModelSheet() {
-    final sourceGeneration = _sourceGeneration;
-    final transport = _transport;
-    final sessionId = _sessionId;
+    final sourceGeneration = controller.sourceGeneration;
+    final transport = controller.transport;
+    final sessionId = controller.sessionId;
     // 立即用缓存打开(零等待);面板自持刷新——新鲜(≤5s)不发请求,
     // 否则强制拉取,数据到达后原地更新列表(删除的模型随之消失)。
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) => _ModelModeSheet(
-        state: _state,
+        state: controller.state,
         transport: transport,
-        prep: _prep,
+        prep: controller.prep,
         sessionId: sessionId,
-        draftConfig: _draftConfig,
-        isSourceCurrent: () => _isCurrentForSource(
+        draftConfig: controller.draftConfig,
+        isSourceCurrent: () => controller.isCurrentForSource(
           sourceGeneration,
           transport,
           sessionId: sessionId,
         ),
-        onRefreshPrep: _fetchPrepForSheet,
+        onRefreshPrep: controller.fetchPrepForSheet,
         onDraftChange: (key, value) {
-          if (!_isCurrentForSource(sourceGeneration, transport,
-              sessionId: sessionId)) return;
-          setState(() => _draftConfig[key] = value);
-          _saveDraftPrefs();
+          if (!controller.isCurrentForSource(sourceGeneration, transport,
+              sessionId: sessionId)) {
+            return;
+          }
+          controller.setDraftOption(key, value);
         },
       ),
     );
@@ -1312,7 +394,7 @@ class _ChatPageState extends State<ChatPage> {
   /// desktop's skills (triggered as `$name` in the composer).
   List<_SlashItem> get _slashItems {
     final items = <_SlashItem>[];
-    for (final c in _prep?.slashCommands ?? const <SlashCommand>[]) {
+    for (final c in controller.prep?.slashCommands ?? const <SlashCommand>[]) {
       items.add(_SlashItem(
         name: c.name,
         description: c.description,
@@ -1320,7 +402,7 @@ class _ChatPageState extends State<ChatPage> {
         isSkill: false,
       ));
     }
-    for (final s in _skills) {
+    for (final s in controller.skills) {
       items.add(_SlashItem(
         name: s.name,
         description: s.description ??
@@ -1336,11 +418,11 @@ class _ChatPageState extends State<ChatPage> {
   /// 当前协作模式 value(U2 输入框模式按钮):活动会话用现场值,
   /// 草稿用草稿选择。
   String get _currentModeLabel =>
-      _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
+      controller.state?.currentMode ?? controller.draftConfig['mode'] ?? 'build';
 
   /// 协作模式菜单(U2):与模型面板的模式区同源,选择即时生效。
   void _showModeMenu() {
-    final option = _prep?.option('mode');
+    final option = controller.prep?.option('mode');
     final options = option != null && option.options.isNotEmpty
         ? [for (final v in option.options) (v.value, v.name)]
         : const [
@@ -1349,11 +431,12 @@ class _ChatPageState extends State<ChatPage> {
             ('plan', 'plan'),
             ('yolo', 'yolo')
           ];
-    final current = _state?.currentMode ?? _draftConfig['mode'] ?? 'build';
-    final sourceGeneration = _sourceGeneration;
-    final sourceTransport = _transport;
-    final sourceSessionId = _sessionId;
-    final sourceState = _state;
+    final current =
+        controller.state?.currentMode ?? controller.draftConfig['mode'] ?? 'build';
+    final sourceGeneration = controller.sourceGeneration;
+    final sourceTransport = controller.transport;
+    final sourceSessionId = controller.sessionId;
+    final sourceState = controller.state;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1381,22 +464,26 @@ class _ChatPageState extends State<ChatPage> {
               title: Text(name, style: const TextStyle(fontSize: 13)),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                if (!_isCurrentForSource(sourceGeneration, sourceTransport,
-                    sessionId: sourceSessionId)) return;
+                if (!controller.isCurrentForSource(sourceGeneration,
+                    sourceTransport,
+                    sessionId: sourceSessionId)) {
+                  return;
+                }
                 if (sourceSessionId == null || sourceSessionId.isEmpty) {
-                  setState(() => _draftConfig['mode'] = value);
-                  _saveDraftPrefs();
+                  controller.setDraftOption('mode', value);
                 } else {
-                  _run('切换失败', () async {
-                    if (!_isCurrentForSource(sourceGeneration, sourceTransport,
+                  controller.run('切换失败', () async {
+                    if (!controller.isCurrentForSource(
+                        sourceGeneration, sourceTransport,
                         sessionId: sourceSessionId)) {
                       return null;
                     }
                     await sourceTransport.switchCollaborationMode(
                         sourceSessionId, value);
-                    if (_isCurrentForSource(sourceGeneration, sourceTransport,
-                        sessionId: sourceSessionId) &&
-                        identical(_state, sourceState)) {
+                    if (controller.isCurrentForSource(
+                            sourceGeneration, sourceTransport,
+                            sessionId: sourceSessionId) &&
+                        identical(controller.state, sourceState)) {
                       sourceState?.optimisticPatch({
                         'config': {
                           ...?sourceState.config,
@@ -1422,7 +509,7 @@ class _ChatPageState extends State<ChatPage> {
       showDragHandle: true,
       builder: (sheetContext) => _PlusSheet(
         slashItems: items,
-        loading: _skillsLoading,
+        loading: controller.skillsLoading,
         onSelect: (text) {
           _inputController.text = text;
           _inputController.selection =
@@ -1432,19 +519,19 @@ class _ChatPageState extends State<ChatPage> {
         },
         onAttach: () {
           Navigator.of(sheetContext).pop();
-          _pickFiles();
+          controller.pickFiles();
         },
-        onRefresh: _loadPrep,
+        onRefresh: controller.loadPrep,
       ),
     );
   }
 
   void _showUsageSheet() {
-    final state = _state;
-    final sessionId = _sessionId;
+    final state = controller.state;
+    final sessionId = controller.sessionId;
     if (state == null || sessionId == null) return;
-    final sourceGeneration = _sourceGeneration;
-    final transport = _transport;
+    final sourceGeneration = controller.sourceGeneration;
+    final transport = controller.transport;
     showModalBottomSheet(
       context: context,
       builder: (context) => _UsageSheet(
@@ -1452,7 +539,7 @@ class _ChatPageState extends State<ChatPage> {
         session: widget.session,
         scope: widget.scope,
         sessionId: sessionId,
-        isSourceCurrent: () => _isCurrentForSource(
+        isSourceCurrent: () => controller.isCurrentForSource(
           sourceGeneration,
           transport,
           sessionId: sessionId,
@@ -1463,7 +550,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = _state;
+    final state = controller.state;
     final body = _content(context, state);
     if (widget.embedded) {
       return Column(
@@ -1506,12 +593,11 @@ class _ChatPageState extends State<ChatPage> {
                       icon: Icon(Icons.stop_circle_outlined,
                           color: EmberColors.of(context).err),
                       tooltip: '停止',
-                      onPressed: () =>
-                          _run('停止失败', () => _transport.stop(_sessionId!)),
+                      onPressed: controller.stop,
                     )
                   : const SizedBox.shrink(),
             ),
-          if (_sessionId != null)
+          if (controller.sessionId != null)
             IconButton(
               icon: const Icon(Icons.quickreply_outlined, size: 20),
               tooltip: '辅助对话',
@@ -1525,7 +611,8 @@ class _ChatPageState extends State<ChatPage> {
           // 常驻(草稿态禁用会话级条目):出现/消失会导致右侧布局跳动,
           // 把会话列表按钮挤出屏幕。
           PopupMenuButton<String>(
-            onSelected: _sessionId == null ? null : _handleOverflowAction,
+            onSelected:
+                controller.sessionId == null ? null : _handleOverflowAction,
             itemBuilder: (context) =>
                 _overflowMenuItems(includeSideChat: false),
           ),
@@ -1546,15 +633,15 @@ class _ChatPageState extends State<ChatPage> {
         if (includeSideChat)
           PopupMenuItem(
               value: 'side',
-              enabled: _sessionId != null,
+              enabled: controller.sessionId != null,
               child: const Text('辅助对话')),
         PopupMenuItem(
             value: 'compact',
-            enabled: _sessionId != null,
+            enabled: controller.sessionId != null,
             child: const Text('压缩上下文 (compact)')),
         PopupMenuItem(
             value: 'usage',
-            enabled: _sessionId != null,
+            enabled: controller.sessionId != null,
             child: const Text('用量统计')),
       ];
 
@@ -1563,7 +650,7 @@ class _ChatPageState extends State<ChatPage> {
       case 'side':
         _openSideChat();
       case 'compact':
-        _run('压缩失败', () => _transport.compact(_sessionId!));
+        controller.compact();
       case 'usage':
         _showUsageSheet();
     }
@@ -1626,10 +713,11 @@ class _ChatPageState extends State<ChatPage> {
   /// 会话流工作状态胶囊(UX 反馈:文字+图标)。运行中 = 旋转箭头 +
   /// 「工作中」(primary),空闲 = 空心圆 + 「空闲」(textFaint);draft
   /// 无订阅时同样按空闲处理。发送已接受、订阅行未到的乐观窗口
-  /// ([_turnPending])同样按工作中显示。
+  /// ([ChatController.turnPending])同样按工作中显示。
   Widget _sessionStatusChip(BuildContext context, ConversationState? state) {
     final colors = EmberColors.of(context);
-    final running = _turnPending || (state != null && state.isRunning);
+    final running =
+        controller.turnPending || (state != null && state.isRunning);
     final color = running ? colors.primary : colors.textFaint;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1701,12 +789,12 @@ class _ChatPageState extends State<ChatPage> {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (state != null && state.isRunning && _sessionId != null)
+          if (state != null && state.isRunning && controller.sessionId != null)
             IconButton(
               icon:
                   Icon(Icons.stop_circle_outlined, size: 22, color: colors.err),
               tooltip: '停止',
-              onPressed: () => _run('停止失败', () => _transport.stop(_sessionId!)),
+              onPressed: controller.stop,
             ),
           Flexible(child: _modelPill(context, state)),
           // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
@@ -1714,7 +802,8 @@ class _ChatPageState extends State<ChatPage> {
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, size: 20, color: colors.textMuted),
             tooltip: '更多',
-            onSelected: _sessionId == null ? null : _handleOverflowAction,
+            onSelected:
+                controller.sessionId == null ? null : _handleOverflowAction,
             itemBuilder: (context) => _overflowMenuItems(includeSideChat: true),
           ),
         ],
@@ -1787,16 +876,18 @@ class _ChatPageState extends State<ChatPage> {
   /// pill 的模型显示名。draft 用草稿选择/准备默认值;活动会话用
   /// provider/model 现场值(展示名匹配不上时退裸模型名)。
   String _pillModelLabel(ConversationState? state) {
-    final opt = _prep?.option('model');
-    final isDraft = state == null || _sessionId == null || _sessionId!.isEmpty;
+    final opt = controller.prep?.option('model');
+    final sessionId = controller.sessionId;
+    final isDraft = state == null || sessionId == null || sessionId.isEmpty;
     String value;
     if (isDraft) {
-      value = _draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
+      value =
+          controller.draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
     } else {
       final config = state.config ?? const {};
       value = '${config['provider'] ?? ''}/${config['model'] ?? ''}';
       if ('${config['model'] ?? ''}'.isEmpty) {
-        value = _draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
+        value = controller.draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
       }
     }
     if (value.isEmpty) return '模型';
@@ -1808,10 +899,11 @@ class _ChatPageState extends State<ChatPage> {
 
   /// pill 的思考强度档名;无值(draft 未选且准备数据未到)时不显示该段。
   String? _pillThoughtLabel(ConversationState? state) {
-    final opt = _prep?.option('thought_level');
-    final isDraft = state == null || _sessionId == null || _sessionId!.isEmpty;
+    final opt = controller.prep?.option('thought_level');
+    final sessionId = controller.sessionId;
+    final isDraft = state == null || sessionId == null || sessionId.isEmpty;
     final value = isDraft
-        ? (_draftConfig['thought'] ?? '${opt?.currentValue ?? ''}')
+        ? (controller.draftConfig['thought'] ?? '${opt?.currentValue ?? ''}')
         : (state.currentThought.isNotEmpty
             ? state.currentThought
             : '${opt?.currentValue ?? ''}');
@@ -1823,15 +915,15 @@ class _ChatPageState extends State<ChatPage> {
   /// 不包 Scaffold/AppBar 外壳。
   Widget _content(BuildContext context, ConversationState? state) => Column(
         children: [
-          if (_error != null)
+          if (controller.error != null)
             Material(
               color: EmberColors.of(context).err.withValues(alpha: 0.15),
               child: ListTile(
                 dense: true,
-                title:
-                    Text('订阅失败: $_error', style: const TextStyle(fontSize: 12)),
-                trailing:
-                    TextButton(onPressed: _subscribe, child: const Text('重试')),
+                title: Text('订阅失败: ${controller.error}',
+                    style: const TextStyle(fontSize: 12)),
+                trailing: TextButton(
+                    onPressed: controller.subscribe, child: const Text('重试')),
               ),
             ),
           if (state != null)
@@ -1847,7 +939,7 @@ class _ChatPageState extends State<ChatPage> {
           Expanded(
             child: state == null
                 ? Center(
-                    child: _sessionId == null
+                    child: controller.sessionId == null
                         ? Text('输入消息开始新会话',
                             style: TextStyle(
                                 color: EmberColors.of(context).textFaint))
@@ -1864,7 +956,7 @@ class _ChatPageState extends State<ChatPage> {
                           final groups = cachedGroupRows(state);
                           // Optimistic echoes render newest-first at the
                           // bottom (reverse index 0..n-1).
-                          final echoCount = _echoes.length;
+                          final echoCount = controller.echoes.length;
                           final itemCount = groups.length +
                               echoCount +
                               (state.canLoadOlder ? 1 : 0);
@@ -1882,9 +974,10 @@ class _ChatPageState extends State<ChatPage> {
                           // opened chat sits on the latest turn by
                           // construction, and prepended history never
                           // shifts the viewport.
-                          final sourceGeneration = _sourceGeneration;
-                          final sourceTransport = _transport;
-                          final sourceSessionId = _sessionId ?? '';
+                          final sourceGeneration = controller.sourceGeneration;
+                          final sourceTransport = controller.transport;
+                          final sourceSessionId =
+                              controller.sessionId ?? '';
                           return ListView.builder(
                             controller: _scrollController,
                             reverse: true,
@@ -1892,13 +985,15 @@ class _ChatPageState extends State<ChatPage> {
                             itemCount: itemCount,
                             itemBuilder: (context, index) {
                               if (index < echoCount) {
-                                final e = _echoes[echoCount - 1 - index];
+                                final e =
+                                    controller.echoes[echoCount - 1 - index];
                                 // Same bubble as a confirmed user row, so
                                 // retiring the echo (real row takes over)
                                 // is visually seamless. 已发送 + 轮次在途
-                                // → 乐观升为「处理中」(见 _turnPending)。
+                                // → 乐观升为「处理中」(见 turnPending)。
                                 final badge =
-                                    e['status'] == 'sent' && _turnPending
+                                    e['status'] == 'sent' &&
+                                            controller.turnPending
                                         ? 'processing'
                                         : '${e['status']}';
                                 return _UserBubble(
@@ -1911,14 +1006,17 @@ class _ChatPageState extends State<ChatPage> {
                                   },
                                   transport: sourceTransport,
                                   sessionId: sourceSessionId,
-                                  isSourceCurrent: () => _isCurrentForSource(
-                                    sourceGeneration,
-                                    sourceTransport,
-                                    sessionId: sourceSessionId,
-                                  ),
+                                  isSourceCurrent: () =>
+                                      controller.isCurrentForSource(
+                                        sourceGeneration,
+                                        sourceTransport,
+                                        sessionId: sourceSessionId,
+                                      ),
                                   badge: badge,
                                   onRetry: e['status'] == 'failed'
-                                      ? () => _retryEcho(e)
+                                      ? () => controller.retryEcho(e,
+                                          askHeldQueueDisposition:
+                                              _askHeldQueueDisposition)
                                       : null,
                                 );
                               }
@@ -1926,9 +1024,10 @@ class _ChatPageState extends State<ChatPage> {
                               if (state.canLoadOlder && mi == groups.length) {
                                 return Center(
                                   child: TextButton.icon(
-                                    onPressed:
-                                        _loadingOlder ? null : _loadOlder,
-                                    icon: _loadingOlder
+                                    onPressed: controller.loadingOlder
+                                        ? null
+                                        : controller.loadOlder,
+                                    icon: controller.loadingOlder
                                         ? const SizedBox(
                                             width: 12,
                                             height: 12,
@@ -1948,17 +1047,19 @@ class _ChatPageState extends State<ChatPage> {
                                 rows: group,
                                 transport: sourceTransport,
                                 sessionId: sourceSessionId,
-                                onAction: _run,
-                                isSourceCurrent: () => _isCurrentForSource(
-                                  sourceGeneration,
-                                  sourceTransport,
-                                  sessionId: sourceSessionId,
-                                ),
+                                onAction: controller.run,
+                                isSourceCurrent: () =>
+                                    controller.isCurrentForSource(
+                                      sourceGeneration,
+                                      sourceTransport,
+                                      sessionId: sourceSessionId,
+                                    ),
                                 beginFileChangesOperation:
-                                    _beginFileChangesOperation,
+                                    controller.beginFileChangesOperation,
                                 isFileChangesOperationCurrent: (generation) =>
-                                    generation == _fileChangesGeneration &&
-                                    _isCurrentForSource(
+                                    generation ==
+                                        controller.fileChangesGeneration &&
+                                    controller.isCurrentForSource(
                                       sourceGeneration,
                                       sourceTransport,
                                       sessionId: sourceSessionId,
@@ -1970,7 +1071,7 @@ class _ChatPageState extends State<ChatPage> {
                         },
                       ),
           ),
-          _ReconnectBanner(bridge: _transport.session),
+          _ReconnectBanner(bridge: controller.transport.session),
           if (state != null)
             AnimatedBuilder(
               animation: Listenable.merge([
@@ -1984,8 +1085,9 @@ class _ChatPageState extends State<ChatPage> {
                 children: [
                   _GoalBanner(state: state),
                   _BackgroundWorksBar(state: state),
-                  _QueueBar(state: state, transport: _transport),
-                  _PendingInteractions(state: state, transport: _transport),
+                  _QueueBar(state: state, transport: controller.transport),
+                  _PendingInteractions(
+                      state: state, transport: controller.transport),
                 ],
               ),
             ),
@@ -2005,7 +1107,7 @@ class _ChatPageState extends State<ChatPage> {
                 }
               },
             ),
-          if (_progress != null)
+          if (controller.progress != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
               child: Row(
@@ -2016,38 +1118,39 @@ class _ChatPageState extends State<ChatPage> {
                     child: CircularProgressIndicator(strokeWidth: 1.5),
                   ),
                   const SizedBox(width: 8),
-                  Text(_progress!,
+                  Text(controller.progress!,
                       style: TextStyle(
                           fontSize: 11,
                           color: EmberColors.of(context).textMuted)),
                 ],
               ),
             ),
-          if (_pendingFiles.isNotEmpty)
+          if (controller.pendingFiles.isNotEmpty)
             _PendingFilesBar(
-              files: _pendingFiles,
-              uploadProgress: _uploadProgress,
-              onRemove: (i) => setState(() => _pendingFiles.removeAt(i)),
+              files: controller.pendingFiles,
+              uploadProgress: controller.uploadProgress,
+              onRemove: controller.removePendingFileAt,
             ),
-          if (state != null && _sessionId != null)
+          if (state != null && controller.sessionId != null)
             AnimatedBuilder(
               animation: Listenable.merge([
                 state.rowsListenable,
                 state.backgroundListenable,
               ]),
               builder: (context, _) {
-                final handleSourceGeneration = _sourceGeneration;
-                final handleTransport = _transport;
-                final handleSessionId = _sessionId;
+                final handleSourceGeneration = controller.sourceGeneration;
+                final handleTransport = controller.transport;
+                final handleSessionId = controller.sessionId;
                 final handleState = state;
                 return InsightsHandle(
                   state: state,
                   transport: handleTransport,
                   sessionId: handleSessionId!,
                   isSourceCurrent: () =>
-                      _isCurrentForSource(handleSourceGeneration, handleTransport,
+                      controller.isCurrentForSource(handleSourceGeneration,
+                          handleTransport,
                           sessionId: handleSessionId) &&
-                      identical(_state, handleState),
+                      identical(controller.state, handleState),
                 );
               },
             ),
@@ -2063,7 +1166,7 @@ class _ChatPageState extends State<ChatPage> {
                   ]),
             builder: (context, _) => _InputBar(
               controller: _inputController,
-              sending: _sending,
+              sending: controller.sending,
               onSend: _send,
               onPlusMenu: _openPlusSheet,
               modeLabel: _currentModeLabel,
