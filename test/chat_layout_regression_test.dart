@@ -197,9 +197,12 @@ void main() {
     // --- 断言 3:消息流可滚动 ---
     // reverse 列表 offset 0 是最新一端,手指下滑(内容下移)翻出更早
     // 内容、offset 增大;上滑在此处是 overscroll,被 Clamping 钳住。
+    // 流式行尾部转圈是有意保留的无限动画,pumpAndSettle 永不收敛,
+    // 用固定 pump 等滚动落定。
     final lv = lists.where((l) => l.controller != null).first;
     await tester.drag(find.byType(ListView), const Offset(0, 120));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
     expect(lv.controller!.offset,
         isNot(equals(lv.controller!.initialScrollOffset)),
         reason: '拖拽后 offset 未变化——真机滚动僵死形态');

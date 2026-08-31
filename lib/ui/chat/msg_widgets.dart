@@ -8,7 +8,8 @@ class _ModeBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final yolo = mode == 'yolo';
+    // full 是部分宿主对 yolo 的别名,一并认作免确认横幅。
+    final yolo = mode == 'yolo' || mode == 'full';
     final plan = mode == 'plan';
     if (!yolo && !plan) return const SizedBox.shrink();
     final colors = EmberColors.of(context);
@@ -559,7 +560,8 @@ class _RowWidget extends StatelessWidget {
           onForkedSession: onForkedSession),
       'reasoning' => _ReasoningTile(
           text: row['text'] as String? ?? '',
-          streaming: row['state'] == 'streaming'),
+          streaming: row['state'] == 'streaming',
+          rowTs: _rowTsOf(row)),
       'toolCall' => _ToolCallTile(row: row),
       'turnHeader' => _TurnHeader(row: row),
       'subagent' => _SubagentTile(row: row),
@@ -1092,7 +1094,10 @@ class _ReasoningTile extends StatefulWidget {
   final String text;
   final bool streaming;
 
-  const _ReasoningTile({required this.text, this.streaming = false});
+  /// 行时间戳(协议 ts / 视图层到达戳),尾部时间显示用;历史行可空。
+  final int? rowTs;
+
+  const _ReasoningTile({required this.text, this.streaming = false, this.rowTs});
 
   @override
   State<_ReasoningTile> createState() => _ReasoningTileState();
@@ -1166,6 +1171,28 @@ class _ReasoningTileState extends State<_ReasoningTile> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: ZflowMarkdown(widget.text, fontSize: 12),
+              ),
+            // 尾部时间戳(用户裁定,与工具块/助手消息一致):流式中附
+            // 转圈;行无戳且非流式则整行隐藏。
+            if (widget.streaming || (widget.rowTs ?? 0) > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.streaming) ...[
+                      const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 1.5)),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(_messageTimeLabel(widget.rowTs),
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: EmberColors.of(context).textFaint)),
+                  ],
+                ),
               ),
           ],
         ),

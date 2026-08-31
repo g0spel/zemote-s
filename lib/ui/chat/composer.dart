@@ -162,10 +162,32 @@ class _PlusSheetState extends State<_PlusSheet> {
 
 /// 会话设置面板图标行(桌面同款布局)。按钮全部压缩密度,整行高度约为
 /// 常规 IconButton 行的一半。
+/// 协作模式元数据(用户裁定:菜单汉化、按钮两字缩写)。宿主实际下发
+/// ask/edit/plan/full(桌面源码另有 build/yolo 别名),两套都覆盖。
+const _modeMeta = {
+  'build': ('构建', '改动前先询问,每次文件改动都会征求确认'),
+  'ask': ('构建', '改动前先询问,每次文件改动都会征求确认'),
+  'edit': ('编辑', '自动编辑选定文件'),
+  'plan': ('计划', '只读研究,方案产出后需确认才会动手'),
+  'yolo': ('YOLO', '编辑与执行命令几乎免确认'),
+  'full': ('YOLO', '编辑与执行命令几乎免确认'),
+};
+
 /// 协作模式中文标签(模式菜单与按钮共用);未知值原样返回。
 String modeLabelOf(String value) {
+  final meta = _modeMeta[value.toLowerCase()];
+  return meta?.$1 ?? value;
+}
+
+/// 协作模式中文描述(菜单副标题);未知值返回 null(回落原始 name)。
+String? modeDescriptionOf(String value) {
+  return _modeMeta[value.toLowerCase()]?.$2;
+}
+
+/// 高风险模式(警示色/横幅):计划与 YOLO(含 full 别名)。
+bool modeIsHot(String value) {
   final v = value.toLowerCase();
-  return _InputBar._modeLabels[v] ?? value;
+  return v == 'plan' || v == 'yolo' || v == 'full';
 }
 
 class _InputBar extends StatelessWidget {
@@ -212,23 +234,12 @@ class _InputBar extends StatelessWidget {
     this.insightsCount = 0,
   });
 
-  /// 协作模式 → 两字缩写按钮文案(用户裁定:不用图标)。yolo 保留
-  /// 桌面端原词;未知模式回落「模式」。
-  static const _modeLabels = {
-    'build': '构建',
-    'edit': '编辑',
-    'plan': '计划',
-    'yolo': 'YOLO',
-  };
-
   @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
     final mode = modeValue;
-    final modeHot = mode == 'plan' || mode == 'yolo';
-    final modeLabel = mode == null
-        ? '模式'
-        : (_modeLabels[mode] ?? _modeLabels[mode.toLowerCase()] ?? '模式');
+    final modeHot = mode != null && modeIsHot(mode);
+    final modeLabel = mode == null ? '模式' : modeLabelOf(mode);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
