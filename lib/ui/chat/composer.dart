@@ -235,8 +235,6 @@ class _InputBar extends StatelessWidget {
                   hintText: running ? '继续输入以排队后续修改' : '向 ZCode 提问…',
                   border: InputBorder.none,
                   isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 ),
                 textInputAction: TextInputAction.newline,
               ),
@@ -303,7 +301,7 @@ class _InputBar extends StatelessWidget {
     );
   }
 
-  /// 图标行按钮:零内边距 + 最大压缩密度,高度约为常规 IconButton 一半。
+  /// 图标行按钮:常规紧凑尺寸。
   Widget _barButton(
     BuildContext context, {
     required IconData icon,
@@ -314,10 +312,8 @@ class _InputBar extends StatelessWidget {
     return IconButton(
       onPressed: onPressed,
       tooltip: tooltip,
-      visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
-      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-      padding: EdgeInsets.zero,
-      icon: Icon(icon, size: 19, color: color ?? EmberColors.of(context).textMuted),
+      visualDensity: VisualDensity.compact,
+      icon: Icon(icon, size: 22, color: color ?? EmberColors.of(context).textMuted),
     );
   }
 }
@@ -342,37 +338,52 @@ class _SendOrStop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = EmberColors.of(context);
+    const size = 40.0;
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (context, value, _) {
         final empty = value.text.trim().isEmpty;
         if (running && empty) {
-          return IconButton(
-            onPressed: onStop,
-            tooltip: '停止',
-            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
-            padding: EdgeInsets.zero,
-            style: IconButton.styleFrom(backgroundColor: colors.raise),
-            icon: Icon(Icons.stop, size: 20, color: colors.textSolid),
+          return Tooltip(
+            message: '停止',
+            child: InkWell(
+              onTap: onStop,
+              borderRadius: BorderRadius.circular(EmberRadius.control),
+              child: Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: colors.raise,
+                  borderRadius: BorderRadius.circular(EmberRadius.control),
+                ),
+                child: Icon(Icons.stop, size: 24, color: colors.textSolid),
+              ),
+            ),
           );
         }
-        return IconButton(
-          onPressed: sending ? null : onSend,
-          tooltip: '发送',
-          visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
-          padding: EdgeInsets.zero,
-          style: IconButton.styleFrom(backgroundColor: colors.primary),
-          icon: sending
-              ? const SizedBox(
-                  width: 15,
-                  height: 15,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.arrow_upward,
-                  color: Colors.white, size: 19),
+        return Tooltip(
+          message: '发送',
+          child: InkWell(
+            onTap: sending ? null : onSend,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              decoration:
+                  BoxDecoration(color: colors.primary, shape: BoxShape.circle),
+              child: sending
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.arrow_upward,
+                      color: Colors.white, size: 24),
+            ),
+          ),
         );
       },
     );

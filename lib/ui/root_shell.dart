@@ -697,6 +697,10 @@ class _RootShellState extends State<RootShell> {
         ),
       ),
       bottomNavigationBar: NavigationBar(
+        // 压缩底栏(用户指令:高度约为默认 80 的一半):隐藏文字标签,
+        // 仅图标+长按悬浮提示,视觉重心让给对话区。
+        height: 44,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
         selectedIndex: _tab,
         onDestinationSelected: (i) =>
             setState(() {
@@ -708,16 +712,19 @@ class _RootShellState extends State<RootShell> {
             icon: Icon(Icons.forum_outlined),
             selectedIcon: Icon(Icons.forum),
             label: '对话',
+            tooltip: '对话',
           ),
           NavigationDestination(
             icon: Icon(Icons.schedule_outlined),
             selectedIcon: Icon(Icons.schedule),
             label: '自动化',
+            tooltip: '自动化',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings),
             label: '设置',
+            tooltip: '设置',
           ),
         ],
       ),

@@ -156,24 +156,24 @@ void main() {
     await _pumpShell(tester, urls: [_deviceUrl], autoConnect: false);
     final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
     expect(bar.selectedIndex, 0);
-    expect(find.text('对话'), findsOneWidget);
-    expect(find.text('自动化'), findsOneWidget);
-    expect(find.text('设置'), findsOneWidget);
+    expect(find.byIcon(Icons.forum), findsOneWidget); // 选中态实心图标
+    expect(find.byIcon(Icons.schedule_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 
   testWidgets('自动化 Tab 无 bridge 时显示连接提示', (tester) async {
     await _pumpShell(tester, urls: [_deviceUrl], autoConnect: false);
-    await tester.tap(find.text('自动化'));
+    await tester.tap(find.byIcon(Icons.schedule_outlined));
     await tester.pumpAndSettle();
     expect(find.text('连接设备后可用'), findsOneWidget);
   });
 
   testWidgets('设置 Tab 渲染 SettingsPage 标题', (tester) async {
     await _pumpShell(tester, urls: [_deviceUrl], autoConnect: false);
-    await tester.tap(find.text('设置'));
+    await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pumpAndSettle();
     expect(find.byType(SettingsPage), findsOneWidget);
-    // 页面标题「设置」+ 底部导航标签「设置」共两处。
+    // 页面标题「设置」+ 底栏标签(图标化后仍在树内,不显示)共两处。
     expect(find.text('设置'), findsNWidgets(2));
   });
 
@@ -238,7 +238,7 @@ void main() {
     await tester.pumpAndSettle(); // A 链完成
     expect(_chatSessionId(tester), isNull); // A 的 draft
 
-    await tester.tap(find.text('设置'));
+    await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pumpAndSettle();
     expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
@@ -294,7 +294,7 @@ void main() {
     expect(shellPopScope().canPop, isTrue);
 
     // 非对话 Tab:back 被拦截,壳切回对话 Tab 而不是退出应用。
-    await tester.tap(find.text('设置'));
+    await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pumpAndSettle();
     expect(shellPopScope().canPop, isFalse);
     await tester.binding.handlePopRoute();
@@ -427,10 +427,10 @@ void main() {
 
     // 切走(自动化 Tab 卸载内嵌 ChatPage)再切回:按回写的会话恢复,
     // 而不是落到一个新 draft。
-    await tester.tap(find.text('自动化'));
+    await tester.tap(find.byIcon(Icons.schedule_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('对话'));
+    await tester.tap(find.byIcon(Icons.forum_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(_chatSessionId(tester), 's-new');
