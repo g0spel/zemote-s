@@ -208,11 +208,10 @@ class _PlusSheetState extends State<_PlusSheet> {
   }
 }
 
-class _InputBar extends StatefulWidget {
+class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
-  final VoidCallback onAttach;
   final VoidCallback onPlusMenu;
 
   /// 当前协作模式 value(空则不渲染模式按钮)与菜单回调(U2)。
@@ -223,17 +222,11 @@ class _InputBar extends StatefulWidget {
     required this.controller,
     required this.sending,
     required this.onSend,
-    required this.onAttach,
     this.modeLabel,
     this.onPickMode,
     required this.onPlusMenu,
   });
 
-  @override
-  State<_InputBar> createState() => _InputBarState();
-}
-
-class _InputBarState extends State<_InputBar> {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -243,18 +236,18 @@ class _InputBarState extends State<_InputBar> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             _ModeButton(
-              modeValue: widget.modeLabel,
-              onTap: widget.sending ? null : widget.onPickMode,
+              modeValue: modeLabel,
+              onTap: sending ? null : onPickMode,
             ),
             IconButton(
               icon: Icon(Icons.add_circle_outline,
                   size: 22, color: EmberColors.of(context).textMuted),
               tooltip: 'Skills / 命令 / 附件',
-              onPressed: widget.sending ? null : widget.onPlusMenu,
+              onPressed: sending ? null : onPlusMenu,
             ),
             Expanded(
               child: TextField(
-                controller: widget.controller,
+                controller: controller,
                 minLines: 1,
                 maxLines: 5,
                 style: const TextStyle(fontSize: 14),
@@ -271,8 +264,8 @@ class _InputBarState extends State<_InputBar> {
                 shape: BoxShape.circle,
               ),
               child: IconButton(
-                onPressed: widget.sending ? null : widget.onSend,
-                icon: widget.sending
+                onPressed: sending ? null : onSend,
+                icon: sending
                     ? const SizedBox(
                         width: 16,
                         height: 16,

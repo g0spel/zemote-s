@@ -1525,31 +1525,48 @@ class _ChatPageState extends State<ChatPage> {
           // 常驻(草稿态禁用会话级条目):出现/消失会导致右侧布局跳动,
           // 把会话列表按钮挤出屏幕。
           PopupMenuButton<String>(
-            onSelected: _sessionId == null
-                ? null
-                : (action) {
-                    switch (action) {
-                      case 'compact':
-                        _run('压缩失败', () => _transport.compact(_sessionId!));
-                      case 'usage':
-                        _showUsageSheet();
-                    }
-                  },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                  value: 'compact',
-                  enabled: _sessionId != null,
-                  child: Text('压缩上下文 (compact)')),
-              PopupMenuItem(
-                  value: 'usage',
-                  enabled: _sessionId != null,
-                  child: Text('用量统计')),
-            ],
+            onSelected: _sessionId == null ? null : _handleOverflowAction,
+            itemBuilder: (context) =>
+                _overflowMenuItems(includeSideChat: false),
           ),
         ],
       ),
       body: body,
     );
+  }
+
+  // ------------------------------------------------- header overflow
+
+  /// 顶栏溢出菜单:非 embedded(Scaffold)与 embedded 两种布局共用的
+  /// 动作集合与分发;布局差异保留(Scaffold 的辅助对话是独立图标,
+  /// 不进菜单)。会话级条目草稿态禁用而非隐藏,避免右侧布局跳动。
+  List<PopupMenuEntry<String>> _overflowMenuItems(
+          {required bool includeSideChat}) =>
+      [
+        if (includeSideChat)
+          PopupMenuItem(
+              value: 'side',
+              enabled: _sessionId != null,
+              child: const Text('辅助对话')),
+        PopupMenuItem(
+            value: 'compact',
+            enabled: _sessionId != null,
+            child: const Text('压缩上下文 (compact)')),
+        PopupMenuItem(
+            value: 'usage',
+            enabled: _sessionId != null,
+            child: const Text('用量统计')),
+      ];
+
+  void _handleOverflowAction(String action) {
+    switch (action) {
+      case 'side':
+        _openSideChat();
+      case 'compact':
+        _run('压缩失败', () => _transport.compact(_sessionId!));
+      case 'usage':
+        _showUsageSheet();
+    }
   }
 
   // ------------------------------------------------- embedded header
@@ -1697,32 +1714,8 @@ class _ChatPageState extends State<ChatPage> {
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, size: 20, color: colors.textMuted),
             tooltip: '更多',
-            onSelected: _sessionId == null
-                ? null
-                : (action) {
-                    switch (action) {
-                      case 'side':
-                        _openSideChat();
-                      case 'compact':
-                        _run('压缩失败', () => _transport.compact(_sessionId!));
-                      case 'usage':
-                        _showUsageSheet();
-                    }
-                  },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                  value: 'side',
-                  enabled: _sessionId != null,
-                  child: Text('辅助对话')),
-              PopupMenuItem(
-                  value: 'compact',
-                  enabled: _sessionId != null,
-                  child: Text('压缩上下文 (compact)')),
-              PopupMenuItem(
-                  value: 'usage',
-                  enabled: _sessionId != null,
-                  child: Text('用量统计')),
-            ],
+            onSelected: _sessionId == null ? null : _handleOverflowAction,
+            itemBuilder: (context) => _overflowMenuItems(includeSideChat: true),
           ),
         ],
       );
@@ -2072,7 +2065,6 @@ class _ChatPageState extends State<ChatPage> {
               controller: _inputController,
               sending: _sending,
               onSend: _send,
-              onAttach: _pickFiles,
               onPlusMenu: _openPlusSheet,
               modeLabel: _currentModeLabel,
               onPickMode: _showModeMenu,
