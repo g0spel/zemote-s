@@ -415,12 +415,11 @@ void main() {
     final rect = tester.getRect(find.byIcon(Icons.menu));
     expect(rect.right, lessThanOrEqualTo(360), // 1080/3 逻辑宽
         reason: '会话列表按钮被长模型名挤出屏幕(真机三杠出界形态)');
-    expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
-    // 模型名不能被挤压成不可见(此前 Spacer+Flexible 对半分空间的形态:
-    // pill 只剩省略号,用户侧表现为「模型名彻底丢了」)。
-    final pillText = find.textContaining('claude-sonnet');
-    expect(pillText, findsOneWidget);
-    expect(tester.getRect(pillText).width, greaterThan(30));
+    // 模型/思考设置已内联进输入区卡片(桌面同款):图标必须在场。
+    expect(find.byIcon(Icons.view_in_ar), findsOneWidget);
+    expect(find.byIcon(Icons.psychology), findsOneWidget);
+    // 运行中 + 输入为空 → 发送键变停止方块。
+    expect(find.byIcon(Icons.stop), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     bridge.dispose();

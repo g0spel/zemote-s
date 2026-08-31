@@ -1,54 +1,6 @@
 // 此文件是 chat_page.dart 的一部分(part):同库共享导入与私有类可见。
 part of '../chat_page.dart';
 
-/// 输入框左侧的协作模式按钮(U2):上图标下简称的紧凑两行,点击弹出
-/// 模式菜单。宿主模式名往往很长(如 "Ask before changes"),此处用
-/// 简称映射;未知模式回退 value 前 4 字符。modeValue 为空不渲染。
-class _ModeButton extends StatelessWidget {
-  final String? modeValue;
-  final VoidCallback? onTap;
-
-  const _ModeButton({this.modeValue, this.onTap});
-
-  static const _abbr = {
-    'build': ('构建', Icons.build),
-    'edit': ('编辑', Icons.edit_note),
-    'plan': ('计划', Icons.checklist),
-    'yolo': ('自主', Icons.bolt),
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final v = modeValue;
-    if (v == null || v.isEmpty) return const SizedBox.shrink();
-    final colors = EmberColors.of(context);
-    final (name, icon) = _abbr[v] ??
-        (v.length > 4 ? v.substring(0, 4) : v, Icons.tune);
-    return InkWell(
-      borderRadius: BorderRadius.circular(EmberRadius.control),
-      onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 40,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(EmberRadius.control),
-          border: Border.all(color: colors.hairline),
-        ),
-        child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 15, color: colors.primary),
-              Text(name,
-                  style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w600,
-                      color: colors.textMuted)),
-            ]),
-      ),
-    );
-  }
-}
-
 /// "+"面板(U2):先出分类入口(Skills/斜杠命令/附件/添加上下文),
 /// 点进分类再列明细,避免一打开就是一整面列表。
 class _PlusSheet extends StatefulWidget {
@@ -208,77 +160,199 @@ class _PlusSheetState extends State<_PlusSheet> {
   }
 }
 
+/// 输入区卡片(桌面客户端同款布局):上输入行 + 下图标行
+/// `＋ 盾(模式) √N排队 …… ○用量 ◈模型 🧠思考 ➤/■`。会话设置
+/// (模型/思考/模式)全部内联在卡片里,顶栏不再放模型 pill。
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
-  final VoidCallback onSend;
-  final VoidCallback onPlusMenu;
 
-  /// 当前协作模式 value(空则不渲染模式按钮)与菜单回调(U2)。
-  final String? modeLabel;
+  /// 会话运行中:占位文案切「排队」语义,输入为空时发送键变停止。
+  final bool running;
+
+  /// 排队中的乐观消息数(桌面 √N 徽标)。
+  final int queueCount;
+
+  /// 当前协作模式 value(空则不渲染盾形按钮)与菜单回调。
+  final String? modeValue;
   final VoidCallback? onPickMode;
+
+  final VoidCallback onSend;
+  final VoidCallback onStop;
+  final VoidCallback onPlusMenu;
+  final VoidCallback? onPickModel;
+  final VoidCallback? onPickThought;
+  final VoidCallback? onPickUsage;
 
   const _InputBar({
     required this.controller,
     required this.sending,
-    required this.onSend,
-    this.modeLabel,
+    required this.running,
+    required this.queueCount,
+    this.modeValue,
     this.onPickMode,
+    required this.onSend,
+    required this.onStop,
     required this.onPlusMenu,
+    this.onPickModel,
+    this.onPickThought,
+    this.onPickUsage,
   });
 
   @override
   Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    final mode = modeValue;
+    final modeHot = mode == 'plan' || mode == 'yolo';
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _ModeButton(
-              modeValue: modeLabel,
-              onTap: sending ? null : onPickMode,
-            ),
-            IconButton(
-              icon: Icon(Icons.add_circle_outline,
-                  size: 22, color: EmberColors.of(context).textMuted),
-              tooltip: 'Skills / 命令 / 附件',
-              onPressed: sending ? null : onPlusMenu,
-            ),
-            Expanded(
-              child: TextField(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          decoration: BoxDecoration(
+            color: colors.card,
+            borderRadius: BorderRadius.circular(EmberRadius.control + 4),
+            border: Border.all(color: colors.hairline),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
                 controller: controller,
                 minLines: 1,
                 maxLines: 5,
                 style: const TextStyle(fontSize: 14),
-                decoration: const InputDecoration(
-                  hintText: '向 ZCode 发送消息…',
+                decoration: InputDecoration(
+                  hintText: running ? '继续输入以排队后续修改' : '向 ZCode 提问…',
+                  border: InputBorder.none,
+                  isDense: true,
                 ),
                 textInputAction: TextInputAction.newline,
               ),
-            ),
-            const SizedBox(width: 10),
-            Container(
-              decoration: BoxDecoration(
-                color: EmberColors.of(context).primary,
-                shape: BoxShape.circle,
+              Row(
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.add,
+                        size: 22, color: colors.textMuted),
+                    tooltip: 'Skills / 命令 / 附件',
+                    onPressed: sending ? null : onPlusMenu,
+                  ),
+                  if (mode != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.shield_outlined,
+                          size: 20,
+                          color: modeHot ? colors.warn : colors.textMuted),
+                      tooltip: '协作模式 · $mode',
+                      onPressed: sending ? null : onPickMode,
+                    ),
+                  if (queueCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 2),
+                      child: Text('√$queueCount',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: colors.textMuted)),
+                    ),
+                  const Spacer(),
+                  if (onPickUsage != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.donut_small,
+                          size: 20, color: colors.textMuted),
+                      tooltip: '上下文与用量',
+                      onPressed: onPickUsage,
+                    ),
+                  if (onPickModel != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.view_in_ar,
+                          size: 20, color: colors.textMuted),
+                      tooltip: '模型',
+                      onPressed: onPickModel,
+                    ),
+                  if (onPickThought != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.psychology,
+                          size: 20, color: colors.textMuted),
+                      tooltip: '思考档',
+                      onPressed: onPickThought,
+                    ),
+                  const SizedBox(width: 4),
+                  _SendOrStop(
+                    controller: controller,
+                    sending: sending,
+                    running: running,
+                    onSend: onSend,
+                    onStop: onStop,
+                  ),
+                ],
               ),
-              child: IconButton(
-                onPressed: sending ? null : onSend,
-                icon: sending
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.arrow_upward,
-                        color: Colors.white, size: 20),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// 发送/停止键:会话运行中且输入为空 → 停止方块(桌面同款);其余状态
+/// 为发送箭头(发送在途显转圈)。
+class _SendOrStop extends StatelessWidget {
+  final TextEditingController controller;
+  final bool sending;
+  final bool running;
+  final VoidCallback onSend;
+  final VoidCallback onStop;
+
+  const _SendOrStop({
+    required this.controller,
+    required this.sending,
+    required this.running,
+    required this.onSend,
+    required this.onStop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = EmberColors.of(context);
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        final empty = value.text.trim().isEmpty;
+        if (running && empty) {
+          return IconButton(
+            onPressed: onStop,
+            tooltip: '停止',
+            style: IconButton.styleFrom(
+                backgroundColor: colors.raise),
+            icon: Icon(Icons.stop, size: 22, color: colors.textSolid),
+          );
+        }
+        return Container(
+          decoration: BoxDecoration(
+            color: colors.primary,
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            onPressed: sending ? null : onSend,
+            tooltip: '发送',
+            icon: sending
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.arrow_upward,
+                    color: Colors.white, size: 20),
+          ),
+        );
+      },
     );
   }
 }

@@ -585,29 +585,12 @@ class _ChatPageState extends State<ChatPage> {
           ],
         ),
         actions: [
-          if (state != null)
-            AnimatedBuilder(
-              animation: state.controlListenable,
-              builder: (context, _) => state.isRunning
-                  ? IconButton(
-                      icon: Icon(Icons.stop_circle_outlined,
-                          color: EmberColors.of(context).err),
-                      tooltip: '停止',
-                      onPressed: controller.stop,
-                    )
-                  : const SizedBox.shrink(),
-            ),
           if (controller.sessionId != null)
             IconButton(
               icon: const Icon(Icons.quickreply_outlined, size: 20),
               tooltip: '辅助对话',
               onPressed: _openSideChat,
             ),
-          IconButton(
-            icon: const Icon(Icons.tune, size: 20),
-            tooltip: '模型',
-            onPressed: _showModelSheet,
-          ),
           // 常驻(草稿态禁用会话级条目):出现/消失会导致右侧布局跳动,
           // 把会话列表按钮挤出屏幕。
           PopupMenuButton<String>(
@@ -783,20 +766,15 @@ class _ChatPageState extends State<ChatPage> {
   /// 停止(isRunning 才出现)+ 模型 pill + 溢出菜单(辅助对话/压缩/
   /// 用量/计划,原 AppBar 入口)。state 为 null(draft 未订阅)时静态
   /// 渲染一次,订阅建立后由 AnimatedBuilder 跟进。
+  /// 嵌入式顶栏操作簇:模型/思考/模式已内联进输入区卡片(桌面同款),
+  /// 这里只保留溢出菜单;state 为 null(draft 未订阅)时静态渲染一次,
+  /// 订阅建立后由 AnimatedBuilder 跟进。
   Widget _headerActions(
       BuildContext context, ConversationState? state, EmberColors colors) {
     Widget build() {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (state != null && state.isRunning && controller.sessionId != null)
-            IconButton(
-              icon:
-                  Icon(Icons.stop_circle_outlined, size: 22, color: colors.err),
-              tooltip: '停止',
-              onPressed: controller.stop,
-            ),
-          Flexible(child: _modelPill(context, state)),
           // 常驻(草稿态禁用会话级条目),避免会话激活时按钮出现把
           // 右侧会话列表入口挤出屏幕。
           PopupMenuButton<String>(
@@ -818,97 +796,6 @@ class _ChatPageState extends State<ChatPage> {
       ]),
       builder: (context, _) => build(),
     );
-  }
-
-  /// 模型 pill:`模型名 | 强度档名`(U2:模式选择移到输入框左侧,
-  /// 顶栏只做模型设置)。显示名优先取 prepareWorkspace 模型/思考选项
-  /// 里当前值的展示名,回退会话 config 的裸值;点击展开模型面板。
-  Widget _modelPill(BuildContext context, ConversationState? state) {
-    final colors = EmberColors.of(context);
-    final model = _pillModelLabel(state);
-    final thought = _pillThoughtLabel(state);
-    return InkWell(
-      borderRadius: BorderRadius.circular(EmberRadius.control),
-      onTap: _showModelSheet,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: colors.card,
-          borderRadius: BorderRadius.circular(EmberRadius.control),
-          border: Border.all(color: colors.hairline),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 长模型名在约束内省略(思考档段保留);无约束时自然宽度。
-            Flexible(
-              child: Text(model,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: EmberType.body,
-                      fontWeight: FontWeight.w600,
-                      color: colors.textSolid)),
-            ),
-            if (thought != null) ...[
-              const SizedBox(width: 6),
-              Text('|',
-                  style: TextStyle(
-                      fontSize: EmberType.caption, color: colors.textFaint)),
-              const SizedBox(width: 6),
-              Text(thought,
-                  style: TextStyle(
-                      fontSize: EmberType.body, color: colors.textMuted)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String? _optionLabel(ConfigOption? opt, String value) {
-    for (final v in opt?.options ?? const <ConfigOptionValue>[]) {
-      if (v.value == value) return v.name;
-    }
-    return null;
-  }
-
-  /// pill 的模型显示名。draft 用草稿选择/准备默认值;活动会话用
-  /// provider/model 现场值(展示名匹配不上时退裸模型名)。
-  String _pillModelLabel(ConversationState? state) {
-    final opt = controller.prep?.option('model');
-    final sessionId = controller.sessionId;
-    final isDraft = state == null || sessionId == null || sessionId.isEmpty;
-    String value;
-    if (isDraft) {
-      value =
-          controller.draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
-    } else {
-      final config = state.config ?? const {};
-      value = '${config['provider'] ?? ''}/${config['model'] ?? ''}';
-      if ('${config['model'] ?? ''}'.isEmpty) {
-        value = controller.draftConfig['model'] ?? '${opt?.currentValue ?? ''}';
-      }
-    }
-    if (value.isEmpty) return '模型';
-    return _optionLabel(opt, value) ??
-        (value.contains('/')
-            ? value.substring(value.lastIndexOf('/') + 1)
-            : value);
-  }
-
-  /// pill 的思考强度档名;无值(draft 未选且准备数据未到)时不显示该段。
-  String? _pillThoughtLabel(ConversationState? state) {
-    final opt = controller.prep?.option('thought_level');
-    final sessionId = controller.sessionId;
-    final isDraft = state == null || sessionId == null || sessionId.isEmpty;
-    final value = isDraft
-        ? (controller.draftConfig['thought'] ?? '${opt?.currentValue ?? ''}')
-        : (state.currentThought.isNotEmpty
-            ? state.currentThought
-            : '${opt?.currentValue ?? ''}');
-    if (value.isEmpty) return null;
-    return _optionLabel(opt, value) ?? value;
   }
 
   /// 消息流 + 横幅组 + 输入区。embedded(对话 Tab 内嵌)直接输出,
@@ -1167,10 +1054,18 @@ class _ChatPageState extends State<ChatPage> {
             builder: (context, _) => _InputBar(
               controller: _inputController,
               sending: controller.sending,
-              onSend: _send,
-              onPlusMenu: _openPlusSheet,
-              modeLabel: _currentModeLabel,
+              running: controller.turnPending ||
+                  (state?.isRunning ?? false),
+              queueCount: controller.echoes.length,
+              modeValue: _currentModeLabel,
               onPickMode: _showModeMenu,
+              onSend: _send,
+              onStop: controller.stop,
+              onPlusMenu: _openPlusSheet,
+              onPickModel: _showModelSheet,
+              onPickThought: _showModelSheet,
+              onPickUsage:
+                  controller.sessionId == null ? null : _showUsageSheet,
             ),
           ),
         ],

@@ -127,7 +127,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 150));
     await tester.pump(const Duration(milliseconds: 150));
 
-    final stopIcon = find.byIcon(Icons.stop_circle_outlined);
+    final stopIcon = find.byIcon(Icons.stop);
     expect(stopIcon, findsOneWidget, reason: '运行中应显示停止按钮');
 
     // 重复停止 → duplicate 是幂等成功,不得提示失败。
