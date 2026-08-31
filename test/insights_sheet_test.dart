@@ -226,92 +226,6 @@ void main() {
     });
   });
 
-  group('InsightsHandle(输入区上方把手)', () {
-    Future<BridgeSession> pumpHandle(
-        WidgetTester tester, ConversationState state) async {
-      final (bridge, transport) = _makeBridge();
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: Column(
-            children: [
-              const Expanded(child: SizedBox.shrink()),
-              InsightsHandle(
-                state: state,
-                transport: transport,
-                sessionId: 's1',
-              ),
-            ],
-          ),
-        ),
-      ));
-      await tester.pump();
-      return bridge;
-    }
-
-    testWidgets('面板数据为空也常驻渲染,且无计数徽', (tester) async {
-      final bridge = await pumpHandle(tester, ConversationState());
-      expect(find.byType(InsightsHandle), findsOneWidget);
-      expect(find.textContaining('后台'), findsNothing);
-      await _tearDown(tester, bridge);
-    });
-
-    testWidgets('后台有运行任务时显示「后台 N」计数徽', (tester) async {
-      final state = ConversationState()
-        ..snapshot = {
-          'backgroundWorks': [
-            {'workId': 'w1', 'kind': 'bash', 'status': 'running'},
-          ],
-        };
-      final bridge = await pumpHandle(tester, state);
-      expect(find.text('后台 1'), findsOneWidget);
-      await _tearDown(tester, bridge);
-    });
-
-    testWidgets('点击把手弹出洞察 sheet(空数据也渲染「暂无待办」)', (tester) async {
-      final bridge = await pumpHandle(tester, ConversationState());
-      await tester.tap(find.byType(InsightsHandle));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(InsightsSheet), findsOneWidget);
-      expect(find.text('暂无待办'), findsOneWidget);
-      await _tearDown(tester, bridge);
-    });
-
-    testWidgets('上滑把手同样弹出洞察 sheet', (tester) async {
-      final bridge = await pumpHandle(tester, ConversationState());
-      await tester.fling(
-          find.byType(InsightsHandle), const Offset(0, -200), 800);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(InsightsSheet), findsOneWidget);
-      await _tearDown(tester, bridge);
-    });
-
-    testWidgets('sheet 内切「后台」chip 渲染后台面板', (tester) async {
-      final state = ConversationState()
-        ..snapshot = {
-          'backgroundWorks': [
-            {
-              'workId': 'w1',
-              'kind': 'bash',
-              'title': '长测试命令',
-              'status': 'running',
-            },
-          ],
-        };
-      final bridge = await pumpHandle(tester, state);
-      await tester.tap(find.byType(InsightsHandle));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      // sheet 内的后台 chip(把手计数徽同文案,限定 sheet 子树)。
-      await tester.tap(find.descendant(
-          of: find.byType(InsightsSheet), matching: find.text('后台 1')));
-      await tester.pump();
-      expect(find.text('长测试命令'), findsOneWidget);
-      await _tearDown(tester, bridge);
-    });
-  });
-
   group('InsightsSheet(chip 切换渲染对应面板)', () {
     /// 直接挂 sheet(不经把手):返回 wire 通道供应答注入。
     Future<(BridgeSession, ChannelClient)> pumpSheet(
@@ -359,6 +273,28 @@ void main() {
       state.notifyListeners();
       await tester.pump();
       expect(find.text('新待办'), findsOneWidget);
+      await _tearDown(tester, bridge);
+    });
+
+    testWidgets('切「后台」chip 渲染后台面板(运行中任务)', (tester) async {
+      final state = ConversationState()
+        ..snapshot = {
+          'backgroundWorks': [
+            {
+              'workId': 'w1',
+              'kind': 'bash',
+              'title': '长测试命令',
+              'status': 'running',
+            },
+          ],
+        };
+      final (bridge, _) = await pumpSheet(tester, state);
+      // 原把手打开入口已迁入 composer 图标行(InsightsHandle 删除),
+      // sheet 本体的后台 chip 切换行为不变。
+      await tester.tap(find.descendant(
+          of: find.byType(InsightsSheet), matching: find.text('后台 1')));
+      await tester.pump();
+      expect(find.text('长测试命令'), findsOneWidget);
       await _tearDown(tester, bridge);
     });
 

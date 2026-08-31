@@ -82,6 +82,10 @@ class ChatPage extends StatefulWidget {
   final String? headerWorkspace;
   final VoidCallback? onOpenDrawer;
 
+  /// 分叉完成(forkAssistant accepted/duplicate):宿主据此切换到
+  /// 新会话(桌面端同款行为;result.sessionId 由分叉应答给出)。
+  final void Function(String newSessionId)? onForkedSession;
+
   const ChatPage({
     super.key,
     required this.session,
@@ -96,6 +100,7 @@ class ChatPage extends StatefulWidget {
     this.headerTitle,
     this.headerWorkspace,
     this.onOpenDrawer,
+    this.onForkedSession,
   });
 
   @override
@@ -775,6 +780,38 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// 洞察三面板(目标/编辑/后台)底部 sheet:原输入区上方把手的打开
+  /// 逻辑迁入 composer 图标行按钮(用户裁定删把手)。
+  void _openInsightsSheet() {
+    final handleState = controller.state;
+    final handleSessionId = controller.sessionId;
+    if (handleState == null || handleSessionId == null) return;
+    if (!controller.isCurrentForSource(controller.sourceGeneration,
+        controller.transport,
+        sessionId: handleSessionId)) {
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.62,
+        builder: (context, scrollController) => InsightsSheet(
+          state: handleState,
+          transport: controller.transport,
+          sessionId: handleSessionId,
+          scrollController: scrollController,
+          isSourceCurrent: () =>
+              controller.isCurrentForSource(controller.sourceGeneration,
+                  controller.transport,
+                  sessionId: handleSessionId) &&
+              identical(controller.state, handleState),
+        ),
+      ),
+    );
+  }
+
   /// 消息流 + 横幅组 + 输入区。embedded(对话 Tab 内嵌)直接输出,
   /// 不包 Scaffold/AppBar 外壳。
   Widget _content(BuildContext context, ConversationState? state) => Column(
@@ -824,9 +861,20 @@ class _ChatPageState extends State<ChatPage> {
                           // Optimistic echoes render newest-first at the
                           // bottom (reverse index 0..n-1).
                           final echoCount = controller.echoes.length;
+                          // 列表末尾固定行(用户裁定):「最近发送 HH:mm」
+                          // = 最近一条用户消息的时间,常驻显示;历史行无
+                          // 时间戳(仅当次会话实时行带 ts)则隐藏该行。
+                          int? footerTs;
+                          for (final row in state.rows.reversed) {
+                            if (row['kind'] != 'userInput') continue;
+                            footerTs = _rowTsOf(row);
+                            break;
+                          }
+                          final hasFooter = footerTs != null;
                           final itemCount = groups.length +
                               echoCount +
-                              (state.canLoadOlder ? 1 : 0);
+                              (state.canLoadOlder ? 1 : 0) +
+                              (hasFooter ? 1 : 0);
                           if (groups.isEmpty &&
                               echoCount == 0 &&
                               !state.canLoadOlder) {
@@ -851,9 +899,24 @@ class _ChatPageState extends State<ChatPage> {
                             padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
                             itemCount: itemCount,
                             itemBuilder: (context, index) {
-                              if (index < echoCount) {
+                              if (hasFooter && index == 0) {
+                                return Padding(
+                                  padding:
+                                      const EdgeInsets.only(top: 2, bottom: 6),
+                                  child: Center(
+                                    child: Text(
+                                        '最近发送 ${_messageTimeLabel(footerTs)}',
+                                        style: TextStyle(
+                                            fontSize: 10.5,
+                                            color: EmberColors.of(context)
+                                                .textFaint)),
+                                  ),
+                                );
+                              }
+                              final i = hasFooter ? index - 1 : index;
+                              if (i < echoCount) {
                                 final e =
-                                    controller.echoes[echoCount - 1 - index];
+                                    controller.echoes[echoCount - 1 - i];
                                 // Same bubble as a confirmed user row, so
                                 // retiring the echo (real row takes over)
                                 // is visually seamless. 已发送 + 轮次在途
@@ -887,7 +950,7 @@ class _ChatPageState extends State<ChatPage> {
                                       : null,
                                 );
                               }
-                              final mi = index - echoCount;
+                              final mi = i - echoCount;
                               if (state.canLoadOlder && mi == groups.length) {
                                 return Center(
                                   child: TextButton.icon(
@@ -907,7 +970,8 @@ class _ChatPageState extends State<ChatPage> {
                                   ),
                                 );
                               }
-                              final group = groups[groups.length - 1 - mi];
+                              final group =
+                                  groups[groups.length - 1 - mi];
                               return _TurnGroupWidget(
                                 key: ValueKey(
                                     'g${group.first['rowId'] ?? group.length}'),
@@ -915,6 +979,7 @@ class _ChatPageState extends State<ChatPage> {
                                 transport: sourceTransport,
                                 sessionId: sourceSessionId,
                                 onAction: controller.run,
+                                onForkedSession: widget.onForkedSession,
                                 isSourceCurrent: () =>
                                     controller.isCurrentForSource(
                                       sourceGeneration,
@@ -1031,38 +1096,18 @@ class _ChatPageState extends State<ChatPage> {
               uploadProgress: controller.uploadProgress,
               onRemove: controller.removePendingFileAt,
             ),
-          if (state != null && controller.sessionId != null)
-            AnimatedBuilder(
-              animation: Listenable.merge([
-                state.rowsListenable,
-                state.backgroundListenable,
-              ]),
-              builder: (context, _) {
-                final handleSourceGeneration = controller.sourceGeneration;
-                final handleTransport = controller.transport;
-                final handleSessionId = controller.sessionId;
-                final handleState = state;
-                return InsightsHandle(
-                  state: state,
-                  transport: handleTransport,
-                  sessionId: handleSessionId!,
-                  isSourceCurrent: () =>
-                      controller.isCurrentForSource(handleSourceGeneration,
-                          handleTransport,
-                          sessionId: handleSessionId) &&
-                      identical(controller.state, handleState),
-                );
-              },
-            ),
           // 模式按钮随会话 state 跟进(optimisticPatch/宿主确认都要
           // 重建输入栏;此前 InputBar 不在 state 监听内,远端已切、
-          // 本地按钮不变)。
+          // 本地按钮不变)。行/后台监听并入:三面板按钮的后台计数徽
+          // (原输入区上方把手徽标迁入,用户裁定)要随 rows 变化。
           AnimatedBuilder(
             animation: state == null
                 ? const AlwaysStoppedAnimation(null)
                 : Listenable.merge([
                     state.configListenable,
                     state.controlListenable,
+                    state.rowsListenable,
+                    state.backgroundListenable,
                   ]),
             builder: (context, _) => _InputBar(
               controller: _inputController,
@@ -1079,6 +1124,14 @@ class _ChatPageState extends State<ChatPage> {
               onPickThought: _showThoughtSheet,
               onPickUsage:
                   controller.sessionId == null ? null : _showUsageSheet,
+              onOpenInsights: controller.sessionId == null
+                  ? null
+                  : _openInsightsSheet,
+              insightsCount: state == null
+                  ? 0
+                  : insightsBgCount(
+                      backgroundWorks: state.backgroundWorks,
+                      rows: state.rows),
             ),
           ),
         ],

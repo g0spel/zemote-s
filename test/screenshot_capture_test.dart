@@ -160,6 +160,7 @@ final _chatRows = <Map<String, dynamic>>[
         '方案是引入 LRU 驻留池(容量 8):离开会话时把订阅 park 在传输层'
         '(继续收帧、不断开),切回时身份校验后直接复用热订阅,实现秒开。',
     'state': 'completed',
+    'ts': _tsAgo(const Duration(seconds: 90)),
   },
   {
     'rowId': 5,
@@ -172,6 +173,7 @@ final _chatRows = <Map<String, dynamic>>[
     'kind': 'assistantText',
     'text': '正在补「s1→s2→s1 仅两次订阅」的端到端测试,随后更新设置页说明…',
     'state': 'streaming',
+    'ts': _tsAgo(const Duration(seconds: 3)),
   },
 ];
 

@@ -207,6 +207,9 @@ class _TurnGroupWidget extends StatelessWidget {
   final int Function()? beginFileChangesOperation;
   final bool Function(int operationGeneration)? isFileChangesOperationCurrent;
 
+  /// 分叉成功后的宿主跳转回调(透传给助手气泡的 fork 按钮)。
+  final void Function(String newSessionId)? onForkedSession;
+
   const _TurnGroupWidget({
     super.key,
     required this.rows,
@@ -217,6 +220,7 @@ class _TurnGroupWidget extends StatelessWidget {
     this.isSourceCurrent,
     this.beginFileChangesOperation,
     this.isFileChangesOperationCurrent,
+    this.onForkedSession,
   });
 
   /// First error snippet among this turn's failed tool calls — shown on the
@@ -241,22 +245,6 @@ class _TurnGroupWidget extends StatelessWidget {
       }
     }
     return null;
-  }
-
-  /// `HH:mm` for rows observed live (view-layer `_zflowTs` stamp). History
-  /// rows carry no timestamp on the wire, so they show none.
-  Widget? _timeLabel(BuildContext context) {
-    final ts = rows.first['_zflowTs'] as int?;
-    if (ts == null) return null;
-    final d = DateTime.fromMillisecondsSinceEpoch(ts);
-    final text =
-        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 2),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 10, color: EmberColors.of(context).textFaint)),
-    );
   }
 
   @override
@@ -292,9 +280,8 @@ class _TurnGroupWidget extends StatelessWidget {
               onAction: onAction,
               state: state,
               isSourceCurrent: isSourceCurrent,
+              onForkedSession: onForkedSession,
             ),
-          if (_timeLabel(context) != null)
-            Align(alignment: Alignment.centerRight, child: _timeLabel(context)),
         ],
       );
     }
@@ -324,6 +311,7 @@ class _TurnGroupWidget extends StatelessWidget {
           isSourceCurrent: isSourceCurrent,
           beginFileChangesOperation: beginFileChangesOperation,
           isFileChangesOperationCurrent: isFileChangesOperationCurrent,
+          onForkedSession: onForkedSession,
         ));
       } else {
         children.add(_RowWidget(
@@ -336,6 +324,7 @@ class _TurnGroupWidget extends StatelessWidget {
           isSourceCurrent: isSourceCurrent,
           beginFileChangesOperation: beginFileChangesOperation,
           isFileChangesOperationCurrent: isFileChangesOperationCurrent,
+          onForkedSession: onForkedSession,
         ));
       }
     }
@@ -360,10 +349,6 @@ class _TurnGroupWidget extends StatelessWidget {
         ));
       }
     }
-    if (_timeLabel(context) != null) {
-      children.add(
-          Align(alignment: Alignment.centerLeft, child: _timeLabel(context)));
-    }
     if (children.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -386,6 +371,9 @@ class _RowWidget extends StatelessWidget {
   /// Delivery badge for user rows (see [_MsgBadge]).
   final String? badge;
 
+  /// 分叉成功后的宿主跳转回调(仅助手气泡使用)。
+  final void Function(String newSessionId)? onForkedSession;
+
   const _RowWidget({
     required this.row,
     required this.transport,
@@ -397,6 +385,7 @@ class _RowWidget extends StatelessWidget {
     this.isFileChangesOperationCurrent,
     this.showFeedback = true,
     this.badge,
+    this.onForkedSession,
   });
 
   Map<String, dynamic> get _target => {
@@ -566,7 +555,8 @@ class _RowWidget extends StatelessWidget {
           sessionId: sessionId,
           state: state,
           showFeedback: showFeedback,
-          isSourceCurrent: isSourceCurrent),
+          isSourceCurrent: isSourceCurrent,
+          onForkedSession: onForkedSession),
       'reasoning' => _ReasoningTile(
           text: row['text'] as String? ?? '',
           streaming: row['state'] == 'streaming'),
@@ -927,6 +917,9 @@ class _AssistantBubble extends StatelessWidget {
   final bool showFeedback;
   final bool Function()? isSourceCurrent;
 
+  /// 分叉成功后的宿主跳转回调(ChatPage → RootShell 切新会话)。
+  final void Function(String newSessionId)? onForkedSession;
+
   const _AssistantBubble({
     required this.row,
     required this.transport,
@@ -934,32 +927,43 @@ class _AssistantBubble extends StatelessWidget {
     required this.state,
     this.showFeedback = true,
     this.isSourceCurrent,
+    this.onForkedSession,
   });
 
-  void _setFeedback(String? value) {
+  /// 分叉(桌面端同款):以此消息为断点创建新会话;accepted/duplicate
+  /// 均为成功,成功取 result.sessionId 交给宿主跳转;拒绝弹 toast。
+  Map<String, dynamic> get _target => {
+        'rowId': row['rowId'],
+        if (row['entityId'] != null) 'entityId': row['entityId'],
+      };
+
+  Future<void> _fork(BuildContext context) async {
     if (sessionId.isEmpty ||
         (isSourceCurrent != null && !isSourceCurrent!())) {
       return;
     }
-    // Optimistic: update the icon instantly; server row.upserted confirms.
-    state.optimisticRowUpdate(row['rowId'] as num?, {'feedback': value});
-    transport
-        .setAssistantFeedback(
-          sessionId,
-          {
-            'rowId': row['rowId'],
-            if (row['entityId'] != null) 'entityId': row['entityId'],
-          },
-          value,
-        )
-        .catchError((_) {});
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final res = await transport.forkAssistant(sessionId, _target);
+      if (!isRpcSuccess(res)) {
+        messenger.showSnackBar(SnackBar(
+            content: Text('分叉被拒绝: ${rpcFailureReason(res)}')));
+        return;
+      }
+      final result = res['result'];
+      final newSessionId =
+          result is Map ? result['sessionId'] as String? : null;
+      if (newSessionId == null || onForkedSession == null) return;
+      onForkedSession!(newSessionId);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('分叉失败: $e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final text = row['text'] as String? ?? '';
     final streaming = row['state'] == 'streaming';
-    final feedback = row['feedback'] as String?;
     final rowTs = _rowTsOf(row);
     return Container(
       margin: const EdgeInsets.only(right: 24, top: 4, bottom: 4),
@@ -987,7 +991,7 @@ class _AssistantBubble extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (streaming)
+                if (streaming) ...[
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
                     child: SizedBox(
@@ -995,25 +999,26 @@ class _AssistantBubble extends StatelessWidget {
                       height: 12,
                       child: CircularProgressIndicator(strokeWidth: 1.5),
                     ),
-                  )
-                else ...[
+                  ),
+                  const SizedBox(width: 6),
+                  // 本条消息的发送时间(用户裁定):流式期间也显示。
+                  Text(_messageTimeLabel(rowTs),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: EmberColors.of(context).textFaint)),
+                ] else ...[
                   _FeedbackButton(
                     icon: Icons.copy_outlined,
                     active: false,
                     onTap: () =>
                         Clipboard.setData(ClipboardData(text: text)),
                   ),
+                  // 分叉(桌面端同款:消息操作行内,以此消息为断点创建
+                  // 新会话,成功后跳转)。
                   _FeedbackButton(
-                    icon: Icons.thumb_up_alt_outlined,
-                    active: feedback == 'like',
-                    onTap: () =>
-                        _setFeedback(feedback == 'like' ? null : 'like'),
-                  ),
-                  _FeedbackButton(
-                    icon: Icons.thumb_down_alt_outlined,
-                    active: feedback == 'dislike',
-                    onTap: () =>
-                        _setFeedback(feedback == 'dislike' ? null : 'dislike'),
+                    icon: Icons.fork_right,
+                    active: false,
+                    onTap: () => _fork(context),
                   ),
                   // 回合时间戳(桌面端约定:行尾小字,今天只给时刻)。
                   Text(_messageTimeLabel(rowTs),

@@ -281,95 +281,11 @@ String _insightsTurnKey(
   return '$sessionId|${state.logEpoch ?? ''}|${turn['rowId']}|${turn['entityId']}';
 }
 
-/// 洞察 sheet 把手(spec §7.1):输入区上方常驻的 40×4 圆角条,点击或
-/// 上滑呼出底部 sheet;后台有运行任务时右端浮出「后台 N」计数徽,
-/// 面板数据为空也常驻。公开给测试(与 SessionDrawer 同例)。
-class InsightsHandle extends StatelessWidget {
-  final ConversationState state;
-  final ConversationTransport transport;
-  final String sessionId;
-  final bool Function()? isSourceCurrent;
-
-  const InsightsHandle({
-    super.key,
-    required this.state,
-    required this.transport,
-    required this.sessionId,
-    this.isSourceCurrent,
-  });
-
-  bool _isCurrent() => isSourceCurrent?.call() ?? true;
-
-  void _openSheet(BuildContext context) {
-    if (!_isCurrent()) return;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.62,
-        builder: (context, scrollController) => InsightsSheet(
-          state: state,
-          transport: transport,
-          sessionId: sessionId,
-          scrollController: scrollController,
-          isSourceCurrent: isSourceCurrent,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ember = EmberColors.of(context);
-    final bg = insightsBgCount(
-        backgroundWorks: state.backgroundWorks, rows: state.rows);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _openSheet(context),
-      onVerticalDragEnd: (details) {
-        if ((details.primaryVelocity ?? 0) < 0) _openSheet(context);
-      },
-      child: SizedBox(
-        height: 20,
-        width: double.infinity,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: ember.textFaint,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            if (bg > 0)
-              Positioned(
-                right: EmberSpacing.page,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: ember.primary.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(EmberRadius.control),
-                  ),
-                  child: Text('后台 $bg',
-                      style: TextStyle(
-                          fontSize: EmberType.caption, color: ember.primary)),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// 洞察底部 sheet(spec §7.1):62% 高升起、可拖至全屏;三 chip 切换
 /// 待办/文件/后台面板。数据逻辑自 _InsightsRowState 整体平移——文件
 /// 的 fire-once 预加载与 stale 重试语义保持(sheet 打开期间每个新完成
 /// 回合只拉一次;选「文件」chip 时无数据才补拉)。公开给测试。
+/// (原输入区上方把手已删,打开入口迁入 composer 图标行,用户裁定。)
 class InsightsSheet extends StatefulWidget {
   final ConversationState state;
   final ConversationTransport transport;

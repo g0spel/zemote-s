@@ -183,6 +183,12 @@ class _InputBar extends StatelessWidget {
   final VoidCallback? onPickThought;
   final VoidCallback? onPickUsage;
 
+  /// 洞察三面板(目标/编辑/后台)打开入口:原输入区上方把手迁入图标行
+  /// (用户裁定);null = 无会话不显示。[insightsCount] 为后台运行计数
+  /// 徽,> 0 时按钮右上角浮出。
+  final VoidCallback? onOpenInsights;
+  final int insightsCount;
+
   const _InputBar({
     required this.controller,
     required this.sending,
@@ -196,6 +202,8 @@ class _InputBar extends StatelessWidget {
     this.onPickModel,
     this.onPickThought,
     this.onPickUsage,
+    this.onOpenInsights,
+    this.insightsCount = 0,
   });
 
   /// 模式 → 图标(随模式变化,plan/yolo 高亮警示色)。
@@ -254,6 +262,14 @@ class _InputBar extends StatelessWidget {
                       color: modeHot ? colors.warn : colors.textMuted,
                       onPressed: sending ? null : onPickMode,
                     ),
+                  if (onOpenInsights != null)
+                    _barButton(
+                      context,
+                      icon: Icons.schema,
+                      tooltip: '目标 / 编辑 / 后台',
+                      onPressed: onOpenInsights,
+                      badge: insightsCount > 0 ? '$insightsCount' : null,
+                    ),
                   if (queueCount > 0)
                     Padding(
                       padding: const EdgeInsets.only(left: 2),
@@ -301,19 +317,48 @@ class _InputBar extends StatelessWidget {
     );
   }
 
-  /// 图标行按钮:常规紧凑尺寸。
+  /// 图标行按钮:常规紧凑尺寸。[badge] 非空时右上角浮出计数徽
+  /// (后台运行任务数,原输入区把手徽标迁入)。
   Widget _barButton(
     BuildContext context, {
     required IconData icon,
     required String tooltip,
     required VoidCallback? onPressed,
     Color? color,
+    String? badge,
   }) {
-    return IconButton(
+    final colors = EmberColors.of(context);
+    final button = IconButton(
       onPressed: onPressed,
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
-      icon: Icon(icon, size: 22, color: color ?? EmberColors.of(context).textMuted),
+      icon: Icon(icon, size: 22, color: color ?? colors.textMuted),
+    );
+    if (badge == null) return button;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        button,
+        Positioned(
+          top: 2,
+          right: 2,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: colors.primary,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            constraints: const BoxConstraints(minWidth: 14),
+            child: Text(badge,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 9,
+                    height: 1.2,
+                    fontWeight: FontWeight.w600,
+                    color: colors.bg)),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -833,6 +833,9 @@ class _RootShellState extends State<RootShell> {
               headerTitle: _activeSessionTitle,
               headerWorkspace: workspaceTitle(workspace),
               onOpenDrawer: _openDrawer,
+              // 分叉成功跳转新会话(桌面端同款):等价抽屉选会话——
+              // 递增重建代数 + 切激活 id。
+              onForkedSession: _pickFromDrawer,
             ),
           );
         }
