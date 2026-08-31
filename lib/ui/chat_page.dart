@@ -242,15 +242,32 @@ class _ChatPageState extends State<ChatPage> {
     controller.dispose();
     _scrollGeneration++;
     _scrollAnimationInFlight = false;
+    _showJumpToBottom.dispose();
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
+  /// 是否显示「滚到底」浮钮:未钉底且有内容。
+  final ValueNotifier<bool> _showJumpToBottom = ValueNotifier(false);
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     // Reverse list: offset 0 is the newest (bottom) message.
     _stickToBottom = _scrollController.position.pixels <= 40;
+    _syncJumpToBottom();
+  }
+
+  void _syncJumpToBottom() {
+    final hasRows = controller.state?.rows.isNotEmpty ?? false;
+    _showJumpToBottom.value = !_stickToBottom && hasRows;
+  }
+
+  void _jumpToBottom() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(0,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut);
   }
 
   Future<void> _send() async {
@@ -297,6 +314,7 @@ class _ChatPageState extends State<ChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollCallbackScheduled = false;
       if (!mounted || scrollGeneration != _scrollGeneration) return;
+      _syncJumpToBottom();
       final prependTail =
           controller.prependScrollPending ? controller.prependTailRow : null;
       controller.prependScrollPending = false;
@@ -824,7 +842,10 @@ class _ChatPageState extends State<ChatPage> {
               builder: (context, _) => _ModeBanner(mode: state.currentMode),
             ),
           Expanded(
-            child: state == null
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: state == null
                 ? Center(
                     child: controller.sessionId == null
                         ? Text('输入消息开始新会话',
@@ -957,6 +978,39 @@ class _ChatPageState extends State<ChatPage> {
                           );
                         },
                       ),
+                ),
+                // 滚到底浮钮(桌面同款):未钉底时出现。
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _showJumpToBottom,
+                    builder: (context, visible, _) => visible
+                        ? InkWell(
+                            onTap: _jumpToBottom,
+                            borderRadius: BorderRadius.circular(24),
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: EmberColors.of(context)
+                                    .card
+                                    .withValues(alpha: 0.92),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color:
+                                        EmberColors.of(context).hairline),
+                              ),
+                              child: Icon(Icons.arrow_downward,
+                                  size: 20,
+                                  color: EmberColors.of(context).textMuted),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ],
+            ),
           ),
           _ReconnectBanner(bridge: controller.transport.session),
           if (state != null)

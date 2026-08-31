@@ -1007,6 +1007,12 @@ class _AssistantBubble extends StatelessWidget {
                   )
                 else ...[
                   _FeedbackButton(
+                    icon: Icons.copy_outlined,
+                    active: false,
+                    onTap: () =>
+                        Clipboard.setData(ClipboardData(text: text)),
+                  ),
+                  _FeedbackButton(
                     icon: Icons.thumb_up_alt_outlined,
                     active: feedback == 'like',
                     onTap: () =>
@@ -1097,12 +1103,16 @@ class _ReasoningTile extends StatefulWidget {
 }
 
 class _ReasoningTileState extends State<_ReasoningTile> {
-  bool _open = true;
+  /// 桌面同款默认折叠为单行条;流式期间保持展开跟随输出。
+  late bool _open = widget.streaming;
 
   @override
   Widget build(BuildContext context) {
     final e = EmberColors.of(context);
     final arrow = _open ? '▾ ' : '▸ ';
+    final preview = widget.text
+        .split('\n')
+        .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
@@ -1132,10 +1142,23 @@ class _ReasoningTileState extends State<_ReasoningTile> {
               onTap: () => setState(() => _open = !_open),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                child: Text(
-                  '$arrow${widget.streaming ? '思考中…' : '思考过程'}',
-                  style: TextStyle(
-                      fontSize: EmberType.caption, color: e.textFaint),
+                child: Row(
+                  children: [
+                    Text('$arrow${widget.streaming ? '思考中…' : '思考过程'}',
+                        style: TextStyle(
+                            fontSize: EmberType.caption, color: e.textFaint)),
+                    if (!_open && preview.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(preview,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: EmberType.caption,
+                                color: e.textFaint.withValues(alpha: 0.7))),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -1165,7 +1188,8 @@ class _ToolCallTile extends StatefulWidget {
 }
 
 class _ToolCallTileState extends State<_ToolCallTile> {
-  bool _open = true;
+  /// 桌面同款默认折叠为单行条(图标+工具名+一行预览)。
+  bool _open = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1180,6 +1204,11 @@ class _ToolCallTileState extends State<_ToolCallTile> {
     final progress = row['progress'];
     final display = row['display'];
     final diff = extractDiff(row);
+
+    /// 折叠态的一行预览:输入首行优先,回落输出首行。
+    final toolPreview = (inputText.isNotEmpty ? inputText : outputText)
+        .split('\n')
+        .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
 
     final (icon, color) = switch (status) {
       'running' || 'inputStreaming' || 'pendingApproval' => (
@@ -1239,6 +1268,19 @@ class _ToolCallTileState extends State<_ToolCallTile> {
                               color: e.textFaint),
                           overflow: TextOverflow.ellipsis),
                     ),
+                    if (!_open) ...[
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          toolPreview,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: EmberType.caption,
+                              color: e.textFaint.withValues(alpha: 0.7)),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
