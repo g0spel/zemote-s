@@ -26,7 +26,16 @@ jobs:
         run: flutter analyze
 
       - name: Run unit tests
-        run: flutter test
+        run: flutter test --coverage
+
+      # Baseline only for now: per-layer thresholds come later. The report
+      # is uploaded so regressions are visible without a local run.
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: error
 
       # Compile smoke: catches breaking API changes in dependencies that
       # `flutter analyze` misses (e.g. file_picker v12's changed return

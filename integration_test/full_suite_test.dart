@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,19 +9,22 @@ import 'package:zflow/protocol/zflow_client.dart';
 /// Full feature suite against the real desktop. Every check logs
 /// [PASS]/[FAIL]; non-critical protocol rejections are recorded as [INFO].
 ///
-/// Requires a real ZCode remote-control URL via the `ZEMOTE_PROBE_URL`
-/// environment variable (e.g. `ZEMOTE_PROBE_URL=https://zcode.z.ai/remote/v4?sid=...`
-/// `flutter test integration_test`). Without it the suite is skipped.
+/// Requires a real ZCode remote-control URL (e.g.
+/// `ZEMOTE_PROBE_URL=https://zcode.z.ai/remote/v4?sid=...`) via
+/// `--dart-define` or the process environment; the suite is explicitly
+/// skipped without it.
 void main() {
   test('full feature suite', () async {
-    final probeUrl = String.fromEnvironment('ZEMOTE_PROBE_URL',
+    var probeUrl = const String.fromEnvironment('ZEMOTE_PROBE_URL',
         defaultValue: '');
+    if (probeUrl.isEmpty) {
+      probeUrl = Platform.environment['ZEMOTE_PROBE_URL'] ?? '';
+    }
     final params = probeUrl.isEmpty
         ? null
         : ZflowConnectionParams.parse(probeUrl);
     if (params == null) {
-      // ignore: avoid_print
-      print('SKIP: ZEMOTE_PROBE_URL not set or invalid — integration '
+      markTestSkipped('ZEMOTE_PROBE_URL not set or invalid — integration '
           'suite requires a live desktop + real device URL.');
       return;
     }

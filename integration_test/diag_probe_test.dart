@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zflow/protocol/connection_params.dart';
 import 'package:zflow/protocol/zflow_client.dart';
@@ -7,14 +9,16 @@ import 'package:zflow/protocol/zflow_client.dart';
 /// Used to diagnose real-world row grouping / ordering without guessing.
 void main() {
   test('diagnostic probe', () async {
-    final probeUrl = String.fromEnvironment('ZEMOTE_PROBE_URL',
+    var probeUrl = const String.fromEnvironment('ZEMOTE_PROBE_URL',
         defaultValue: '');
+    if (probeUrl.isEmpty) {
+      probeUrl = Platform.environment['ZEMOTE_PROBE_URL'] ?? '';
+    }
     final params = probeUrl.isEmpty
         ? null
         : ZflowConnectionParams.parse(probeUrl);
     if (params == null) {
-      // ignore: avoid_print
-      print('SKIP: ZEMOTE_PROBE_URL not set.');
+      markTestSkipped('ZEMOTE_PROBE_URL not set or invalid.');
       return;
     }
 
