@@ -15,7 +15,9 @@ import 'ui/theme.dart';
 import 'ui/ui_settings.dart';
 import 'update/update_checker.dart';
 import 'update/update_dialog.dart';
+import 'notifications/keep_alive.dart';
 import 'notifications/notifications.dart';
+import 'state/background_prefs.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -62,6 +64,7 @@ class _ZflowAppState extends State<ZflowApp> {
   final AppSession _session = AppSession();
   final ThemeController _theme = ThemeController();
   final UiSettings _uiSettings = UiSettings();
+  KeepAliveController? _keepAlive;
 
   @override
   void initState() {
@@ -73,6 +76,14 @@ class _ZflowAppState extends State<ZflowApp> {
     _theme.load();
     _uiSettings.load();
     loadDiagLogPref();
+    // 后台保活(设置 → 后台与通知):偏好/设备列表/回前台都会重新对齐
+    // 前台服务。非 Android 平台为 no-op。
+    BackgroundPrefs.instance.load();
+    _keepAlive = KeepAliveController(
+      store: _store,
+      prefs: BackgroundPrefs.instance,
+      notifications: notificationsService,
+    )..start();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());
   }
 
@@ -88,6 +99,12 @@ class _ZflowAppState extends State<ZflowApp> {
     } catch (_) {
       // Offline / API errors are ignored on startup.
     }
+  }
+
+  @override
+  void dispose() {
+    _keepAlive?.dispose();
+    super.dispose();
   }
 
   @override

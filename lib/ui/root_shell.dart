@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../notifications/notifications.dart';
 import '../notifications/task_notifier.dart';
+import '../notifications/unread.dart';
 import '../protocol/conversation.dart'
     show SessionEntry, SessionsIndexSubscription;
 import '../protocol/relay_client.dart';
@@ -18,6 +19,9 @@ import 'delayed_banner.dart';
 import 'device_management_page.dart';
 import 'settings_page.dart';
 import 'theme.dart';
+
+/// 库级未读计数单例（通知发出 +1，打开会话清零）。
+final unreadEvents = UnreadEvents.instance;
 
 /// Mirrors `HC()` in the web client:
 /// key = workspaceIdentity?.trim() || workspacePath.
@@ -111,6 +115,13 @@ class _RootShellState extends State<RootShell> {
   /// 头部会话名:null 显示"新会话";由内嵌 ChatPage 的 onSessionInfo
   /// 回写(桌面端生成或重命名标题时)。
   final ValueNotifier<String?> _activeSessionTitle = ValueNotifier(null);
+
+  /// 推入栈顶的任务会话页(通知点击进入)——可见会话判定的最高优先级。
+  String? _visibleTaskChatId;
+
+  /// 通知三重门控用:当前前台正在查看的会话 id(推入的任务页优先,
+  /// 否则为内嵌会话)。
+  String? _visibleSessionId() => _visibleTaskChatId ?? _activeSessionId.value;
 
   /// 当前壳已加载/正在加载的设备 id(防止 session 通知重复触发引导链)。
   String? _loadedAccountId;
@@ -397,8 +408,10 @@ class _RootShellState extends State<RootShell> {
       bridge: bridge,
       scope: scope,
       notifications: notificationsService,
+      visibleSessionId: _visibleSessionId,
       onOpenTask: (taskId, title) async {
         if (!_isCurrentBridge(bridge, gen)) return;
+        unreadEvents.clearTask(taskId);
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ChatPage(
@@ -409,7 +422,10 @@ class _RootShellState extends State<RootShell> {
               title: title,
             ),
           ),
-        );
+        ).then((_) {
+          if (_visibleTaskChatId == taskId) _visibleTaskChatId = null;
+        });
+        _visibleTaskChatId = taskId;
       },
     )..start();
   }
@@ -460,6 +476,8 @@ class _RootShellState extends State<RootShell> {
       _activeSessionId.value = sessionId;
       _activeSessionTitle.value = null;
     });
+    // 用户主动打开了该会话，未读即清（draft 复位无对应任务，跳过）。
+    if (sessionId != null) unreadEvents.clearTask(sessionId);
     _closeDrawer();
   }
 
@@ -496,6 +514,8 @@ class _RootShellState extends State<RootShell> {
     if (epoch != _sessionEpoch) return;
     if (sessionId.isNotEmpty && sessionId != _activeSessionId.value) {
       _activeSessionId.value = sessionId;
+      // 用户正看着这个会话（draft 采纳），未读即清。
+      unreadEvents.clearTask(sessionId);
       // 新会话 adopt 宽限:刚建的会话短暂不在索引快照属常态,30s 内
       // 抽屉的"消失"判定一律忽略(误判会拆掉订阅,回复随之丢失)。
       _sessionAdoptedAt = DateTime.now();

@@ -4,8 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/relay_client.dart';
 import '../protocol/zflow_client.dart';
+import '../notifications/notifications.dart';
+import '../notifications/unread.dart';
 import '../state/account_store.dart';
 import '../state/app_session.dart';
+import '../state/background_prefs.dart';
 import '../state/crash_report.dart';
 import '../state/log_store.dart';
 import '../update/app_version.dart';
@@ -191,24 +194,32 @@ class SettingsPage extends StatelessWidget {
         _groupTitle(context, '设备与连接'),
         _GroupCard(
           children: [
-            ListTile(
-              leading: const Icon(Icons.devices_other, size: 20),
-              title: const Text('设备管理'),
-              subtitle: Text('${store.accounts.length} 台设备 · 扫码/导入添加'),
-              trailing: _chevron,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DeviceManagementPage(
-                      store: store, session: session),
-                ),
-              ),
-            ),
+            _DevicesTile(store: store, session: session),
             const Divider(indent: 52),
             const _VerboseFramesTile(),
             const Divider(indent: 52),
             const _DiagLogTile(),
           ],
         ),
+        if (Notifications.isSupported) ...[
+          const SizedBox(height: 12),
+          _groupTitle(context, '后台与通知'),
+          _GroupCard(
+            children: const [
+              _KeepAliveTile(),
+              Divider(indent: 52),
+              _WakeLockTile(),
+              Divider(indent: 52),
+              _BatteryWhitelistTile(),
+              Divider(indent: 52),
+              _NotifyToggle(kind: NotifyKind.approvals),
+              Divider(indent: 52),
+              _NotifyToggle(kind: NotifyKind.completions),
+              Divider(indent: 52),
+              _NotifyToggle(kind: NotifyKind.failures),
+            ],
+          ),
+        ],
         if (bridge != null) ...[
           const SizedBox(height: 12),
           _groupTitle(context, '模型'),
@@ -475,6 +486,217 @@ class _DiagLogTileState extends State<_DiagLogTile> {
         value: value,
         onChanged: (v) => setDiagLogEnabled(v),
       ),
+    );
+  }
+}
+
+/// 设备管理入口(带未读徽标):后台/别处产生的任务事件推成通知后计未读,
+/// 打开对应会话即清。
+class _DevicesTile extends StatefulWidget {
+  final AccountStore store;
+  final AppSession session;
+
+  const _DevicesTile({required this.store, required this.session});
+
+  @override
+  State<_DevicesTile> createState() => _DevicesTileState();
+}
+
+class _DevicesTileState extends State<_DevicesTile> {
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([widget.store, UnreadEvents.instance]),
+      builder: (context, _) {
+        final unread = UnreadEvents.instance.total;
+        return ListTile(
+          leading: const Icon(Icons.devices_other, size: 20),
+          title: const Text('设备管理'),
+          subtitle: Text(unread > 0
+              ? '$unread 条未读 · ${widget.store.accounts.length} 台设备'
+              : '${widget.store.accounts.length} 台设备 · 扫码/导入添加'),
+          trailing: unread > 0
+              ? Badge(
+                  label: Text('$unread'),
+                  child: const Icon(Icons.notifications_none, size: 20),
+                )
+              : _chevron,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => DeviceManagementPage(
+                  store: widget.store, session: widget.session),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 会话保活开关:前台服务常驻（有已配对设备时），后台/息屏不掉线。
+class _KeepAliveTile extends StatefulWidget {
+  const _KeepAliveTile();
+
+  @override
+  State<_KeepAliveTile> createState() => _KeepAliveTileState();
+}
+
+class _KeepAliveTileState extends State<_KeepAliveTile> {
+  @override
+  Widget build(BuildContext context) {
+    final prefs = BackgroundPrefs.instance;
+    return AnimatedBuilder(
+      animation: prefs,
+      builder: (context, _) => SwitchListTile(
+        secondary: const Icon(Icons.sync_lock_outlined, size: 20),
+        title: const Text('会话保活'),
+        subtitle: const Text('前台服务常驻，后台与息屏下保持连接；通知栏常驻低重要性提醒'),
+        value: prefs.keepAliveEnabled,
+        onChanged: (v) async {
+          await prefs.setKeepAliveEnabled(v);
+          if (v && context.mounted) await _guideBatteryWhitelist(context);
+        },
+      ),
+    );
+  }
+
+  /// 开启时引导一次电池优化白名单（系统确认框;拒绝也可稍后手动再来）。
+  Future<void> _guideBatteryWhitelist(BuildContext context) async {
+    final notifications = notificationsService;
+    if (!Notifications.isSupported) return;
+    if (await notifications.isIgnoringBatteryOptimizations()) return;
+    final remembered =
+        (await SharedPreferences.getInstance()).getBool('battery.guideShown') ?? false;
+    if (remembered) return;
+    await SharedPreferences.getInstance()
+        .then((p) => p.setBool('battery.guideShown', true));
+    if (!context.mounted) return;
+    await notifications.requestIgnoreBatteryOptimizations();
+  }
+}
+
+/// 息屏保持在线:息屏期间持部分 WakeLock,防 Doze 冻结连接(耗电换稳定)。
+class _WakeLockTile extends StatefulWidget {
+  const _WakeLockTile();
+
+  @override
+  State<_WakeLockTile> createState() => _WakeLockTileState();
+}
+
+class _WakeLockTileState extends State<_WakeLockTile> {
+  @override
+  Widget build(BuildContext context) {
+    final prefs = BackgroundPrefs.instance;
+    return AnimatedBuilder(
+      animation: prefs,
+      builder: (context, _) => SwitchListTile(
+        secondary: const Icon(Icons.screen_lock_portrait_outlined, size: 20),
+        title: const Text('息屏保持在线'),
+        subtitle: const Text('息屏期间保持 CPU 唤醒，连接最稳；耗电略增'),
+        value: prefs.keepAliveEnabled && prefs.wakeLock,
+        onChanged: prefs.keepAliveEnabled
+            ? (v) => prefs.setWakeLock(v)
+            : null,
+      ),
+    );
+  }
+}
+
+/// 电池优化白名单状态行:未加白显 ⚠,点按弹系统确认框。
+class _BatteryWhitelistTile extends StatefulWidget {
+  const _BatteryWhitelistTile();
+
+  @override
+  State<_BatteryWhitelistTile> createState() => _BatteryWhitelistTileState();
+}
+
+class _BatteryWhitelistTileState extends State<_BatteryWhitelistTile> {
+  bool _ignoring = true;
+
+  @override
+  void initState() {
+    super.initState();
+    notificationsService.isIgnoringBatteryOptimizations().then((v) {
+      if (mounted) setState(() => _ignoring = v);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: _ignoring
+          ? const Icon(Icons.battery_saver_outlined, size: 20)
+          : Icon(Icons.warning_amber_outlined,
+              size: 20, color: EmberColors.of(context).warn),
+      title: const Text('电池优化白名单'),
+      subtitle: Text(_ignoring
+          ? '已加白：后台连接不受电池优化影响'
+          : '未加白：系统可能冻结后台连接，建议允许'),
+      trailing: _ignoring
+          ? const Icon(Icons.check, size: 20)
+          : const Icon(Icons.chevron_right, size: 20),
+      onTap: _ignoring
+          ? null
+          : () async {
+              await notificationsService.requestIgnoreBatteryOptimizations();
+              final ok = await notificationsService.isIgnoringBatteryOptimizations();
+              if (mounted) setState(() => _ignoring = ok);
+            },
+    );
+  }
+}
+
+enum NotifyKind { approvals, completions, failures }
+
+/// 通知三分开关：审批请求 / 任务完成 / 任务失败。
+class _NotifyToggle extends StatefulWidget {
+  final NotifyKind kind;
+
+  const _NotifyToggle({required this.kind});
+
+  @override
+  State<_NotifyToggle> createState() => _NotifyToggleState();
+}
+
+class _NotifyToggleState extends State<_NotifyToggle> {
+  @override
+  Widget build(BuildContext context) {
+    final prefs = BackgroundPrefs.instance;
+    return AnimatedBuilder(
+      animation: prefs,
+      builder: (context, _) {
+        final (title, subtitle, icon, value) = switch (widget.kind) {
+          NotifyKind.approvals => (
+              '审批请求',
+              '任务等待权限批准或输入时横幅提醒',
+              Icons.approval_outlined,
+              prefs.notifyApprovals,
+            ),
+          NotifyKind.completions => (
+              '任务完成',
+              '任务完成时静默提醒',
+              Icons.task_alt_outlined,
+              prefs.notifyCompletions,
+            ),
+          NotifyKind.failures => (
+              '任务失败',
+              '任务失败或中断时静默提醒',
+              Icons.error_outline,
+              prefs.notifyFailures,
+            ),
+        };
+        return SwitchListTile(
+          secondary: Icon(icon, size: 20),
+          title: Text(title),
+          subtitle: Text(subtitle),
+          value: value,
+          onChanged: (v) => switch (widget.kind) {
+            NotifyKind.approvals => prefs.setNotifyApprovals(v),
+            NotifyKind.completions => prefs.setNotifyCompletions(v),
+            NotifyKind.failures => prefs.setNotifyFailures(v),
+          },
+        );
+      },
     );
   }
 }

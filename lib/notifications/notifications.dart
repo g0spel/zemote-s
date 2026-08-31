@@ -44,29 +44,51 @@ class Notifications {
     } catch (_) {}
   }
 
-  void setTapHandler(Future<void> Function(Map<String, dynamic> payload)? h) {
+  Future<void> setTapHandler(Future<void> Function(Map<String, dynamic> payload)? h) {
     _tapHandler = h;
+    return Future.value();
   }
 
-  Future<void> startForeground(String title, String text) =>
-      _channel.invokeMethod('startForeground', {'title': title, 'text': text});
+  /// 运行中任务通知（TaskNotifier 驱动，实时预览）。
+  Future<void> setRunning(String title, String text) => _channel
+      .invokeMethod('setRunning', {'title': title, 'text': text});
 
-  Future<void> updateForeground(String title, String text) =>
-      _channel.invokeMethod(
-          'updateForeground', {'title': title, 'text': text});
+  /// 释放「运行中」占用：若保活常驻开启，服务回落为保活空闲通知而非停止。
+  Future<void> releaseRunning() => _channel.invokeMethod('releaseRunning');
 
-  Future<void> stopForeground() => _channel.invokeMethod('stopForeground');
+  /// 保活常驻：空闲时也保持前台服务与连接。[wakeLock] = 息屏持锁。
+  Future<void> setKeepAlive({required bool wakeLock}) =>
+      _channel.invokeMethod('setKeepAlive', {'wakeLock': wakeLock});
 
-  Future<void> notifyTaskCompleted({
+  Future<void> clearKeepAlive() => _channel.invokeMethod('clearKeepAlive');
+
+  /// [channel] 选择通知渠道：`approval`（审批，高重要性横幅）或
+  /// `completion`（完成/失败，静音普通渠道）。
+  Future<void> notifyEvent({
+    required String channel,
     required String title,
     required String text,
     required Map<String, dynamic> payload,
   }) =>
-      _channel.invokeMethod('notifyTaskCompleted', {
+      _channel.invokeMethod('notifyEvent', {
+        'channel': channel,
         'title': title,
         'text': text,
         'payload': jsonEncode(payload),
       });
+
+  Future<bool> isIgnoringBatteryOptimizations() async {
+    if (!isSupported) return true;
+    final ok = await _channel
+        .invokeMethod<bool>('isIgnoringBatteryOptimizations');
+    return ok ?? true;
+  }
+
+  /// 弹出系统「忽略电池优化」确认框（需 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS）。
+  Future<void> requestIgnoreBatteryOptimizations() {
+    if (!isSupported) return Future.value();
+    return _channel.invokeMethod('requestIgnoreBatteryOptimizations');
+  }
 
   Future<bool> hasPermission() async {
     final ok = await _channel.invokeMethod<bool>('hasNotificationPermission');

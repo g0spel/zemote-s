@@ -65,6 +65,13 @@ void main() {
     await tester.pumpAndSettle();
 
     // 进页时无诊断条目:只有行尾箭头,无计数徽。
+    // (后台与通知分组加入后,诊断行位于首屏之外,拖拽滚动到可见。)
+    await tester.scrollUntilVisible(
+      find.text('诊断与日志'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('诊断与日志'));
     await tester.pumpAndSettle();
     expect(find.text('1'), findsNothing);

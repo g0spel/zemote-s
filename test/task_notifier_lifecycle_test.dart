@@ -10,17 +10,34 @@ import 'package:zflow/protocol/zflow_client.dart';
 
 class _FakeNotifications extends Notifications {
   Future<void> Function(Map<String, dynamic> payload)? tapHandler;
-  int stopForegroundCalls = 0;
+  int releaseRunningCalls = 0;
+  int setRunningCalls = 0;
+  final List<({String channel, String title, String payload})> events = [];
 
   @override
-  void setTapHandler(
-      Future<void> Function(Map<String, dynamic> payload)? handler) {
+  Future<void> setTapHandler(
+      Future<void> Function(Map<String, dynamic> payload)? handler) async {
     tapHandler = handler;
   }
 
   @override
-  Future<void> stopForeground() async {
-    stopForegroundCalls++;
+  Future<void> setRunning(String title, String text) async {
+    setRunningCalls++;
+  }
+
+  @override
+  Future<void> releaseRunning() async {
+    releaseRunningCalls++;
+  }
+
+  @override
+  Future<void> notifyEvent({
+    required String channel,
+    required String title,
+    required String text,
+    required Map<String, dynamic> payload,
+  }) async {
+    events.add((channel: channel, title: title, payload: payload['taskId'] as String? ?? ''));
   }
 }
 
@@ -81,7 +98,7 @@ void main() {
 
     await newNotifier.dispose();
     expect(notifications.tapHandler, isNull);
-    expect(notifications.stopForegroundCalls, 1);
+    expect(notifications.releaseRunningCalls, 1);
     bridge.dispose();
   });
 

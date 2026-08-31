@@ -46,33 +46,50 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(messenger, notifyChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
-                "startForeground" -> {
-                    ZflowNotificationService.start(
-                        this,
-                        call.argument<String>("title") ?: "任务运行中",
-                        call.argument<String>("text") ?: ""
-                    )
-                    result.success(true)
-                }
-                "updateForeground" -> {
+                "setRunning" -> {
+                    val service = ZflowNotificationService.instance
                     val title = call.argument<String>("title") ?: "任务运行中"
                     val text = call.argument<String>("text") ?: ""
-                    val service = ZflowNotificationService.instance
                     if (service != null) {
-                        service.update(title, text)
-                        result.success(true)
+                        service.setRunning(title, text)
                     } else {
                         ZflowNotificationService.start(this, title, text)
-                        result.success(true)
                     }
-                }
-                "stopForeground" -> {
-                    stopService(Intent(this, ZflowNotificationService::class.java))
                     result.success(true)
                 }
-                "notifyTaskCompleted" -> {
+                "releaseRunning" -> {
+                    ZflowNotificationService.instance?.releaseRunning()
+                        ?: stopService(Intent(this, ZflowNotificationService::class.java))
+                    result.success(true)
+                }
+                "setKeepAlive" -> {
+                    val service = ZflowNotificationService.instance
+                    if (service != null) {
+                        service.enableKeepAlive(call.argument<Boolean>("wakeLock") ?: true)
+                    } else {
+                        // 启动入口：空闲文案，onStartCommand 后由 enableKeepAlive 语义接管。
+                        ZflowNotificationService.start(this, "Zflow 保持连接", "已连接 · 后台保持在线")
+                        ZflowNotificationService.instance
+                            ?.enableKeepAlive(call.argument<Boolean>("wakeLock") ?: true)
+                    }
+                    result.success(true)
+                }
+                "clearKeepAlive" -> {
+                    ZflowNotificationService.instance?.disableKeepAlive()
+                        ?: stopService(Intent(this, ZflowNotificationService::class.java))
+                    result.success(true)
+                }
+                "isIgnoringBatteryOptimizations" -> {
+                    result.success(isIgnoringBatteryOptimizations())
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    requestIgnoreBatteryOptimizations()
+                    result.success(true)
+                }
+                "notifyEvent" -> {
                     TaskNotifications.notify(
                         this,
+                        call.argument<String>("channel") ?: "completion",
                         call.argument<String>("title") ?: "任务完成",
                         call.argument<String>("text") ?: "",
                         call.argument<String>("payload")
@@ -147,6 +164,29 @@ class MainActivity : FlutterActivity() {
         } else {
             true
         }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } else {
+            true
+        }
+
+    /** System dialog asking the user to exempt the app from Doze — the
+     *  keep-alive service and relay socket survive idle otherwise. */
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !isIgnoringBatteryOptimizations()
+        ) {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }
+    }
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
