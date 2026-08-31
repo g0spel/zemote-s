@@ -140,6 +140,7 @@ final _chatRows = <Map<String, dynamic>>[
         '如果把最近几个订阅保持在连接上,切回时就只需重挂监听器……'
         '用 LRU 驻留池,容量取 8 应该够覆盖来回横跳的场景。',
     'state': 'completedSuccess',
+    'ts': _tsAgo(const Duration(seconds: 105)),
   },
   {
     'rowId': 3,
@@ -346,6 +347,38 @@ void main() {
     final bridge = await _pumpChat(tester, wire, scaffoldKey: scaffoldKey);
     await _shot(tester, 'chat-main');
     await _teardown(tester, () async => bridge.dispose());
+  });
+
+  testWidgets('mode-menu:协作模式菜单(汉化)', (tester) async {
+    if (!_enabled) return;
+    await _phoneSurface(tester);
+    final wire = _Wire({
+      'helloConversationV4': <String, dynamic>{},
+      'initializeConversationV4': <String, dynamic>{},
+      'prepareWorkspace': <String, dynamic>{},
+      'list': const <dynamic>[],
+      'createSession': {
+        'status': 'accepted',
+        'result': {'sessionId': 's1'},
+      },
+      'sendConversationCommandV4': {
+        'status': 'accepted',
+        'result': {'sessionId': 's1'},
+      },
+      'subscribeConversationV4': {
+        'ack': {'subscriptionId': 'conv-sub'}
+      },
+      'subscribeSessionsIndexV4': {
+        'ack': {'subscriptionId': 'sub-idx'}
+      },
+    });
+    final scaffoldKey = GlobalKey<ScaffoldState>();
+    await _pumpChat(tester, wire, scaffoldKey: scaffoldKey);
+    // 打开协作模式菜单(真实按钮 → _showModeMenu)。
+    await tester.tap(find.text('构建'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await _shot(tester, 'mode-menu');
   });
 
   testWidgets('chat-drawer:会话抽屉(叠在对话页上)', (tester) async {
