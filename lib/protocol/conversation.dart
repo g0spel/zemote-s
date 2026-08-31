@@ -9,6 +9,7 @@ import 'channel_client.dart';
 import 'id.dart';
 import '../state/log_store.dart' show diagLogEnabled;
 import 'zflow_client.dart';
+import 'rpc_result.dart';
 
 /// Conversation V4 protocol over the `zcode-agent` channel.
 ///
@@ -244,13 +245,9 @@ class ConversationTransport {
         res is Map &&
         res['revisionAtDecision'] is num) {
       final rev = (res['revisionAtDecision'] as num).toInt();
-      final status = res['status'];
       // revisionAtDecision is the base at decision time; an accepted
       // command bumps the revision by one, so the next CAS base is +1.
-      final floor =
-          (status == 'accepted' || status == 'noop' || status == 'duplicate')
-              ? rev + 1
-              : rev;
+      final floor = rpcSuccessStatuses.contains(res['status']) ? rev + 1 : rev;
       if (floor > (_ackedRevisions[sessionId] ?? 0)) {
         _ackedRevisions[sessionId] = floor;
       }

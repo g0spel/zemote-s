@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zflow/protocol/connection_params.dart';
+import 'package:zflow/protocol/rpc_result.dart';
 import 'package:zflow/protocol/zflow_client.dart';
 
 /// Full feature suite against the real desktop. Every check logs
@@ -44,11 +45,8 @@ void main() {
       print(line);
     }
 
-    bool ackOk(dynamic res) =>
-        res is Map &&
-        (res['status'] == 'accepted' ||
-            res['status'] == 'noop' ||
-            res['status'] == 'duplicate');
+    // Acknowledged commands must carry an explicit idempotent status.
+    bool ackOk(dynamic res) => isRpcSuccess(res, requireStatus: true);
 
     final client = ZflowClient(params, onLog: log);
 

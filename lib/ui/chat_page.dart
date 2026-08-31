@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
+import '../protocol/rpc_result.dart';
 import '../protocol/zflow_client.dart';
 import '../state/log_store.dart';
 import 'delayed_banner.dart';
@@ -629,11 +630,8 @@ class _ChatPageState extends State<ChatPage> {
       final res = await run();
       if (!_isCurrentOperation(sourceGeneration, operationGeneration,
           _runGeneration, transport, sessionId: sessionId)) return;
-      if (res is Map &&
-          res['status'] != null &&
-          res['status'] != 'accepted' &&
-          res['status'] != 'noop') {
-        _toast('$errorPrefix: ${res['reasonCode'] ?? res['status']}');
+      if (isRpcRejected(res)) {
+        _toast('$errorPrefix: ${rpcFailureReason(res)}');
       }
     } catch (e) {
       if (_isCurrentOperation(sourceGeneration, operationGeneration,
@@ -1072,17 +1070,9 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  bool _ackRejected(dynamic res) =>
-      res is Map &&
-      res['status'] != null &&
-      res['status'] != 'accepted' &&
-      res['status'] != 'noop' &&
-      res['status'] != 'duplicate';
+  bool _ackRejected(dynamic res) => isRpcRejected(res);
 
-  String _ackReason(dynamic res) {
-    if (res is! Map) return '$res';
-    return '${res['reasonCode'] ?? res['message'] ?? res['status']}';
-  }
+  String _ackReason(dynamic res) => rpcFailureReason(res);
 
   String _requireSession() {
     final sessionId = _sessionId;

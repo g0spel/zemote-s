@@ -439,13 +439,9 @@ class _ModelModeSheetState extends State<_ModelModeSheet> {
           applyGeneration != _applyGeneration ||
           transport != widget.transport ||
           !widget.isSourceCurrent()) return;
-      if (res is Map &&
-          res['status'] != null &&
-          res['status'] != 'accepted' &&
-          res['status'] != 'noop' &&
-          res['status'] != 'duplicate') {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('被拒绝: ${res['reasonCode'] ?? res['status']}')));
+      if (isRpcRejected(res)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('被拒绝: ${rpcFailureReason(res)}')));
       } else {
         onAccepted?.call();
         if (context.mounted && widget.isSourceCurrent()) Navigator.pop(context);

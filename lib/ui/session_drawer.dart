@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
+import '../protocol/rpc_result.dart';
 import '../protocol/zflow_client.dart';
 import '../state/log_store.dart';
 import '../state/session_list_cache.dart';
@@ -758,8 +759,9 @@ class _SessionDrawerState extends State<SessionDrawer> {
           managementGeneration != _managementGeneration) return;
       try {
         if (!_isCurrentActionSource(source, id)) return;
-        await source.bridge.channels.call(Channels.zcodeTask, method,
-            [_taskArgs(id, pinned: pinned, scope: source.scope)]);
+        final res = await source.bridge.channels.call(Channels.zcodeTask,
+            method, [_taskArgs(id, pinned: pinned, scope: source.scope)]);
+        if (isRpcRejected(res)) throw Exception(rpcFailureReason(res));
       } catch (_) {
         failed++;
       }
@@ -929,8 +931,10 @@ class _SessionDrawerState extends State<SessionDrawer> {
     final managementGeneration = ++_managementGeneration;
     if (!_isCurrentActionSource(source, entry.sessionId)) return;
     try {
-      await source.bridge.channels.call(Channels.zcodeTask, method,
-          [args ?? _taskArgs(entry.sessionId, scope: source.scope)]);
+      final res = await source.bridge.channels.call(Channels.zcodeTask,
+          method, [args ?? _taskArgs(entry.sessionId, scope: source.scope)]);
+      // 无 status 直接返回保持兼容;明确 rejected 走下面的错误提示。
+      if (isRpcRejected(res)) throw Exception(rpcFailureReason(res));
     } catch (e) {
       if (!_isCurrentActionSource(source, entry.sessionId) ||
           managementGeneration != _managementGeneration) return;

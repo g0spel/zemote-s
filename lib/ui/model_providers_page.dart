@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../protocol/channel_client.dart';
 import '../protocol/conversation.dart';
 import '../protocol/id.dart';
+import '../protocol/rpc_result.dart';
 import '../protocol/zflow_client.dart';
 import 'theme.dart';
 
@@ -244,12 +245,14 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
     required _ProviderActionSource source,
   }) async {
     if (!_isCurrentActionSource(source)) return;
-    await source.session.channels.call('model-provider', 'save', [
+    final res = await source.session.channels.call('model-provider', 'save', [
       {
         ...provider,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       },
     ]);
+    // 无 status 的直接返回保持兼容;明确 rejected 走调用方的错误提示。
+    if (isRpcRejected(res)) throw Exception(rpcFailureReason(res));
   }
 
   Future<void> _toggle(Map<String, dynamic> provider, bool enabled) async {
@@ -296,17 +299,21 @@ class _ModelProvidersPageState extends State<ModelProvidersPage> {
         mutationGeneration != _mutationGeneration) return;
     try {
       if (!_isCurrentActionSource(source)) return;
-      await source.session.channels.call('model-provider', 'delete', [
+      final res = await source.session.channels.call('model-provider',
+          'delete', [
         {'id': provider['id']},
       ]);
+      // 明确 rejected 说明宿主理解了请求,fallback 换形状无意义,直接报错。
+      if (isRpcRejected(res)) throw Exception(rpcFailureReason(res));
     } on ChannelRpcError {
       // Fallback: try alternate parameter shape
       if (!_isCurrentActionSource(source) ||
           mutationGeneration != _mutationGeneration) return;
       try {
         if (!_isCurrentActionSource(source)) return;
-        await source.session.channels
+        final res = await source.session.channels
             .call('model-provider', 'delete', [provider['id']]);
+        if (isRpcRejected(res)) throw Exception(rpcFailureReason(res));
       } catch (e2) {
         if (_isCurrentActionSource(source) &&
             mutationGeneration == _mutationGeneration) {
