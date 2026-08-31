@@ -1298,6 +1298,60 @@ String? toolTargetPathOf(Map<String, dynamic> row, String inputText) {
   return null;
 }
 
+/// 从工具行收集图片字节(用户裁定:图片也要能看):递归扫描
+/// display/output 下的 base64/data 字段,并提取文本中的 data URI;
+/// 解码失败的候选跳过。去重后返回。
+List<Uint8List> collectToolImages(Map<String, dynamic> row, String outputText) {
+  final out = <Uint8List>[];
+  final seen = <String>{};
+  void addEncoded(String s) {
+    var v = s.trim();
+    const prefix = 'data:image/';
+    if (v.startsWith(prefix)) {
+      final i = v.indexOf('base64,');
+      if (i != -1) v = v.substring(i + 'base64,'.length);
+    }
+    final bytes = decodeInlineToolImage(v);
+    if (bytes == null) return;
+    final key = '${bytes.length}:${bytes.length > 8 ? bytes[0] : 0}'
+        ':${bytes.length > 16 ? bytes[8] : 0}';
+    if (!seen.add(key)) return;
+    out.add(bytes);
+  }
+
+  void walk(Object? o, int depth) {
+    if (o == null || depth > 6) return;
+    if (o is Map) {
+      for (final e in o.entries) {
+        final v = e.value;
+        if (v is String &&
+            (e.key == 'base64' || e.key == 'data' || e.key == 'dataUrl')) {
+          addEncoded(v);
+        } else {
+          walk(v, depth + 1);
+        }
+      }
+    } else if (o is List) {
+      for (final v in o) {
+        walk(v, depth + 1);
+      }
+    } else if (o is String) {
+      if (o.startsWith('data:image/') && o.contains('base64,')) {
+        addEncoded(o);
+      }
+    }
+  }
+
+  walk(row['display'], 0);
+  walk(row['output'], 0);
+  final dataUri =
+      RegExp(r'data:image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+', caseSensitive: false);
+  for (final m in dataUri.allMatches(outputText)) {
+    addEncoded(m.group(0)!);
+  }
+  return out;
+}
+
 /// 工具调用块。Ember look matches [_ReasoningTile]: tile one step
 /// darker than card, 10pt radius, 3px rail colored by status (success→ok,
 /// error→err, running→run). The tool name is a standalone caption row
@@ -1536,13 +1590,8 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: () => _viewOutput(
-                      context,
-                      images,
-                      toolPath == null
-                          ? toolName
-                          : '$toolName · $toolPath',
-                      outputText),
+                  onPressed: () =>
+                      _viewOutput(context, row, inputText, outputText, toolName),
                   icon: const Icon(Icons.visibility_outlined, size: 14),
                   label: const Text('查看', style: TextStyle(fontSize: 12)),
                   style: TextButton.styleFrom(
@@ -1591,14 +1640,21 @@ class _ToolCallTileState extends State<_ToolCallTile> {
 
   /// 查看工具输出(用户裁定:所有工具、所有文件类型,文本与图片
   /// 都能看):全屏等宽查看器,标题带工具名与目标路径。
-  void _viewOutput(
-      BuildContext context, List images, String title, String content) {
+  void _viewOutput(BuildContext context, Map<String, dynamic> row,
+      String inputText, String outputText, String toolName) {
+    final path = toolTargetPathOf(row, inputText);
+    final title = path == null ? toolName : '$toolName · $path';
+    final images = collectToolImages(row, outputText);
+    final dataUri = RegExp(
+        r'data:image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+',
+        caseSensitive: false);
+    final text = outputText.replaceAll(dataUri, '').trim();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (context) => _ToolOutputSheet(
         title: title,
-        content: content,
+        content: text,
         images: images,
       ),
     );
@@ -1737,9 +1793,13 @@ class _ToolOutputSheet extends StatelessWidget {
                             },
                           ),
                       if (content.isEmpty && images.isEmpty)
-                        Text('(无输出)',
-                            style: TextStyle(
-                                fontSize: 12, color: colors.textFaint)),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                              '查看器未收到输出数据——宿主未在该工具行中下发内容(部分图片输出不下发图片数据)',
+                              style: TextStyle(
+                                  fontSize: 12, color: colors.textFaint)),
+                        ),
                     ],
                   ),
                 ),
