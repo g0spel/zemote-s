@@ -215,11 +215,21 @@ class _WorkingLabelState extends State<_WorkingLabel> {
 
   @override
   Widget build(BuildContext context) {
-    return Text('工作中 · ${_elapsedLabel()}',
-        style: TextStyle(
-            fontSize: EmberType.caption,
-            fontWeight: FontWeight.w600,
-            color: widget.color));
+    // 两行(用户裁定):上行「工作中」,下行纯计时。
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('工作中',
+            style: TextStyle(
+                fontSize: EmberType.caption,
+                fontWeight: FontWeight.w600,
+                color: widget.color)),
+        Text(_elapsedLabel(),
+            style: TextStyle(
+                fontSize: 10, height: 1.15, color: widget.color)),
+      ],
+    );
   }
 }
 
