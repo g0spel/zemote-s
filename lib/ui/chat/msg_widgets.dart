@@ -1251,6 +1251,26 @@ Widget _todoStepsBlock(BuildContext context, List<PlanStep> steps) {
   );
 }
 
+/// 工具输入里的目标文件路径(read/edit/write 等):优先 row.input,
+/// 回退解析 inputText JSON;路径键与 DiffView 同款。无则 null。
+String? toolTargetPathOf(Map<String, dynamic> row, String inputText) {
+  Map<String, dynamic>? input;
+  final raw = row['input'];
+  if (raw is Map) input = raw.cast<String, dynamic>();
+  if (input == null && inputText.trim().isNotEmpty) {
+    try {
+      final decoded = jsonDecode(inputText);
+      if (decoded is Map) input = decoded.cast<String, dynamic>();
+    } catch (_) {}
+  }
+  if (input == null) return null;
+  for (final k in const ['filePath', 'file_path', 'path', 'file']) {
+    final v = input[k];
+    if (v is String && v.trim().isNotEmpty) return v.trim();
+  }
+  return null;
+}
+
 /// 工具调用块。Ember look matches [_ReasoningTile]: tile one step
 /// darker than card, 10pt radius, 3px rail colored by status (success→ok,
 /// error→err, running→run). The tool name is a standalone caption row
@@ -1283,8 +1303,11 @@ class _ToolCallTileState extends State<_ToolCallTile> {
     final display = row['display'];
     final diff = extractDiff(row);
 
-    /// 折叠态的一行预览:输入首行优先,回落输出首行。
-    final toolPreview = (inputText.isNotEmpty ? inputText : outputText)
+    /// 折叠态的一行预览:目标文件路径优先(read/edit 等带路径输入,
+    /// 用户裁定:与 edit 一样可见操作对象),回落输入/输出首行。
+    final toolPath = toolTargetPathOf(row, inputText);
+    final toolPreview = (toolPath ??
+            (inputText.isNotEmpty ? inputText : outputText))
         .split('\n')
         .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
 
@@ -1393,6 +1416,28 @@ class _ToolCallTileState extends State<_ToolCallTile> {
               ),
             ),
             if (_open) ...[
+              // 目标文件路径行(用户裁定:read 等与 edit 一样显示操作
+              // 对象);edit 已有 diff 路径头,不重复。
+              if (toolPath != null && diff == null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+                  child: Row(
+                    children: [
+                      Icon(Icons.insert_drive_file_outlined,
+                          size: 12, color: e.textFaint),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(toolPath,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontFamily: EmberFonts.term,
+                                color: e.textMuted)),
+                      ),
+                    ],
+                  ),
+                ),
               // 用户裁定:bash 保留原始输入输出,其余工具直接展示结果
               // (不再铺原始输入/输出 kv);todo/计划工具解析成步骤列表。
               if (isBash) ...[

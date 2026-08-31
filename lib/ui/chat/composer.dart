@@ -162,6 +162,12 @@ class _PlusSheetState extends State<_PlusSheet> {
 
 /// 会话设置面板图标行(桌面同款布局)。按钮全部压缩密度,整行高度约为
 /// 常规 IconButton 行的一半。
+/// 协作模式中文标签(模式菜单与按钮共用);未知值原样返回。
+String modeLabelOf(String value) {
+  final v = value.toLowerCase();
+  return _InputBar._modeLabels[v] ?? value;
+}
+
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
@@ -206,12 +212,13 @@ class _InputBar extends StatelessWidget {
     this.insightsCount = 0,
   });
 
-  /// 模式 → 图标(随模式变化,plan/yolo 高亮警示色)。
-  static const _modeIcons = {
-    'build': Icons.build,
-    'edit': Icons.edit_note,
-    'plan': Icons.checklist,
-    'yolo': Icons.bolt,
+  /// 协作模式 → 两字缩写按钮文案(用户裁定:不用图标)。yolo 保留
+  /// 桌面端原词;未知模式回落「模式」。
+  static const _modeLabels = {
+    'build': '构建',
+    'edit': '编辑',
+    'plan': '计划',
+    'yolo': 'YOLO',
   };
 
   @override
@@ -219,7 +226,9 @@ class _InputBar extends StatelessWidget {
     final colors = EmberColors.of(context);
     final mode = modeValue;
     final modeHot = mode == 'plan' || mode == 'yolo';
-    final modeIcon = _modeIcons[mode] ?? Icons.tune;
+    final modeLabel = mode == null
+        ? '模式'
+        : (_modeLabels[mode] ?? _modeLabels[mode.toLowerCase()] ?? '模式');
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
@@ -255,9 +264,9 @@ class _InputBar extends StatelessWidget {
                     onPressed: sending ? null : onPlusMenu,
                   ),
                   if (mode != null)
-                    _barButton(
+                    _barLabel(
                       context,
-                      icon: modeIcon,
+                      label: modeLabel,
                       tooltip: '协作模式 · $mode',
                       color: modeHot ? colors.warn : colors.textMuted,
                       onPressed: sending ? null : onPickMode,
@@ -327,13 +336,41 @@ class _InputBar extends StatelessWidget {
     Color? color,
     String? badge,
   }) {
-    final colors = EmberColors.of(context);
-    final button = IconButton(
+    return _withBadge(
+      badge,
+      colors: EmberColors.of(context),
+      button: IconButton(
+        onPressed: onPressed,
+        tooltip: tooltip,
+        visualDensity: VisualDensity.compact,
+        icon:
+            Icon(icon, size: 22, color: color ?? EmberColors.of(context).textMuted),
+      ),
+    );
+  }
+
+  /// 图标行文字按钮:模式缩写(两字)等非图标内容。
+  Widget _barLabel(
+    BuildContext context, {
+    required String label,
+    required String tooltip,
+    required VoidCallback? onPressed,
+    Color? color,
+  }) {
+    return IconButton(
       onPressed: onPressed,
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
-      icon: Icon(icon, size: 22, color: color ?? colors.textMuted),
+      icon: Text(label,
+          style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: color ?? EmberColors.of(context).textMuted)),
     );
+  }
+
+  Widget _withBadge(String? badge,
+      {required EmberColors colors, required Widget button}) {
     if (badge == null) return button;
     return Stack(
       clipBehavior: Clip.none,

@@ -544,7 +544,13 @@ class _ChatPageState extends State<ChatPage> {
                     ? EmberColors.of(context).primary
                     : EmberColors.of(context).textFaint,
               ),
-              title: Text(name, style: const TextStyle(fontSize: 13)),
+              // 汉化(用户裁定):中文标签为主,原始值右侧小字对照桌面端。
+              title: Text(modeLabelOf(value),
+                  style: const TextStyle(fontSize: 13)),
+              trailing: Text(name,
+                  style: TextStyle(
+                      fontSize: 10.5,
+                      color: EmberColors.of(context).textFaint)),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 if (!controller.isCurrentForSource(sourceGeneration,
