@@ -864,11 +864,18 @@ class _ChatPageState extends State<ChatPage> {
                           // 列表末尾固定行(用户裁定):「最近发送 HH:mm」
                           // = 最近一条用户消息的时间,常驻显示;历史行无
                           // 时间戳(仅当次会话实时行带 ts)则隐藏该行。
+                          // 回退:行尚未物化/未带戳时,用最近 echo 的
+                          // 发送时刻(乐观气泡仍在场即有意义)。
                           int? footerTs;
                           for (final row in state.rows.reversed) {
                             if (row['kind'] != 'userInput') continue;
                             footerTs = _rowTsOf(row);
                             break;
+                          }
+                          if (footerTs == null && controller.echoes.isNotEmpty) {
+                            final ts =
+                                controller.echoes.last['ts'] as int?;
+                            footerTs = ts;
                           }
                           final hasFooter = footerTs != null;
                           final itemCount = groups.length +

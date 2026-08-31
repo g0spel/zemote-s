@@ -276,13 +276,27 @@ class ChatController {
     if (turnPending &&
         (state.rows.isNotEmpty ||
             (state.phase.isNotEmpty && state.phase != 'draft'))) {
-      // 轮次已在订阅侧物化(行到达或相位离开 draft),乐观窗口结束。
+      // 轮次已在订阅侧行数据物化(行到达或相位离开 draft),乐观窗口结束。
       turnPending = false;
       _notify();
     }
     if (_echoes.isEmpty) return;
     final kept = removeEchoedTexts(_echoes, state.rows);
     if (kept.length != _echoes.length) {
+      // 退休的 echo = 已物化的服务端行。部分宿主回发的行不带时间戳,
+      // 把乐观发送时刻转移到未打戳的物化行,保证「最近发送」固定行与
+      // 操作行时间在快照重洗后仍成立(发送时刻以本端 echo 为准)。
+      for (final e in _echoes) {
+        if (kept.contains(e)) continue;
+        final t = '${e['text'] ?? ''}'.trim();
+        if (t.isEmpty) continue;
+        for (final r in state.rows.reversed) {
+          if (r['kind'] != 'userInput') continue;
+          if ('${r['text'] ?? ''}'.trim() != t) continue;
+          if (r['_zflowTs'] == null) r['_zflowTs'] = e['ts'];
+          break;
+        }
+      }
       _echoes
         ..clear()
         ..addAll(kept);
