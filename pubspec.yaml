@@ -20,7 +20,7 @@ dependencies:
   image_picker: ^1.2.3
   zxing2: ^0.2.4
   image: ^4.9.1
-  file_picker: ^12.0.0
+  file_picker: ^12.1.2
   flutter_markdown_plus: ^1.0.12
   markdown: ^7.3.1
   http: ^1.6.0
