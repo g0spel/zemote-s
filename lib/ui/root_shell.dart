@@ -403,29 +403,20 @@ class _RootShellState extends State<RootShell> {
       unawaited(previous.dispose());
     }
     final scope = _scopeOf(workspace);
-    final workspaceKey = workspaceKeyOf(workspace) ?? '';
     _taskNotifier = TaskNotifier(
       bridge: bridge,
       scope: scope,
       notifications: notificationsService,
       visibleSessionId: _visibleSessionId,
       onOpenTask: (taskId, title) async {
-        if (!_isCurrentBridge(bridge, gen)) return;
-        unreadEvents.clearTask(taskId);
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ChatPage(
-              session: bridge,
-              scope: scope,
-              workspaceKey: workspaceKey,
-              sessionId: taskId,
-              title: title,
-            ),
-          ),
-        ).then((_) {
-          if (_visibleTaskChatId == taskId) _visibleTaskChatId = null;
+        if (!mounted || !_isCurrentBridge(bridge, gen)) return;
+        // 从通知进入与抽屉选择同路:切换内嵌会话并回到对话 Tab
+        // (真机反馈:推独立 Scaffold 页与主界面割裂,显示不正常)。
+        setState(() {
+          _tab = 0;
+          _drawerOpen = false;
         });
-        _visibleTaskChatId = taskId;
+        _pickFromDrawer(taskId);
       },
     )..start();
   }

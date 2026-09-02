@@ -13,13 +13,17 @@ class Notifications {
   static const _nav = MethodChannel('zflow/nav');
 
   Future<void> Function(Map<String, dynamic> payload)? _tapHandler;
+
+  /// 冷启动/过早到达的点击载荷:此刻 tap 处理器(连接建立后由
+  /// TaskNotifier 注册)尚不存在,暂存待注册时补派发,不再丢弃。
+  Map<String, dynamic>? _pendingTap;
   bool _initialized = false;
 
   static bool get isSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   /// Registers the native→Dart tap callback and drains any cold-start payload
-  /// (accepted behavior: cold-start payloads are dropped, warm taps are routed).
+  /// (处理器未就绪时暂存补派发)。
   void init() {
     if (_initialized || !isSupported) return;
     _initialized = true;
@@ -29,7 +33,6 @@ class Notifications {
       }
       return null;
     });
-    // Cold start: just consume the payload so it doesn't linger.
     _nav.invokeMethod<String>('getLaunchPayload').then((p) {
       if (p != null) _dispatch(p);
     }).catchError((_) {});
@@ -39,13 +42,24 @@ class Notifications {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map) {
-        _tapHandler?.call(decoded.cast<String, dynamic>());
+        final payload = decoded.cast<String, dynamic>();
+        final handler = _tapHandler;
+        if (handler == null) {
+          _pendingTap = payload;
+        } else {
+          handler(payload);
+        }
       }
     } catch (_) {}
   }
 
   Future<void> setTapHandler(Future<void> Function(Map<String, dynamic> payload)? h) {
     _tapHandler = h;
+    final pending = _pendingTap;
+    if (h != null && pending != null) {
+      _pendingTap = null;
+      Future(() => h(pending)).catchError((_) {});
+    }
     return Future.value();
   }
 

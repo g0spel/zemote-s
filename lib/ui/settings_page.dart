@@ -610,12 +610,31 @@ class _BatteryWhitelistTile extends StatefulWidget {
   State<_BatteryWhitelistTile> createState() => _BatteryWhitelistTileState();
 }
 
-class _BatteryWhitelistTileState extends State<_BatteryWhitelistTile> {
+class _BatteryWhitelistTileState extends State<_BatteryWhitelistTile>
+    with WidgetsBindingObserver {
   bool _ignoring = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _query();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 系统白名单确认框返回后,initState 的查询已过期;回前台重查
+    // (真机反馈:已加白仍显示未开启)。
+    if (state == AppLifecycleState.resumed) _query();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _query() {
     notificationsService.isIgnoringBatteryOptimizations().then((v) {
       if (mounted) setState(() => _ignoring = v);
     });
@@ -639,8 +658,7 @@ class _BatteryWhitelistTileState extends State<_BatteryWhitelistTile> {
           ? null
           : () async {
               await notificationsService.requestIgnoreBatteryOptimizations();
-              final ok = await notificationsService.isIgnoringBatteryOptimizations();
-              if (mounted) setState(() => _ignoring = ok);
+              _query();
             },
     );
   }
