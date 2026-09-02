@@ -613,18 +613,21 @@ class _BatteryWhitelistTile extends StatefulWidget {
 class _BatteryWhitelistTileState extends State<_BatteryWhitelistTile>
     with WidgetsBindingObserver {
   bool _ignoring = true;
+  bool _meizu = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _query();
+    notificationsService.deviceManufacturer().then((m) {
+      if (mounted) setState(() => _meizu = m.contains('meizu'));
+    }).catchError((_) {});
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 系统白名单确认框返回后,initState 的查询已过期;回前台重查
-    // (真机反馈:已加白仍显示未开启)。
+    // 系统白名单确认框返回后,initState 的查询已过期;回前台重查。
     if (state == AppLifecycleState.resumed) _query();
   }
 
@@ -642,15 +645,21 @@ class _BatteryWhitelistTileState extends State<_BatteryWhitelistTile>
 
   @override
   Widget build(BuildContext context) {
+    // Flyme 不认标准白名单(实测:弹窗允许后 isIgnoringBatteryOptimizations
+    // 仍为 false),引导去手机管家的后台管理手动放行。
+    final subtitle = _ignoring
+        ? '已加白：后台连接不受电池优化影响'
+        : _meizu
+            ? 'Flyme 可能不生效：请在手机管家 → 后台管理 中允许 Zflow 后台运行'
+            : '未加白：系统可能冻结后台连接，建议允许';
     return ListTile(
       leading: _ignoring
           ? const Icon(Icons.battery_saver_outlined, size: 20)
           : Icon(Icons.warning_amber_outlined,
-              size: 20, color: EmberColors.of(context).warn),
+              size: 20,
+              color: EmberColors.of(context).warn),
       title: const Text('电池优化白名单'),
-      subtitle: Text(_ignoring
-          ? '已加白：后台连接不受电池优化影响'
-          : '未加白：系统可能冻结后台连接，建议允许'),
+      subtitle: Text(subtitle),
       trailing: _ignoring
           ? const Icon(Icons.check, size: 20)
           : const Icon(Icons.chevron_right, size: 20),

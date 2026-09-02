@@ -82,6 +82,9 @@ class MainActivity : FlutterActivity() {
                 "isIgnoringBatteryOptimizations" -> {
                     result.success(isIgnoringBatteryOptimizations())
                 }
+                "deviceManufacturer" -> {
+                    result.success(android.os.Build.MANUFACTURER)
+                }
                 "requestIgnoreBatteryOptimizations" -> {
                     requestIgnoreBatteryOptimizations()
                     result.success(true)

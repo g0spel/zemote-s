@@ -2196,10 +2196,8 @@ class _InteractionCardState extends State<_InteractionCard> {
             _QuestionsView(
               questions: questions.cast<Map>(),
               busy: _busy,
-              onResolve: (answers) => _resolve(
-                action: 'accept',
-                content: {'answers': answers},
-              ),
+              onResolve: (content) =>
+                  _resolve(action: 'accept', content: content),
             ),
           if (freeText)
             Row(
@@ -2243,6 +2241,37 @@ class _InteractionCardState extends State<_InteractionCard> {
   }
 }
 
+/// 渲染 questions 交互的提交 content,与桌面 buildBotElicitationContent
+/// 同构(逆向实证):answers 的值为该问题全部选项的**逗号连接字符串**
+/// (不是数组);每题另附 answer_N(单选=字符串/多选=数组);单问题
+/// 表单再附 answer。agent 侧读取的是 answer/answer_N 键。
+@visibleForTesting
+Map<String, dynamic> buildElicitationContent(
+    List<Map> questions, Map<String, List<String>> answers) {
+  String valuesOf(String key) => (answers[key] ?? const <String>[]).join(', ').trim();
+  final content = <String, dynamic>{
+    'answers': {
+      for (final q in questions)
+        if (valuesOf('${q['question']}').isNotEmpty)
+          '${q['question']}': valuesOf('${q['question']}'),
+    },
+  };
+  for (var i = 0; i < questions.length; i++) {
+    final values = answers['${questions[i]['question']}'] ?? const <String>[];
+    if (values.isEmpty) continue;
+    final multi = questions[i]['multiSelect'] == true;
+    content['answer_$i'] = multi ? values : values[0];
+  }
+  if (questions.length == 1) {
+    final values = answers['${questions[0]['question']}'] ?? const <String>[];
+    if (values.isNotEmpty) {
+      final multi = questions[0]['multiSelect'] == true;
+      content['answer'] = multi ? values : values[0];
+    }
+  }
+  return content;
+}
+
 /// Renders a form-style `userInput` interaction (the `questions` payload).
 /// Answers are collected LOCALLY and submitted in ONE resolveInteraction —
 /// the pending interaction is consumed by the first answer, so per-question
@@ -2250,7 +2279,9 @@ class _InteractionCardState extends State<_InteractionCard> {
 class _QuestionsView extends StatefulWidget {
   final List<Map> questions;
   final bool busy;
-  final void Function(Map<String, List<String>> answers) onResolve;
+
+  /// 提交回调:参数为构建好的提交 content(buildElicitationContent)。
+  final void Function(Map<String, dynamic> content) onResolve;
 
   const _QuestionsView({
     required this.questions,
@@ -2287,14 +2318,15 @@ class _QuestionsViewState extends State<_QuestionsView> {
               }
             }),
           ),
-        Align(
+          Align(
           alignment: Alignment.centerRight,
           child: TextButton(
             // Unanswered questions are allowed — the model is told it
             // should use its best judgment for those.
             onPressed: widget.busy || _answers.isEmpty
                 ? null
-                : () => widget.onResolve(Map.of(_answers)),
+                : () => widget.onResolve(
+                    buildElicitationContent(widget.questions, _answers)),
             child: const Text('提交答案', style: TextStyle(fontSize: 12)),
           ),
         ),

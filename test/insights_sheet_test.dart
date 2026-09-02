@@ -226,6 +226,62 @@ void main() {
     });
   });
 
+  group('buildElicitationContent(问题表单提交 content,桌面契约)', () {
+    final questions = [
+      {
+        'question': '选择部署方式',
+        'multiSelect': false,
+        'options': [
+          {'value': 'docker', 'label': 'Docker'},
+          {'value': 'bare', 'label': '裸机'},
+        ],
+      },
+      {
+        'question': '需要哪些组件',
+        'multiSelect': true,
+        'options': [
+          {'value': 'db', 'label': '数据库'},
+          {'value': 'cache', 'label': '缓存'},
+        ],
+      },
+    ];
+
+    test('answers 值为逗号连接字符串,附 answer_N(单选=串/多选=数组)', () {
+      final content = buildElicitationContent(questions, {
+        '选择部署方式': ['docker'],
+        '需要哪些组件': ['db', 'cache'],
+      });
+      expect(content['answers'], {
+        '选择部署方式': 'docker',
+        '需要哪些组件': 'db, cache',
+      }, reason: '与桌面 buildBotElicitationContent 同构:值为逗号连接字符串');
+      expect(content['answer_0'], 'docker', reason: '单选 = 字符串');
+      expect(content['answer_1'], ['db', 'cache'], reason: '多选 = 数组');
+    });
+
+    test('单问题表单附 answer 键;未回答的题不产生键', () {
+      final single = [
+        {
+          'question': '继续吗',
+          'multiSelect': false,
+          'options': [
+            {'value': 'yes', 'label': '是'},
+          ],
+        },
+      ];
+      final content = buildElicitationContent(single, {
+        '继续吗': ['yes'],
+      });
+      expect(content['answer'], 'yes');
+      expect(content['answer_0'], 'yes');
+      expect((content['answers'] as Map).keys, ['继续吗']);
+
+      final unanswered = buildElicitationContent(single, {});
+      expect(unanswered['answer'], isNull);
+      expect(unanswered['answers'], isEmpty);
+    });
+  });
+
   group('InsightsSheet(chip 切换渲染对应面板)', () {
     /// 直接挂 sheet(不经把手):返回 wire 通道供应答注入。
     Future<(BridgeSession, ChannelClient)> pumpSheet(

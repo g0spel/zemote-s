@@ -98,6 +98,19 @@ class Notifications {
     return ok ?? true;
   }
 
+  /// 设备厂商(Build.MANUFACTURER,小写);非 Android 返回空串。
+  /// Flyme 等厂商系统不认标准白名单时用于给出针对性引导。
+  Future<String> deviceManufacturer() async {
+    if (!isSupported) return '';
+    try {
+      return (await _channel.invokeMethod<String>('deviceManufacturer'))
+              ?.toLowerCase() ??
+          '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// 弹出系统「忽略电池优化」确认框（需 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS）。
   Future<void> requestIgnoreBatteryOptimizations() {
     if (!isSupported) return Future.value();
