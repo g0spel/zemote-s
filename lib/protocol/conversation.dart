@@ -68,6 +68,9 @@ class ConversationTransport {
 
   void _log(String line) => onLog?.call(line);
 
+  /// 切换/订阅路径的诊断计时出口(诊断开关开启时可见)。
+  void debugLog(String line) => _log(line);
+
   Future<void> handshake() {
     if (_handshaken) return Future.value();
     return _handshakeFuture ??= () async {
@@ -1039,6 +1042,9 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
   Timer? _resubscribeTimer;
   Future<void>? _resubscribeFuture;
 
+  /// 订阅请求发出 → 首个快照应用 的计时(诊断开关可见)。
+  Stopwatch? _snapshotWatch;
+
   final _stagedFrames = <Map<String, dynamic>>[];
   final _fragments = <String, _LogicalFrameAssembly>{};
   int _fragmentBytes = 0;
@@ -1119,6 +1125,7 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
   }
 
   Future<void> _start() async {
+    final sw = Stopwatch()..start();
     await _transport.handshake();
     if (_disposed) return;
     _cancelFrameListener = _transport._channels.addEventListener(
@@ -1137,6 +1144,9 @@ abstract class _SubscriptionBase<T extends ChangeNotifier> {
       timeout: const Duration(seconds: 60),
     );
     if (_disposed) return;
+    _snapshotWatch = Stopwatch()..start();
+    _transport.debugLog('[v4] $_subscribeMethod $topic: '
+        '${sw.elapsedMilliseconds}ms 含宿主会话预热');
     final ack = (res as Map?)?['ack'] as Map?;
     _subscriptionId = ack?['subscriptionId'] as String?;
     _transport._log('[$_logTag] subscribed $topic id=$_subscriptionId');
@@ -1428,6 +1438,13 @@ class ConversationSubscription extends _SubscriptionBase<ConversationState> {
     if (subId == null || frame['subscriptionId'] != subId) return;
     _lastFrameAt = DateTime.now();
     state.applyFrame(frame, onGap: _resync);
+    // 首个快照应用耗时(切换会话慢时的关键计时,诊断开关可见)。
+    if (_snapshotWatch != null) {
+      final ms = _snapshotWatch!.elapsedMilliseconds;
+      _snapshotWatch = null;
+      _transport.debugLog('[v4] 快照已应用 $topic: '
+          '${state.rows.length} 行, 距订阅请求 ${ms}ms');
+    }
   }
 
   void _startWatchdog() {

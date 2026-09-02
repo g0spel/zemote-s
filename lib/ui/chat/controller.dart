@@ -192,12 +192,12 @@ class ChatController {
           }
           sub.state.rowsListenable.addListener(_dedupeEchoes);
           sub.state.controlListenable.addListener(_dedupeEchoes);
-          if (diagLogEnabled.value) {
-            debugPrint('[chat] subscribe parked-hit $sessionId');
-          }
+          transport.debugLog(
+              '[chat] 会话切换命中驻留池: $sessionId (即时, 零订阅)');
           if (sub.state.canLoadOlder) unawaited(loadOlder());
           return;
         }
+        transport.debugLog('[chat] 会话切换未命中驻留池: $sessionId (冷订阅)');
         sub = await transport
             .subscribe(sessionId)
             .timeout(const Duration(seconds: 60));
