@@ -200,10 +200,34 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             Text('已复制下载链接：${widget.info.releaseUrl}（请打开 GitHub 下载）')));
   }
 
+  /// Release body(changelog markdown)→ 弹窗行:去标题/引用/分隔线记号,
+  /// 列表转「·」,小节标题转「◆」。空行保留作分组间距。
+  List<String> _changelogLines(String body) {
+    final lines = <String>[];
+    for (final raw in body.split('\n')) {
+      final l = raw.trim();
+      if (l.startsWith('### ')) {
+        lines.add('◆ ${l.substring(4)}');
+      } else if (l.startsWith('- ')) {
+        lines.add('· ${l.substring(2)}');
+      } else if (l.startsWith('#') || l.startsWith('>') || l.startsWith('---')) {
+        continue;
+      } else if (l.isEmpty) {
+        if (lines.isNotEmpty && lines.last.isNotEmpty) lines.add('');
+      } else {
+        lines.add(l);
+      }
+    }
+    while (lines.isNotEmpty && lines.last.isEmpty) {
+      lines.removeLast();
+    }
+    return lines;
+  }
+
   @override
   Widget build(BuildContext context) {
     final info = widget.info;
-    final notes = (info.body ?? '').trim();
+    final notes = _changelogLines((info.body ?? '').trim());
     return AlertDialog(
       title: Text('发现新版本 v${info.latestVersion}'),
       content: SizedBox(
@@ -216,9 +240,27 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               if (notes.isNotEmpty)
                 Flexible(
                   child: SingleChildScrollView(
-                    child: SelectableText(
-                      notes,
-                      style: const TextStyle(fontSize: 12, height: 1.5),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final line in notes)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: SelectableText(
+                              line,
+                              style: TextStyle(
+                                fontSize: line.startsWith('◆') ? 12.5 : 12,
+                                height: 1.5,
+                                fontWeight: line.startsWith('◆')
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                                color: line.startsWith('◆')
+                                    ? EmberColors.of(context).textSolid
+                                    : EmberColors.of(context).textSoft,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 )

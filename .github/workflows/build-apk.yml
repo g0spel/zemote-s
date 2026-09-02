@@ -84,6 +84,25 @@ jobs:
           cat "Zflow-v$VERSION-arm64.apk.sha256"
 
       # Manual dispatches build but never publish — publishing requires a tag.
+      # Release body carries the matching CHANGELOG section so the in-app
+      # update dialog can show what's new.
+      - name: Extract changelog for release body
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v section="## [$VERSION]" '
+            index($0, section)==1 {found=1; next}
+            found && /^## /{exit}
+            found {print}
+          ' CHANGELOG.md > release_body.md
+          if [ ! -s release_body.md ]; then
+            echo "Zflow ${{ github.ref_name }}" > release_body.md
+          fi
+          {
+            cat release_body.md
+            printf '\n---\n\n> APK 由 GitHub Actions 从标签 `%s` 自动构建，SHA-256 见附件。\n' "$GITHUB_REF_NAME"
+          } > release_body_final.md
+
       - name: Upload APK to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -92,10 +111,7 @@ jobs:
             build/app/outputs/flutter-apk/Zflow-v${{ env.VERSION }}-arm64.apk
             build/app/outputs/flutter-apk/Zflow-v${{ env.VERSION }}-arm64.apk.sha256
           name: ${{ github.ref_name }}
-          body: |
-            Zflow ${{ github.ref_name }}
-
-            > APK built automatically by GitHub Actions from tag `${{ github.ref_name }}`.
+          body_path: release_body_final.md
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
