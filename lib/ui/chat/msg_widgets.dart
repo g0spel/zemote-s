@@ -1367,8 +1367,15 @@ class _ToolCallTile extends StatefulWidget {
 }
 
 class _ToolCallTileState extends State<_ToolCallTile> {
-  /// 默认展开（用户裁定）；折叠时显示一行预览。
-  bool _open = true;
+  /// 默认展开(用户裁定);read 工具例外——输出为整个文件内容,
+  /// 默认折叠(用户裁定),折叠预览优先显示目标文件路径。todoRead
+  /// 是待办清单小输出,不在此列。
+  late bool _open = !_isReadTool;
+
+  bool get _isReadTool {
+    final n = widget.row['toolName'] as String? ?? '';
+    return n.toLowerCase().contains('read') && !n.toLowerCase().contains('todo');
+  }
 
   @override
   Widget build(BuildContext context) {
