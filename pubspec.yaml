@@ -19,7 +19,7 @@ dependencies:
   mobile_scanner: ^7.4.0
   image_picker: ^1.2.3
   zxing2: ^0.2.4
-  image: ^4.9.1
+  image: ^4.9.2
   file_picker: ^12.0.0
   flutter_markdown_plus: ^1.0.12
   markdown: ^7.3.1
